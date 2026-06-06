@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { PageHelmet } from "@/components/page-helmet";
 import { useEquipmentApi } from "@/hooks/use-equipment-api";
-import { useMaintenanceApi } from "@/hooks/use-maintenance-api";
 import { useAuth } from "@/hooks/use-auth";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 import type { Task } from "@/types/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -69,9 +70,9 @@ export default function Schedule() {
     filterLabel,
   } = useSubdivisionFilter();
   const { allEquipment: equipment, getActiveEquipment } = useEquipmentApi();
-  
-  const { addMaintenance } = useMaintenanceApi();
-  
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
   const { data: tasks = [] } = useQuery<Task[]>({
     queryKey: ['/api/tasks'],
   });
@@ -240,29 +241,51 @@ export default function Schedule() {
 
   const handleSaveAdd = async () => {
     if (!selectedDate) return;
-    
-    // Находим оборудование по имени для получения ID
-    const equipmentItem = equipment.find(eq => eq.name === formData.equipmentName);
-    
-    if (equipmentItem) {
-      // Создаем запись ТО в базе данных
-      const newMaintenanceRecord = {
-        equipmentId: equipmentItem.id,
-        equipmentName: formData.equipmentName,
-        maintenanceType: formData.type,
-        scheduledDate: selectedDate,
-        duration: formData.duration,
-        responsible: maintenanceResponsible,
-        status: formData.status as 'scheduled' | 'in_progress' | 'completed' | 'postponed',
-        priority: formData.priority as 'low' | 'medium' | 'high' | 'critical'
-      };
 
-      await addMaintenance(newMaintenanceRecord);
+    const equipmentItem = equipment.find((eq) => eq.name === formData.equipmentName);
+    if (!equipmentItem) {
+      toast({
+        title: "Ошибка",
+        description: "Выберите оборудование",
+        variant: "destructive",
+      });
+      return;
     }
 
-    // Данные автоматически обновятся через useMaintenanceData
-    setIsAddDialogOpen(false);
-    setSelectedDate(null);
+    const taskStatus =
+      formData.status === "completed"
+        ? "completed"
+        : formData.status === "in_progress"
+          ? "in_progress"
+          : "pending";
+
+    try {
+      await apiRequest("POST", "/api/tasks", {
+        title: `ТО: ${formData.type} — ${formData.equipmentName}`,
+        description: formData.notes || formData.duration || undefined,
+        taskType: "maintenance",
+        maintenanceType: formData.type,
+        equipmentId: equipmentItem.id,
+        dueDate: selectedDate.toISOString(),
+        status: taskStatus,
+        priority: formData.priority,
+        assigneeName: maintenanceResponsible,
+        sourceType: "manual",
+      });
+      await queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/calendar/events"] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/calendar/stats"] });
+      window.dispatchEvent(new CustomEvent("taskUpdated"));
+      toast({ title: "ТО запланировано", description: "Запись добавлена в календарь" });
+      setIsAddDialogOpen(false);
+      setSelectedDate(null);
+    } catch (error) {
+      toast({
+        title: "Ошибка",
+        description: error instanceof Error ? error.message : "Не удалось создать ТО",
+        variant: "destructive",
+      });
+    }
   };
 
   const upcomingTasks = scopedTasks

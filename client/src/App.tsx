@@ -6,7 +6,6 @@ import Dashboard from "@/pages/dashboard";
 import Schedule from "@/pages/schedule";
 import Equipment from "@/pages/equipment";
 import Users from "@/pages/users";
-import Maintenance from "@/pages/maintenance";
 import Reports from "@/pages/reports";
 import DailyInspection from "@/pages/daily-inspection-new";
 import Remarks from "@/pages/remarks";
@@ -25,8 +24,8 @@ import { AuthProvider } from "@/hooks/use-auth";
 import { UserStatusProvider } from "@/hooks/use-user-status";
 import { EquipmentProvider } from "@/hooks/use-equipment-data";
 import { RemarksProvider } from "@/hooks/use-remarks-data";
-import { MaintenanceProvider } from "@/hooks/use-maintenance-data";
 import { InspectionChecklistProvider } from "@/hooks/use-inspection-checklists";
+import { LegacyRouteRedirect } from "@/components/legacy-route-redirect";
 import { SidebarProvider } from "@/hooks/use-sidebar-state";
 import { TaskDialogProvider } from "@/hooks/use-task-dialog";
 import { useModalBodyCleanup } from "@/hooks/use-modal-body-cleanup";
@@ -70,9 +69,7 @@ function Router() {
         </ProtectedLayout>
       </Route>
       <Route path="/maintenance">
-        <ProtectedLayout>
-          <Maintenance />
-        </ProtectedLayout>
+        <LegacyRouteRedirect to="/schedule" />
       </Route>
       <Route path="/tasks">
         <ProtectedLayout>
@@ -142,18 +139,16 @@ function App() {
       <SidebarProvider>
         <EquipmentProvider>
           <RemarksProvider>
-            <MaintenanceProvider>
-              <InspectionChecklistProvider>
-                <UserStatusProvider>
-                  <MobileSidebarProvider>
-                    <TaskDialogProvider>
-                      <BlockerRecovery />
-                      <Router />
-                    </TaskDialogProvider>
-                  </MobileSidebarProvider>
-                </UserStatusProvider>
-              </InspectionChecklistProvider>
-            </MaintenanceProvider>
+            <InspectionChecklistProvider>
+              <UserStatusProvider>
+                <MobileSidebarProvider>
+                  <TaskDialogProvider>
+                    <BlockerRecovery />
+                    <Router />
+                  </TaskDialogProvider>
+                </MobileSidebarProvider>
+              </UserStatusProvider>
+            </InspectionChecklistProvider>
           </RemarksProvider>
         </EquipmentProvider>
       </SidebarProvider>

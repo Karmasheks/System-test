@@ -10,8 +10,8 @@ import {
   DropdownMenuLabel,
 } from '@/components/ui/dropdown-menu';
 import { useRemarksData } from '@/hooks/use-remarks-data';
-import { useMaintenanceData } from '@/hooks/use-maintenance-data';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import type { Task } from '@/types/api';
 import { Link } from 'wouter';
 import { apiRequest } from '@/lib/queryClient';
 import {
@@ -84,7 +84,8 @@ function dismissAllLocalNotifications(ids: string[]) {
     mergedMap.set(id, {
       id,
       at: now,
-      repeat: id.startsWith('maintenance-') || id.startsWith('maintenance-overdue-'),
+      repeat:
+        id.startsWith('maintenance-task-') || id.startsWith('maintenance-overdue-task-'),
     });
   }
   saveDismissed([...mergedMap.values()]);
@@ -139,7 +140,10 @@ export function NotificationsDropdown() {
   const { user } = useAuth();
   const { equipment } = useEquipmentApi();
   const { remarks } = useRemarksData();
-  const { maintenanceRecords, refreshData } = useMaintenanceData();
+  const { data: tasks = [] } = useQuery<Task[]>({
+    queryKey: ['/api/tasks'],
+    enabled: !!user,
+  });
   const { data: dbNotifications = [] } = useNotifications(!!user);
   const markRead = useMarkNotificationRead();
   const dismissDb = useDismissNotification();
@@ -171,22 +175,22 @@ export function NotificationsDropdown() {
 
   useEffect(() => {
     const handleDataChange = () => {
-      refreshData();
+      queryClient.invalidateQueries({ queryKey: ['/api/tasks'] });
       queryClient.invalidateQueries({ queryKey: ['/api/notifications'] });
     };
 
-    window.addEventListener('maintenanceDataChanged', handleDataChange);
     window.addEventListener('remarksUpdated', handleDataChange);
     window.addEventListener('remarkStatusChanged', handleDataChange);
     window.addEventListener('taskCommentAdded', handleDataChange);
+    window.addEventListener('taskUpdated', handleDataChange);
 
     return () => {
-      window.removeEventListener('maintenanceDataChanged', handleDataChange);
       window.removeEventListener('remarksUpdated', handleDataChange);
       window.removeEventListener('remarkStatusChanged', handleDataChange);
       window.removeEventListener('taskCommentAdded', handleDataChange);
+      window.removeEventListener('taskUpdated', handleDataChange);
     };
-  }, [refreshData, queryClient]);
+  }, [queryClient]);
 
   useEffect(() => {
     if (!user) return;
@@ -219,48 +223,56 @@ export function NotificationsDropdown() {
     const today = new Date();
     const nextWeek = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
 
-    maintenanceRecords.forEach((record) => {
-      if (record.status !== 'scheduled') return;
+    tasks
+      .filter(
+        (task) =>
+          task.taskType === 'maintenance' &&
+          task.dueDate &&
+          task.status !== 'completed' &&
+          task.status !== 'cancelled'
+      )
+      .forEach((task) => {
+        const scheduledDate = new Date(task.dueDate!);
+        const daysUntil = Math.ceil(
+          (scheduledDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
+        );
+        const equipmentItem = equipment.find((eq) => eq.id === task.equipmentId);
+        const equipmentName =
+          equipmentItem?.name ?? task.equipmentId ?? 'Оборудование';
+        const typeLabel = task.maintenanceType || 'ТО';
 
-      const scheduledDate = new Date(record.scheduledDate);
-      const daysUntil = Math.ceil((scheduledDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-      const equipmentItem = equipment.find((eq) => eq.id === record.equipmentId);
-      if (!equipmentItem) return;
-
-      const equipmentName = equipmentItem.name;
-
-      if (scheduledDate <= nextWeek && scheduledDate >= today) {
-        const id = `maintenance-${record.id}`;
-        if (isLocallyDismissed(id, hiddenLocalIds)) return;
-        notifications.push({
-          id,
-          type: 'maintenance',
-          title: 'Требуется ТО',
-          description: `${equipmentName} - ${record.maintenanceType} через ${daysUntil} дн.`,
-          link: '/maintenance',
-          equipmentId: record.equipmentId,
-          priority: daysUntil <= 3 ? 'high' : 'medium',
-          createdAt: today,
-          isLocal: true,
-          repeatableDismiss: true,
-        });
-      } else if (scheduledDate < today) {
-        const id = `maintenance-overdue-${record.id}`;
-        if (isLocallyDismissed(id, hiddenLocalIds)) return;
-        notifications.push({
-          id,
-          type: 'warning',
-          title: 'Просрочено ТО',
-          description: `${equipmentName} - ${record.maintenanceType} просрочено на ${Math.abs(daysUntil)} дн.`,
-          link: '/maintenance',
-          equipmentId: record.equipmentId,
-          priority: 'high',
-          createdAt: today,
-          isLocal: true,
-          repeatableDismiss: true,
-        });
-      }
-    });
+        if (scheduledDate <= nextWeek && scheduledDate >= today) {
+          const id = `maintenance-task-${task.id}`;
+          if (isLocallyDismissed(id, hiddenLocalIds)) return;
+          notifications.push({
+            id,
+            type: 'maintenance',
+            title: 'Требуется ТО',
+            description: `${equipmentName} - ${typeLabel} через ${daysUntil} дн.`,
+            link: `/tasks?task=${task.id}`,
+            equipmentId: task.equipmentId ?? undefined,
+            priority: daysUntil <= 3 ? 'high' : 'medium',
+            createdAt: today,
+            isLocal: true,
+            repeatableDismiss: true,
+          });
+        } else if (scheduledDate < today) {
+          const id = `maintenance-overdue-task-${task.id}`;
+          if (isLocallyDismissed(id, hiddenLocalIds)) return;
+          notifications.push({
+            id,
+            type: 'warning',
+            title: 'Просрочено ТО',
+            description: `${equipmentName} - ${typeLabel} просрочено на ${Math.abs(daysUntil)} дн.`,
+            link: `/tasks?task=${task.id}`,
+            equipmentId: task.equipmentId ?? undefined,
+            priority: 'high',
+            createdAt: today,
+            isLocal: true,
+            repeatableDismiss: true,
+          });
+        }
+      });
 
     remarks.forEach((remark) => {
       if (remark.status === 'open' || remark.status === 'in_progress') {
@@ -318,7 +330,7 @@ export function NotificationsDropdown() {
     });
 
     return notifications;
-  }, [equipment, remarks, maintenanceRecords, hiddenLocalIds]);
+  }, [equipment, remarks, tasks, hiddenLocalIds]);
 
   const dbMapped: Notification[] = useMemo(
     () =>

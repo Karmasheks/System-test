@@ -7,7 +7,6 @@ import {
   budgetEntries,
   documents,
   documentCategories,
-  maintenanceRecords,
   tasks,
   serviceRequests,
   remarks,
@@ -408,18 +407,20 @@ export async function getReportsData(from?: string, to?: string, equipmentId?: s
   });
   const budgetTotal = budgetList.reduce((s, e) => s + e.amount, 0);
 
-  const allMaint = await db.select().from(maintenanceRecords);
-  const maintInRange = allMaint.filter((m) => {
-    if (equipmentId && m.equipmentId !== equipmentId) return false;
-    const d = new Date(m.scheduledDate);
+  const allTasks = await db.select().from(tasks);
+  const maintTasks = allTasks.filter((t) => t.taskType === "maintenance" && t.dueDate);
+  const maintInRange = maintTasks.filter((t) => {
+    if (equipmentId && t.equipmentId !== equipmentId) return false;
+    const d = new Date(t.dueDate!);
     return d >= fromDate && d <= toDate;
   });
-  const maintCompleted = maintInRange.filter((m) => m.status === "completed");
+  const maintCompleted = maintInRange.filter((t) => t.status === "completed");
   const maintOverdue = maintInRange.filter(
-    (m) => m.status === "scheduled" && new Date(m.scheduledDate) < new Date()
+    (t) =>
+      t.status !== "completed" &&
+      t.status !== "cancelled" &&
+      new Date(t.dueDate!) < new Date()
   );
-
-  const allTasks = await db.select().from(tasks);
   const tasksInRange = allTasks.filter((t) => {
     if (equipmentId && t.equipmentId && t.equipmentId !== equipmentId) return false;
     const d = t.completedAt ? new Date(t.completedAt) : t.dueDate ? new Date(t.dueDate) : null;
@@ -476,15 +477,15 @@ export async function getReportsData(from?: string, to?: string, equipmentId?: s
       })),
     },
     maintenance: {
-      scheduled: maintInRange.filter((m) => m.status === "scheduled").length,
+      scheduled: maintInRange.filter((t) => t.status === "pending" || t.status === "in_progress").length,
       completed: maintCompleted.length,
       overdue: maintOverdue.length,
-      items: maintInRange.slice(0, 50).map((m) => ({
-        id: m.id,
-        equipmentName: m.equipmentName,
-        type: m.maintenanceType,
-        scheduledDate: m.scheduledDate,
-        status: m.status,
+      items: maintInRange.slice(0, 50).map((t) => ({
+        id: t.id,
+        equipmentName: t.equipmentId,
+        type: t.maintenanceType,
+        scheduledDate: t.dueDate,
+        status: t.status,
       })),
     },
     calendar: calendarStats,

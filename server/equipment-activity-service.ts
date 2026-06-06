@@ -4,7 +4,6 @@ import {
   budgetEntries,
   dailyInspections,
   equipmentEventLog,
-  maintenanceRecords,
   remarks,
   serviceRequests,
   tasks,
@@ -12,7 +11,6 @@ import {
 import { STATUS_LABELS, type ServiceRequestStatus } from "@shared/service-request-constants";
 import { TASK_SOURCE_LABELS, type TaskSourceType } from "@shared/task-source-constants";
 import { taskStatusLabel } from "@shared/task-status-constants";
-import { maintenanceStatusLabel } from "@shared/maintenance-status-constants";
 import { equipmentLinkTypeLabel } from "@shared/equipment-link-constants";
 import { equipmentStatusLabel } from "@shared/equipment-utils";
 import {
@@ -144,10 +142,9 @@ export async function getEquipmentLinkHistory(equipmentId: string): Promise<Equi
 
 export async function getEquipmentActivity(equipmentId: string): Promise<EquipmentActivityItem[]> {
   await backfillMissingLinkEvents();
-  const [taskRows, srRows, maintRows, remarkRows, inspRows, budgetRows, eventRows] = await Promise.all([
+  const [taskRows, srRows, remarkRows, inspRows, budgetRows, eventRows] = await Promise.all([
     db.select().from(tasks).where(eq(tasks.equipmentId, equipmentId)),
     db.select().from(serviceRequests).where(eq(serviceRequests.equipmentId, equipmentId)),
-    db.select().from(maintenanceRecords).where(eq(maintenanceRecords.equipmentId, equipmentId)),
     db.select().from(remarks).where(eq(remarks.equipmentId, equipmentId)),
     db.select().from(dailyInspections).where(eq(dailyInspections.equipmentId, equipmentId)),
     db.select().from(budgetEntries).where(eq(budgetEntries.equipmentId, equipmentId)),
@@ -192,22 +189,6 @@ export async function getEquipmentActivity(equipmentId: string): Promise<Equipme
       actor: row.assigneeName ?? row.requesterName,
       href: `/service-requests/${row.id}`,
       links,
-    });
-  }
-
-  for (const row of maintRows) {
-    items.push({
-      id: `maint-${row.id}`,
-      category: "maintenance",
-      entityId: row.id,
-      title: `${row.maintenanceType} — ${row.equipmentName}`,
-      subtitle: row.responsible,
-      status: row.status,
-      statusLabel: maintenanceStatusLabel(row.status),
-      occurredAt: (row.updatedAt ?? row.scheduledDate ?? row.createdAt).toISOString(),
-      actor: row.responsible,
-      href: `/maintenance?record=${row.id}`,
-      links: [],
     });
   }
 

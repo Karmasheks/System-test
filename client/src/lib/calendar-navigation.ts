@@ -13,7 +13,7 @@ export function getCalendarItemHref(
 ): string | null {
   switch (sourceType) {
     case "maintenance":
-      return `/maintenance?record=${sourceId}`;
+      return `/tasks?task=${sourceId}`;
     case "task":
       return `/tasks?task=${sourceId}`;
     case "service_request":

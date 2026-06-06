@@ -65,7 +65,7 @@ function LinkedWorkButtons({
           item.type === "service_request"
             ? `/service-requests/${item.id}`
             : item.type === "maintenance"
-              ? `/maintenance?record=${item.id}`
+              ? `/schedule`
               : undefined;
 
         if (href && onNavigate) {

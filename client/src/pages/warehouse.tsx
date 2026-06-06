@@ -75,7 +75,7 @@ function LinkedWorkChip({
   const href =
     item.type === "service_request"
       ? `/service-requests/${item.id}`
-      : `/maintenance?record=${item.id}`;
+      : `/schedule`;
 
   return (
     <button type="button" className={className} onClick={() => onNavigate(href)}>

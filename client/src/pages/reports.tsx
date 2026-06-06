@@ -12,7 +12,6 @@ import type { Task } from "@/types/api";
 import type { Equipment as EquipmentRecord } from "@shared/schema";
 import { useEquipmentData } from "@/hooks/use-equipment-data";
 import { useRemarksData } from "@/hooks/use-remarks-data";
-import { useMaintenanceData } from "@/hooks/use-maintenance-data";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -60,7 +59,6 @@ export default function Reports() {
   } = useSubdivisionFilter();
   const { equipment: equipmentData } = useEquipmentData();
   const { remarks } = useRemarksData();
-  const { maintenanceRecords } = useMaintenanceData();
   const [, setLocation] = useLocation();
 
   // Загрузка данных по задачам
@@ -106,9 +104,40 @@ export default function Reports() {
     [remarks, scopedEquipmentIds, filterSubdivisionId]
   );
 
+  const scopedMaintenanceTasks = useMemo(
+    () =>
+      scopedTasks.filter(
+        (t) => t.taskType === "maintenance" && t.dueDate && scopedEquipmentIds.has(t.equipmentId ?? "")
+      ),
+    [scopedTasks, scopedEquipmentIds]
+  );
+
   const scopedMaintenance = useMemo(
-    () => maintenanceRecords.filter((r) => scopedEquipmentIds.has(r.equipmentId)),
-    [maintenanceRecords, scopedEquipmentIds]
+    () =>
+      scopedMaintenanceTasks.map((task) => {
+        const eq = scopedEquipment.find((e) => e.id === task.equipmentId);
+        return {
+          id: task.id,
+          equipmentId: task.equipmentId ?? "",
+          equipmentName: eq?.name ?? task.equipmentId ?? "",
+          maintenanceType: task.maintenanceType || "ТО",
+          status:
+            task.status === "pending"
+              ? "scheduled"
+              : task.status === "in_progress"
+                ? "in_progress"
+                : task.status,
+          scheduledDate: task.dueDate,
+          completedDate: task.completedAt,
+          responsible: task.assigneeName ?? "",
+          notes: task.description ?? "",
+          duration: "",
+          priority: task.priority ?? "medium",
+          createdAt: task.createdAt,
+          updatedAt: task.updatedAt,
+        };
+      }),
+    [scopedMaintenanceTasks, scopedEquipment]
   );
 
   const scopedTaskStats = useMemo(
@@ -178,7 +207,7 @@ export default function Reports() {
     const completed = scopedMaintenance.filter((record) => record.status === "completed").length;
     const inProgress = scopedMaintenance.filter((record) => record.status === "in_progress").length;
     const overdue = scopedMaintenance.filter((record) => {
-      if (record.status !== "scheduled") return false;
+      if (!record.scheduledDate || record.status !== "scheduled") return false;
       return new Date(record.scheduledDate) < today;
     }).length;
     const byType = scopedMaintenance.reduce(
