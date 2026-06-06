@@ -1,62 +1,37 @@
 import { useCallback, useMemo, useState } from "react";
-import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek } from "date-fns";
+import { format, startOfMonth, endOfMonth } from "date-fns";
 import { ru } from "date-fns/locale";
 import { Download, ExternalLink, RefreshCw, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useTeamUsers } from "@/hooks/use-warehouse";
 import {
-  downloadEmployeeWorkReportCsv,
   useEmployeeWorkReport,
+  useUserWorkReport,
   type EmployeeWorkReport,
+  type UserWorkReport,
 } from "@/hooks/use-asset-management";
+import {
+  ReportPeriodFilter,
+  getReportPeriodRange,
+  type ReportPeriodPreset,
+} from "@/components/reports/report-period-filter";
+import {
+  exportAllEmployeesWorkReport,
+  exportEmployeeWorkReport,
+  type ReportFileFormat,
+} from "@/lib/specialized-report-export";
 import { useTaskDialog, type TaskRecord } from "@/hooks/use-task-dialog";
 import { formatActualHours } from "@shared/task-hours";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { taskStatusColors } from "@/lib/badge-colors";
 import { cn } from "@/lib/utils";
-
-type PeriodPreset = "today" | "week" | "month" | "custom";
-
-function getPeriodRange(
-  preset: PeriodPreset,
-  customFrom: string,
-  customTo: string
-): { from: string; to: string; label: string } {
-  const now = new Date();
-  if (preset === "today") {
-    const d = format(now, "yyyy-MM-dd");
-    return { from: d, to: d, label: "Сегодня" };
-  }
-  if (preset === "week") {
-    const from = startOfWeek(now, { locale: ru });
-    const to = endOfWeek(now, { locale: ru });
-    return {
-      from: format(from, "yyyy-MM-dd"),
-      to: format(to, "yyyy-MM-dd"),
-      label: "Неделя",
-    };
-  }
-  if (preset === "month") {
-    return {
-      from: format(startOfMonth(now), "yyyy-MM-dd"),
-      to: format(endOfMonth(now), "yyyy-MM-dd"),
-      label: "Месяц",
-    };
-  }
-  return {
-    from: customFrom,
-    to: customTo,
-    label: `${format(new Date(customFrom), "d MMM", { locale: ru })} — ${format(new Date(customTo), "d MMM yyyy", { locale: ru })}`,
-  };
-}
 
 function fmtDateTime(iso: string | null | undefined) {
   if (!iso) return "—";
@@ -89,81 +64,6 @@ function StatusBadge({ status, label }: { status: string; label: string }) {
     <Badge className={cn("text-xs", taskStatusColors[status] ?? "")} variant="outline">
       {label}
     </Badge>
-  );
-}
-
-function PeriodFilterBar({
-  preset,
-  onPresetChange,
-  customFrom,
-  customTo,
-  onCustomFromChange,
-  onCustomToChange,
-}: {
-  preset: PeriodPreset;
-  onPresetChange: (p: PeriodPreset) => void;
-  customFrom: string;
-  customTo: string;
-  onCustomFromChange: (v: string) => void;
-  onCustomToChange: (v: string) => void;
-}) {
-  return (
-    <div className="flex flex-wrap gap-2 items-end">
-      <Button
-        type="button"
-        size="sm"
-        variant={preset === "today" ? "default" : "outline"}
-        onClick={() => onPresetChange("today")}
-      >
-        Сегодня
-      </Button>
-      <Button
-        type="button"
-        size="sm"
-        variant={preset === "week" ? "default" : "outline"}
-        onClick={() => onPresetChange("week")}
-      >
-        Неделя
-      </Button>
-      <Button
-        type="button"
-        size="sm"
-        variant={preset === "month" ? "default" : "outline"}
-        onClick={() => onPresetChange("month")}
-      >
-        Месяц
-      </Button>
-      <Button
-        type="button"
-        size="sm"
-        variant={preset === "custom" ? "default" : "outline"}
-        onClick={() => onPresetChange("custom")}
-      >
-        Период
-      </Button>
-      {preset === "custom" && (
-        <>
-          <div>
-            <Label className="text-xs">С</Label>
-            <Input
-              type="date"
-              className="h-9 w-[150px]"
-              value={customFrom}
-              onChange={(e) => onCustomFromChange(e.target.value)}
-            />
-          </div>
-          <div>
-            <Label className="text-xs">По</Label>
-            <Input
-              type="date"
-              className="h-9 w-[150px]"
-              value={customTo}
-              onChange={(e) => onCustomToChange(e.target.value)}
-            />
-          </div>
-        </>
-      )}
-    </div>
   );
 }
 
@@ -261,6 +161,41 @@ function CompletedTasksTable({
   );
 }
 
+function AllEmployeesSummaryTable({ report }: { report: UserWorkReport }) {
+  if (report.users.length === 0) {
+    return <p className="text-sm text-muted-foreground py-4">Нет данных по сотрудникам</p>;
+  }
+
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Сотрудник</TableHead>
+          <TableHead>Должность</TableHead>
+          <TableHead>Подразделение</TableHead>
+          <TableHead className="text-right">На сотруднике</TableHead>
+          <TableHead className="text-right">Заявок</TableHead>
+          <TableHead className="text-right">Закрыто за период</TableHead>
+          <TableHead className="text-right">Часов за период</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {report.users.map((user) => (
+          <TableRow key={user.userId}>
+            <TableCell className="font-medium">{user.userName}</TableCell>
+            <TableCell className="text-xs">{user.position ?? "—"}</TableCell>
+            <TableCell className="text-xs">{user.department ?? "—"}</TableCell>
+            <TableCell className="text-right">{user.openTasksCount}</TableCell>
+            <TableCell className="text-right">{user.openServiceRequestsCount}</TableCell>
+            <TableCell className="text-right">{user.completedTasksInPeriod.length}</TableCell>
+            <TableCell className="text-right font-medium">{user.totalHoursInPeriod} ч</TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
+}
+
 export function EmployeeWorkReportPanel() {
   const { toast } = useToast();
   const { openEdit } = useTaskDialog();
@@ -268,21 +203,37 @@ export function EmployeeWorkReportPanel() {
 
   const [userId, setUserId] = useState("");
   const [subTab, setSubTab] = useState<"open" | "completed">("open");
-  const [periodPreset, setPeriodPreset] = useState<PeriodPreset>("today");
+  const [periodPreset, setPeriodPreset] = useState<ReportPeriodPreset>("today");
+  const [exporting, setExporting] = useState(false);
   const [customFrom, setCustomFrom] = useState(() => format(startOfMonth(new Date()), "yyyy-MM-dd"));
   const [customTo, setCustomTo] = useState(() => format(endOfMonth(new Date()), "yyyy-MM-dd"));
 
   const period = useMemo(
-    () => getPeriodRange(periodPreset, customFrom, customTo),
+    () => getReportPeriodRange(periodPreset, customFrom, customTo),
     [periodPreset, customFrom, customTo]
   );
 
+  const isAll = userId === "all";
+  const numericUserId = userId && !isAll ? Number(userId) : undefined;
+
   const {
-    data: report,
-    isLoading,
-    refetch,
-    isFetching,
-  } = useEmployeeWorkReport(userId ? Number(userId) : undefined, period.from, period.to);
+    data: singleReport,
+    isLoading: singleLoading,
+    refetch: refetchSingle,
+    isFetching: singleFetching,
+  } = useEmployeeWorkReport(numericUserId, period.from, period.to);
+
+  const {
+    data: allReport,
+    isLoading: allLoading,
+    refetch: refetchAll,
+    isFetching: allFetching,
+  } = useUserWorkReport(period.from, period.to, isAll);
+
+  const report = isAll ? undefined : singleReport;
+  const isLoading = isAll ? allLoading : singleLoading;
+  const isFetching = isAll ? allFetching : singleFetching;
+  const refetch = isAll ? refetchAll : refetchSingle;
 
   const openTaskById = useCallback(
     async (taskId: number) => {
@@ -298,13 +249,34 @@ export function EmployeeWorkReportPanel() {
     [openEdit, toast]
   );
 
-  const handleExport = async () => {
+  const allTotals = useMemo(() => {
+    if (!allReport) return null;
+    return allReport.users.reduce(
+      (acc, u) => ({
+        openTasks: acc.openTasks + u.openTasksCount,
+        openRequests: acc.openRequests + u.openServiceRequestsCount,
+        completed: acc.completed + u.completedTasksInPeriod.length,
+        hours: acc.hours + u.totalHoursInPeriod,
+      }),
+      { openTasks: 0, openRequests: 0, completed: 0, hours: 0 }
+    );
+  }, [allReport]);
+
+  const handleExport = async (fileFormat: ReportFileFormat) => {
     if (!userId) return;
+    setExporting(true);
     try {
-      await downloadEmployeeWorkReportCsv(Number(userId), period.from, period.to);
-      toast({ title: "Отчёт выгружен" });
+      if (isAll && allReport) {
+        await exportAllEmployeesWorkReport(allReport, fileFormat, period.from, period.to);
+        toast({ title: "Сводный отчёт по всем сотрудникам выгружен" });
+      } else if (singleReport) {
+        await exportEmployeeWorkReport(singleReport, fileFormat, period.from, period.to);
+        toast({ title: "Отчёт по сотруднику выгружен" });
+      }
     } catch {
       toast({ title: "Ошибка экспорта", variant: "destructive" });
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -317,7 +289,7 @@ export function EmployeeWorkReportPanel() {
             Работы сотрудника
           </CardTitle>
           <CardDescription>
-            Выберите сотрудника — откроются активные задачи и закрытые за выбранный период с учётом
+            Выберите сотрудника или всех сразу — активные задачи и закрытые за период с учётом
             фактического времени
           </CardDescription>
         </CardHeader>
@@ -330,6 +302,7 @@ export function EmployeeWorkReportPanel() {
                   <SelectValue placeholder="Выберите сотрудника…" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="all">Все сотрудники</SelectItem>
                   {teamUsers.map((u) => (
                     <SelectItem key={u.id} value={String(u.id)}>
                       {u.name}
@@ -344,9 +317,27 @@ export function EmployeeWorkReportPanel() {
                   <RefreshCw className={cn("w-4 h-4 mr-2", isFetching && "animate-spin")} />
                   Обновить
                 </Button>
-                <Button variant="outline" onClick={handleExport}>
+                <Button
+                  variant="outline"
+                  disabled={(!report && !allReport) || exporting}
+                  onClick={() => handleExport("excel")}
+                >
                   <Download className="w-4 h-4 mr-2" />
+                  Excel
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={(!report && !allReport) || exporting}
+                  onClick={() => handleExport("csv")}
+                >
                   CSV
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={(!report && !allReport) || exporting}
+                  onClick={() => handleExport("pdf")}
+                >
+                  PDF
                 </Button>
               </>
             )}
@@ -357,13 +348,64 @@ export function EmployeeWorkReportPanel() {
       {!userId ? (
         <Card>
           <CardContent className="py-12 text-center text-muted-foreground">
-            Выберите сотрудника, чтобы увидеть его задачи
+            Выберите сотрудника или «Все сотрудники», чтобы увидеть задачи
           </CardContent>
         </Card>
       ) : isLoading ? (
         <Card>
           <CardContent className="py-12 text-center text-muted-foreground">Загрузка…</CardContent>
         </Card>
+      ) : isAll && allReport && allTotals ? (
+        <>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardDescription>Сотрудников</CardDescription>
+                <CardTitle className="text-2xl">{allReport.users.length}</CardTitle>
+              </CardHeader>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardDescription>Открытых задач</CardDescription>
+                <CardTitle className="text-2xl">{allTotals.openTasks}</CardTitle>
+              </CardHeader>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardDescription>Закрыто за период</CardDescription>
+                <CardTitle className="text-2xl">{allTotals.completed}</CardTitle>
+              </CardHeader>
+            </Card>
+            <Card>
+              <CardHeader className="pb-2">
+                <CardDescription>Часов за период</CardDescription>
+                <CardTitle className="text-2xl">
+                  {Math.round(allTotals.hours * 100) / 100} ч
+                </CardTitle>
+              </CardHeader>
+            </Card>
+          </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Все сотрудники</CardTitle>
+              <CardDescription>
+                Сводка за {period.label} · открытых заявок: {allTotals.openRequests}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <ReportPeriodFilter
+                preset={periodPreset}
+                onPresetChange={setPeriodPreset}
+                customFrom={customFrom}
+                customTo={customTo}
+                onCustomFromChange={setCustomFrom}
+                onCustomToChange={setCustomTo}
+              />
+              <AllEmployeesSummaryTable report={allReport} />
+            </CardContent>
+          </Card>
+        </>
       ) : report ? (
         <>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -430,7 +472,7 @@ export function EmployeeWorkReportPanel() {
                       </span>{" "}
                       за {period.label}
                     </p>
-                    <PeriodFilterBar
+                    <ReportPeriodFilter
                       preset={periodPreset}
                       onPresetChange={setPeriodPreset}
                       customFrom={customFrom}

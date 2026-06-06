@@ -5,7 +5,9 @@ import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { PlusCircle, FileEdit, Trash2, Eye, Settings, Calendar, Clock, ExternalLink } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { EquipmentStatusBadge } from "@/components/equipment-status-badge";
+import { PlusCircle, FileEdit, Trash2, Settings, Calendar, Clock, ExternalLink, Link2 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -24,18 +26,24 @@ import { useSubdivisions } from "@/hooks/use-subdivisions";
 import { SubdivisionsPanel } from "@/components/admin/subdivisions-panel";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { EquipmentImageGallery } from "@/components/equipment-image-urls";
+import { EquipmentImageGallery, EquipmentImageThumbnail } from "@/components/equipment-image-urls";
 import { EquipmentAssetPanel } from "@/components/equipment-asset-panel";
 import { apiRequest } from "@/lib/queryClient";
 import { normalizeEquipmentRecord, generateNextEquipmentId, formatEquipmentResponsible } from "@shared/equipment-utils";
 import type { Equipment } from "@shared/schema";
-import { syncEquipmentLinksApi } from "@/hooks/use-equipment-links";
+import { syncEquipmentLinksApi, useEquipmentLinks } from "@/hooks/use-equipment-links";
+import { equipmentLinkTypeLabel } from "@shared/equipment-link-constants";
 import { useTaskDialog, type TaskRecord } from "@/hooks/use-task-dialog";
 import { useAccessControl } from "@/hooks/use-access-control";
 import { SubdivisionTransferPanel } from "@/components/admin/subdivision-transfer-panel";
 import { useSubdivisionFilter } from "@/hooks/use-subdivision-filter";
 import { SubdivisionFilterSelect } from "@/components/subdivision-filter-select";
 import { filterItemsBySubdivision } from "@/lib/subdivision-filter";
+
+const equipmentFormDialogClass =
+  "max-w-3xl w-[min(100vw-2rem,48rem)] max-h-[90vh] overflow-y-auto overflow-x-hidden p-4 sm:p-6";
+const equipmentViewDialogClass =
+  "max-w-5xl w-[min(100vw-2rem,64rem)] max-h-[90vh] overflow-y-auto overflow-x-hidden p-4 sm:p-6";
 
 export default function Equipment() {
   const { user, isLoading, isAuthenticated } = useAuth();
@@ -159,6 +167,9 @@ export default function Equipment() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [viewDialogOpen, setViewDialogOpen] = useState(false);
   const [selectedEquipment, setSelectedEquipment] = useState<any>(null);
+  const { data: viewEquipmentLinks = [], isLoading: loadingViewLinks } = useEquipmentLinks(
+    viewDialogOpen ? selectedEquipment?.id : undefined
+  );
 
   const [formData, setFormData] = useState({
     id: "",
@@ -352,41 +363,6 @@ export default function Equipment() {
     setFormData((prev) => ({ ...prev, name: e.target.value }));
   }, []);
 
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case "active":
-        return (
-          <Badge className="bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-100">
-            Активно
-          </Badge>
-        );
-      case "maintenance":
-        return (
-          <Badge className="bg-yellow-100 text-yellow-800 dark:bg-yellow-800 dark:text-yellow-100">
-            ТО
-          </Badge>
-        );
-      case "inactive":
-        return (
-          <Badge className="bg-red-100 text-red-800 dark:bg-red-800 dark:text-red-100">
-            Неактивно
-          </Badge>
-        );
-      case "decommissioned":
-        return (
-          <Badge className="bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-100">
-            Выведено из эксплуатации
-          </Badge>
-        );
-      default:
-        return (
-          <Badge className="bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-100">
-            {status}
-          </Badge>
-        );
-    }
-  };
-
   const getPeriodBadge = (period: string) => {
     const colors = {
       "1М - ТО": "bg-blue-100 text-blue-800 dark:bg-blue-800 dark:text-blue-100",
@@ -424,12 +400,12 @@ export default function Equipment() {
         />
       </Helmet>
 
-      <main className="p-6">
-        <div className="max-w-7xl mx-auto">
-              <div className="flex justify-between items-center mb-6">
+      <main className="p-4 sm:p-6">
+        <div className="max-w-7xl mx-auto min-w-0">
+              <div className="flex flex-wrap justify-between items-start gap-3 mb-4">
                 <div>
-                  <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Оборудование</h1>
-                  <p className="text-gray-600 dark:text-gray-400 mt-2">
+                  <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Оборудование</h1>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
                     Управление оборудованием и настройка периодичности ТО
                   </p>
                 </div>
@@ -443,7 +419,7 @@ export default function Equipment() {
                         Добавить оборудование
                       </Button>
                     </DialogTrigger>
-                    <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                    <DialogContent className={equipmentFormDialogClass}>
                     <DialogHeader>
                       <DialogTitle>Добавить новое оборудование</DialogTitle>
                       <DialogDescription>
@@ -480,26 +456,26 @@ export default function Equipment() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
                 <Card>
-                  <CardContent className="p-6">
+                  <CardContent className="p-4">
                     <div className="flex items-center">
-                      <Settings className="h-8 w-8 text-blue-600" />
-                      <div className="ml-4">
-                        <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Всего оборудования</p>
-                        <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{equipment.length}</p>
+                      <Settings className="h-6 w-6 text-blue-600" />
+                      <div className="ml-3">
+                        <p className="text-xs font-medium text-gray-600 dark:text-gray-400">Всего</p>
+                        <p className="text-xl font-bold text-gray-900 dark:text-gray-100">{equipment.length}</p>
                       </div>
                     </div>
                   </CardContent>
                 </Card>
 
                 <Card>
-                  <CardContent className="p-6">
+                  <CardContent className="p-4">
                     <div className="flex items-center">
-                      <Clock className="h-8 w-8 text-green-600" />
-                      <div className="ml-4">
-                        <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Активно</p>
-                        <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+                      <Clock className="h-6 w-6 text-green-600" />
+                      <div className="ml-3">
+                        <p className="text-xs font-medium text-gray-600 dark:text-gray-400">Активно</p>
+                        <p className="text-xl font-bold text-gray-900 dark:text-gray-100">
                           {equipment.filter((eq) => eq.status === "active").length}
                         </p>
                       </div>
@@ -508,12 +484,12 @@ export default function Equipment() {
                 </Card>
 
                 <Card>
-                  <CardContent className="p-6">
+                  <CardContent className="p-4">
                     <div className="flex items-center">
-                      <Calendar className="h-8 w-8 text-yellow-600" />
-                      <div className="ml-4">
-                        <p className="text-sm font-medium text-gray-600 dark:text-gray-400">На ТО</p>
-                        <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+                      <Calendar className="h-6 w-6 text-amber-600" />
+                      <div className="ml-3">
+                        <p className="text-xs font-medium text-gray-600 dark:text-gray-400">ТО / ремонт</p>
+                        <p className="text-xl font-bold text-gray-900 dark:text-gray-100">
                           {equipment.filter((eq) => eq.status === "maintenance").length}
                         </p>
                       </div>
@@ -522,12 +498,12 @@ export default function Equipment() {
                 </Card>
 
                 <Card>
-                  <CardContent className="p-6">
+                  <CardContent className="p-4">
                     <div className="flex items-center">
-                      <Settings className="h-8 w-8 text-red-600" />
-                      <div className="ml-4">
-                        <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Неактивно</p>
-                        <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+                      <Settings className="h-6 w-6 text-red-600" />
+                      <div className="ml-3">
+                        <p className="text-xs font-medium text-gray-600 dark:text-gray-400">Неактивно</p>
+                        <p className="text-xl font-bold text-gray-900 dark:text-gray-100">
                           {equipment.filter((eq) => eq.status === "inactive").length}
                         </p>
                       </div>
@@ -597,71 +573,87 @@ export default function Equipment() {
                       Показано: {filteredEquipment.length} из {equipment.length}
                     </p>
                   </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
+                  <div className="min-w-0">
+                    <table className="w-full table-fixed text-sm">
                       <thead>
                         <tr className="border-b border-gray-200 dark:border-gray-700">
-                          <th className="text-left p-4 font-medium text-gray-900 dark:text-gray-100">ID</th>
-                          <th className="text-left p-4 font-medium text-gray-900 dark:text-gray-100">Название</th>
-                          <th className="text-left p-4 font-medium text-gray-900 dark:text-gray-100 w-16">Фото</th>
-                          <th className="text-left p-4 font-medium text-gray-900 dark:text-gray-100">Тип</th>
-                          <th className="text-left p-4 font-medium text-gray-900 dark:text-gray-100">Подразделение</th>
-                          <th className="text-left p-4 font-medium text-gray-900 dark:text-gray-100">Статус</th>
-                          <th className="text-left p-4 font-medium text-gray-900 dark:text-gray-100">Периодичность ТО</th>
-                          <th className="text-left p-4 font-medium text-gray-900 dark:text-gray-100">Ответственный</th>
-                          <th className="text-left p-4 font-medium text-gray-900 dark:text-gray-100">Действия</th>
+                          <th className="text-left p-2 font-medium w-12">Фото</th>
+                          <th className="text-left p-2 font-medium w-[24%]">Название</th>
+                          <th className="text-left p-2 font-medium w-[12%] hidden md:table-cell">Тип</th>
+                          <th className="text-left p-2 font-medium w-[14%] hidden lg:table-cell">Подразделение</th>
+                          <th className="text-left p-2 font-medium w-[12%]">Статус</th>
+                          <th className="text-left p-2 font-medium w-[12%] hidden sm:table-cell">ТО</th>
+                          <th className="text-left p-2 font-medium w-[12%] hidden xl:table-cell">Ответств.</th>
+                          <th className="text-right p-2 font-medium w-[88px]"> </th>
                         </tr>
                       </thead>
                       <tbody>
                         {filteredEquipment.map((equipmentItem) => (
                           <tr
                             key={equipmentItem.id}
-                            className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800"
+                            role="button"
+                            tabIndex={0}
+                            className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer"
+                            onClick={() => openViewDialog(equipmentItem)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                openViewDialog(equipmentItem);
+                              }
+                            }}
                           >
-                            <td className="p-4 text-gray-900 dark:text-gray-100 font-mono text-sm">{equipmentItem.id}</td>
-                            <td className="p-4 text-gray-900 dark:text-gray-100 font-medium">{equipmentItem.name}</td>
-                            <td className="p-4">
-                              {equipmentItem.imageUrls?.[0] ? (
-                                <img
-                                  src={equipmentItem.imageUrls[0]}
-                                  alt=""
-                                  className="w-10 h-10 rounded object-cover border dark:border-gray-700"
-                                  loading="lazy"
-                                />
-                              ) : (
-                                <span className="text-gray-300 text-xs">—</span>
-                              )}
+                            <td className="p-2 w-12">
+                              <EquipmentImageThumbnail url={equipmentItem.imageUrls?.[0]} />
                             </td>
-                            <td className="p-4 text-gray-600 dark:text-gray-400">{equipmentItem.type}</td>
-                            <td className="p-4 text-gray-600 dark:text-gray-400 text-sm">
+                            <td className="p-2 min-w-0">
+                              <p className="font-medium truncate">{equipmentItem.name}</p>
+                              <p className="text-xs text-muted-foreground font-mono">{equipmentItem.id}</p>
+                            </td>
+                            <td className="p-2 text-muted-foreground truncate hidden md:table-cell">
+                              {equipmentItem.type}
+                            </td>
+                            <td className="p-2 text-muted-foreground truncate hidden lg:table-cell">
                               {equipmentSubdivisionLabel(equipmentItem)}
                             </td>
-                            <td className="p-4">{getStatusBadge(equipmentItem.status)}</td>
-                            <td className="p-4">
+                            <td className="p-2">
+                              <EquipmentStatusBadge status={equipmentItem.status} compact />
+                            </td>
+                            <td className="p-2 hidden sm:table-cell">
                               <div className="flex gap-1 flex-wrap">
-                                {equipmentItem.maintenancePeriods?.map((period: string) => getPeriodBadge(period)) || (
-                                  <span className="text-gray-400 text-sm">Не настроено</span>
+                                {equipmentItem.maintenancePeriods?.length ? (
+                                  <>
+                                    {getPeriodBadge(equipmentItem.maintenancePeriods[0])}
+                                    {equipmentItem.maintenancePeriods.length > 1 && (
+                                      <span className="text-xs text-muted-foreground">
+                                        +{equipmentItem.maintenancePeriods.length - 1}
+                                      </span>
+                                    )}
+                                  </>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">—</span>
                                 )}
                               </div>
                             </td>
-                            <td className="p-4 text-gray-600 dark:text-gray-400">
+                            <td className="p-2 text-muted-foreground truncate hidden xl:table-cell">
                               {formatEquipmentResponsible(equipmentItem.responsible)}
                             </td>
-                            <td className="p-4">
-                              <div className="flex gap-2">
-                                <Button size="sm" variant="outline" onClick={() => openViewDialog(equipmentItem)}>
-                                  <Eye className="h-4 w-4" />
-                                </Button>
-                                <Button size="sm" variant="outline" onClick={() => openEditDialog(equipmentItem)}>
-                                  <FileEdit className="h-4 w-4" />
+                            <td className="p-2" onClick={(e) => e.stopPropagation()}>
+                              <div className="flex gap-1 justify-end">
+                                <Button
+                                  size="icon"
+                                  variant="outline"
+                                  className="h-8 w-8"
+                                  onClick={() => openEditDialog(equipmentItem)}
+                                >
+                                  <FileEdit className="h-3.5 w-3.5" />
                                 </Button>
                                 <Button
-                                  size="sm"
+                                  size="icon"
                                   variant="outline"
+                                  className="h-8 w-8 text-red-600 hover:text-red-700"
                                   onClick={() => openDeleteDialog(equipmentItem)}
-                                  className="text-red-600 hover:text-red-700"
                                 >
-                                  <Trash2 className="h-4 w-4" />
+                                  <Trash2 className="h-3.5 w-3.5" />
                                 </Button>
                               </div>
                             </td>
@@ -676,7 +668,7 @@ export default function Equipment() {
       </main>
 
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className={equipmentFormDialogClass}>
           <DialogHeader>
             <DialogTitle>Редактировать оборудование</DialogTitle>
             <DialogDescription>Измените информацию об оборудовании и настройки периодичности ТО</DialogDescription>
@@ -709,161 +701,228 @@ export default function Equipment() {
       </Dialog>
 
       <Dialog open={viewDialogOpen} onOpenChange={setViewDialogOpen}>
-        <DialogContent className="max-w-5xl w-[95vw] max-h-[90vh] overflow-y-auto overflow-x-hidden">
+        <DialogContent className={equipmentViewDialogClass}>
           <DialogHeader>
             <DialogTitle>Информация об оборудовании</DialogTitle>
-            <DialogDescription>Подробная информация об оборудовании и настройках ТО</DialogDescription>
+            <DialogDescription>
+              Подробная информация, связи и управление активом
+            </DialogDescription>
           </DialogHeader>
           {selectedEquipment && (
-            <div className="space-y-4 min-w-0">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label className="font-medium">ID:</Label>
-                  <p className="text-gray-600 dark:text-gray-400">{selectedEquipment.id}</p>
-                </div>
-                <div>
-                  <Label className="font-medium">Название:</Label>
-                  <p className="text-gray-600 dark:text-gray-400">{selectedEquipment.name}</p>
-                </div>
-                <div>
-                  <Label className="font-medium">Тип:</Label>
-                  <p className="text-gray-600 dark:text-gray-400">{selectedEquipment.type}</p>
-                </div>
-                <div>
-                  <Label className="font-medium">Статус:</Label>
-                  <div className="mt-1">{getStatusBadge(selectedEquipment.status)}</div>
-                </div>
-              </div>
+            <Tabs defaultValue="card" className="min-w-0">
+              <TabsList
+                className={`w-full grid ${systemAdmin ? "grid-cols-3" : "grid-cols-2"}`}
+              >
+                <TabsTrigger value="card">Карточка</TabsTrigger>
+                <TabsTrigger value="management">Связи и История</TabsTrigger>
+                {systemAdmin && <TabsTrigger value="subdivisions">Подразделения</TabsTrigger>}
+              </TabsList>
 
-              {selectedEquipment.description && (
-                <div>
-                  <Label className="font-medium">Описание:</Label>
-                  <p className="text-gray-600 dark:text-gray-400 mt-1">{selectedEquipment.description}</p>
-                </div>
-              )}
+              <TabsContent value="card" className="space-y-4 min-w-0 mt-3">
+                <EquipmentImageGallery urls={selectedEquipment.imageUrls} />
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label className="font-medium">Подразделение:</Label>
-                  <p className="text-gray-600 dark:text-gray-400">
-                    {equipmentSubdivisionLabel(selectedEquipment)}
-                  </p>
-                </div>
-                {selectedEquipment.repairSubdivisionName && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
                   <div>
-                    <Label className="font-medium">На ремонте в:</Label>
+                    <Label className="font-medium">ID</Label>
+                    <p className="text-gray-600 dark:text-gray-400 font-mono">{selectedEquipment.id}</p>
+                  </div>
+                  <div>
+                    <Label className="font-medium">Название</Label>
+                    <p className="text-gray-600 dark:text-gray-400">{selectedEquipment.name}</p>
+                  </div>
+                  <div>
+                    <Label className="font-medium">Тип</Label>
+                    <p className="text-gray-600 dark:text-gray-400">{selectedEquipment.type || "—"}</p>
+                  </div>
+                  <div>
+                    <Label className="font-medium">Статус</Label>
+                    <div className="mt-1">
+                      <EquipmentStatusBadge status={selectedEquipment.status} />
+                    </div>
+                  </div>
+                  <div>
+                    <Label className="font-medium">Подразделение</Label>
                     <p className="text-gray-600 dark:text-gray-400">
-                      {selectedEquipment.repairSubdivisionName}
-                      {selectedEquipment.homeSubdivisionName
-                        ? ` (из «${selectedEquipment.homeSubdivisionName}»)`
-                        : ""}
+                      {equipmentSubdivisionLabel(selectedEquipment)}
                     </p>
                   </div>
-                )}
-                {selectedEquipment.location && (
                   <div>
-                    <Label className="font-medium">Местоположение:</Label>
-                    <p className="text-gray-600 dark:text-gray-400">{selectedEquipment.location}</p>
+                    <Label className="font-medium">На ремонте в</Label>
+                    <p className="text-gray-600 dark:text-gray-400">
+                      {selectedEquipment.repairSubdivisionName
+                        ? `${selectedEquipment.repairSubdivisionName}${
+                            selectedEquipment.homeSubdivisionName
+                              ? ` (из «${selectedEquipment.homeSubdivisionName}»)`
+                              : ""
+                          }`
+                        : "—"}
+                    </p>
                   </div>
-                )}
-                {selectedEquipment.model && (
                   <div>
-                    <Label className="font-medium">Модель:</Label>
-                    <p className="text-gray-600 dark:text-gray-400">{selectedEquipment.model}</p>
+                    <Label className="font-medium">Местоположение</Label>
+                    <p className="text-gray-600 dark:text-gray-400">
+                      {selectedEquipment.location || "—"}
+                    </p>
                   </div>
-                )}
-                {selectedEquipment.serialNumber && (
                   <div>
-                    <Label className="font-medium">Серийный №:</Label>
-                    <p className="text-gray-600 dark:text-gray-400">{selectedEquipment.serialNumber}</p>
+                    <Label className="font-medium">Модель</Label>
+                    <p className="text-gray-600 dark:text-gray-400">
+                      {selectedEquipment.model || "—"}
+                    </p>
                   </div>
-                )}
-                {selectedEquipment.inventoryNumber && (
                   <div>
-                    <Label className="font-medium">Инвентарный №:</Label>
-                    <p className="text-gray-600 dark:text-gray-400">{selectedEquipment.inventoryNumber}</p>
+                    <Label className="font-medium">Серийный №</Label>
+                    <p className="text-gray-600 dark:text-gray-400">
+                      {selectedEquipment.serialNumber || "—"}
+                    </p>
                   </div>
-                )}
-                {selectedEquipment.installationDate && (
                   <div>
-                    <Label className="font-medium">Дата установки:</Label>
-                    <p className="text-gray-600 dark:text-gray-400">{selectedEquipment.installationDate}</p>
+                    <Label className="font-medium">Инвентарный №</Label>
+                    <p className="text-gray-600 dark:text-gray-400">
+                      {selectedEquipment.inventoryNumber || "—"}
+                    </p>
                   </div>
-                )}
-                {selectedEquipment.warrantyUntil && (
                   <div>
-                    <Label className="font-medium">Гарантия до:</Label>
-                    <p className="text-gray-600 dark:text-gray-400">{selectedEquipment.warrantyUntil}</p>
+                    <Label className="font-medium">Дата установки</Label>
+                    <p className="text-gray-600 dark:text-gray-400">
+                      {selectedEquipment.installationDate || "—"}
+                    </p>
                   </div>
-                )}
-              </div>
-
-              {selectedEquipment.confluenceUrl && (
-                <div>
-                  <Label className="font-medium">Confluence:</Label>
-                  <a
-                    href={selectedEquipment.confluenceUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="mt-1 inline-flex items-center gap-1 text-blue-600 hover:underline break-all"
-                  >
-                    <ExternalLink className="h-4 w-4 shrink-0" />
-                    {selectedEquipment.confluenceUrl}
-                  </a>
+                  <div>
+                    <Label className="font-medium">Гарантия до</Label>
+                    <p className="text-gray-600 dark:text-gray-400">
+                      {selectedEquipment.warrantyUntil || "—"}
+                    </p>
+                  </div>
+                  <div>
+                    <Label className="font-medium">Ответственный</Label>
+                    <p className="text-gray-600 dark:text-gray-400">
+                      {formatEquipmentResponsible(selectedEquipment.responsible)}
+                    </p>
+                  </div>
                 </div>
-              )}
 
-              <EquipmentImageGallery urls={selectedEquipment.imageUrls} />
-
-              <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label className="font-medium">Последнее ТО:</Label>
-                  <p className="text-gray-600 dark:text-gray-400">{selectedEquipment.lastMaintenance || "Не указано"}</p>
-                </div>
-                <div>
-                  <Label className="font-medium">Следующее ТО:</Label>
-                  <p className="text-gray-600 dark:text-gray-400">{selectedEquipment.nextMaintenance || "Не указано"}</p>
-                </div>
-                <div>
-                  <Label className="font-medium">Ответственный:</Label>
-                  <p className="text-gray-600 dark:text-gray-400">
-                    {formatEquipmentResponsible(selectedEquipment.responsible)}
+                  <Label className="font-medium">Описание</Label>
+                  <p className="text-gray-600 dark:text-gray-400 mt-1 whitespace-pre-wrap">
+                    {selectedEquipment.description?.trim() || "—"}
                   </p>
                 </div>
-              </div>
 
-              <div>
-                <Label className="font-medium">Периодичность ТО:</Label>
-                <div className="flex gap-2 flex-wrap mt-2">
-                  {selectedEquipment.maintenancePeriods?.length > 0 ? (
-                    selectedEquipment.maintenancePeriods.map((period: string) => getPeriodBadge(period))
+                <div>
+                  <Label className="font-medium">Confluence</Label>
+                  {selectedEquipment.confluenceUrl ? (
+                    <a
+                      href={selectedEquipment.confluenceUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-1 inline-flex items-center gap-1 text-blue-600 hover:underline break-all"
+                    >
+                      <ExternalLink className="h-4 w-4 shrink-0" />
+                      {selectedEquipment.confluenceUrl}
+                    </a>
                   ) : (
-                    <span className="text-gray-400">Не настроено</span>
+                    <p className="text-gray-600 dark:text-gray-400 mt-1">—</p>
                   )}
                 </div>
-              </div>
 
-              <EquipmentAssetPanel
-                equipmentId={selectedEquipment.id}
-                equipmentName={selectedEquipment.name}
-                onOpenEquipment={openEquipmentById}
-                onOpenTask={openTaskById}
-              />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <Label className="font-medium">Последнее ТО</Label>
+                    <p className="text-gray-600 dark:text-gray-400">
+                      {selectedEquipment.lastMaintenance || "Не указано"}
+                    </p>
+                  </div>
+                  <div>
+                    <Label className="font-medium">Следующее ТО</Label>
+                    <p className="text-gray-600 dark:text-gray-400">
+                      {selectedEquipment.nextMaintenance || "Не указано"}
+                    </p>
+                  </div>
+                </div>
+
+                <div>
+                  <Label className="font-medium">Периодичность ТО</Label>
+                  <div className="flex gap-2 flex-wrap mt-2">
+                    {selectedEquipment.maintenancePeriods?.length > 0 ? (
+                      selectedEquipment.maintenancePeriods.map((period: string) => getPeriodBadge(period))
+                    ) : (
+                      <span className="text-gray-400">Не настроено</span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="border-t pt-4">
+                  <Label className="font-medium flex items-center gap-2">
+                    <Link2 className="h-4 w-4" />
+                    Связанное оборудование
+                  </Label>
+                  <p className="text-xs text-muted-foreground mt-1 mb-2">
+                    Оборудование, работающее в связке с этим активом. Управление — на вкладке «Связи и История».
+                  </p>
+                  {loadingViewLinks ? (
+                    <p className="text-sm text-muted-foreground">Загрузка…</p>
+                  ) : viewEquipmentLinks.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">Связи не указаны</p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {viewEquipmentLinks.map((link) => (
+                        <li
+                          key={link.id}
+                          className="p-2 border rounded-md text-sm flex flex-wrap items-start justify-between gap-2"
+                        >
+                          <button
+                            type="button"
+                            className="text-left min-w-0 hover:underline text-blue-600 dark:text-blue-400"
+                            onClick={() => openEquipmentById(link.otherEquipmentId)}
+                          >
+                            <p className="font-medium">{link.otherEquipmentName}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {link.otherEquipmentId}
+                              {link.otherEquipmentType ? ` · ${link.otherEquipmentType}` : ""}
+                            </p>
+                          </button>
+                          <Badge variant="outline" className="text-[10px] shrink-0">
+                            {equipmentLinkTypeLabel(link.linkType)}
+                          </Badge>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </TabsContent>
+
+              <TabsContent value="management" className="min-w-0 mt-3">
+                <EquipmentAssetPanel
+                  equipmentId={selectedEquipment.id}
+                  equipmentName={selectedEquipment.name}
+                  onOpenEquipment={openEquipmentById}
+                  onOpenTask={openTaskById}
+                  embedded
+                />
+              </TabsContent>
 
               {systemAdmin && (
-                <SubdivisionTransferPanel
-                  entityType="equipment"
-                  entityId={selectedEquipment.id}
-                  entityLabel={selectedEquipment.name}
-                  currentSubdivisionId={selectedEquipment.subdivisionId}
-                  repairSubdivisionId={selectedEquipment.repairSubdivisionId}
-                  homeSubdivisionName={selectedEquipment.homeSubdivisionName}
-                  onSuccess={() => {
-                    queryClient.invalidateQueries({ queryKey: ["/api/equipment"] });
-                  }}
-                />
+                <TabsContent value="subdivisions" className="min-w-0 mt-3">
+                  <SubdivisionTransferPanel
+                    entityType="equipment"
+                    entityId={selectedEquipment.id}
+                    entityLabel={selectedEquipment.name}
+                    currentSubdivisionId={selectedEquipment.subdivisionId}
+                    currentSubdivisionName={selectedEquipment.subdivisionName}
+                    repairSubdivisionId={selectedEquipment.repairSubdivisionId}
+                    repairSubdivisionName={selectedEquipment.repairSubdivisionName}
+                    homeSubdivisionName={selectedEquipment.homeSubdivisionName}
+                    onSuccess={() => {
+                      queryClient.invalidateQueries({ queryKey: ["/api/equipment"] });
+                      queryClient.invalidateQueries({
+                        queryKey: ["/api/equipment", selectedEquipment.id, "activity"],
+                      });
+                    }}
+                  />
+                </TabsContent>
               )}
-            </div>
+            </Tabs>
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setViewDialogOpen(false)}>

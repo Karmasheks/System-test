@@ -779,6 +779,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       await notifyNewTaskCreated(task, req.user.id);
+
+      const { syncEquipmentOperationalStatus } = await import("./equipment-status-service");
+      await syncEquipmentOperationalStatus(task.equipmentId, {
+        id: req.user.id,
+        name: req.user.name,
+      });
       
       // Create activity
       await storage.createActivity({
@@ -994,6 +1000,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
       }
       
+      const { syncEquipmentOperationalStatus } = await import("./equipment-status-service");
+      const statusActor = { id: req.user.id, name: req.user.name };
+      await syncEquipmentOperationalStatus(updatedTask.equipmentId, statusActor);
+      if (task.equipmentId && task.equipmentId !== updatedTask.equipmentId) {
+        await syncEquipmentOperationalStatus(task.equipmentId, statusActor);
+      }
+
       // Create activity
       await storage.createActivity({
         userId: req.user.id,
@@ -2092,6 +2105,14 @@ app.post("/api/maintenance", authenticate, requireRole(writeRoles), async (req, 
       }
     }
 
+    if (record.equipmentId && req.user) {
+      const { syncEquipmentOperationalStatus } = await import("./equipment-status-service");
+      await syncEquipmentOperationalStatus(record.equipmentId, {
+        id: req.user.id,
+        name: req.user.name,
+      });
+    }
+
     return res.status(201).json(record);
   } catch (error: any) {
     console.error("MAINTENANCE CREATE ERROR:", error);
@@ -2182,6 +2203,19 @@ app.put("/api/maintenance/:id", authenticate, requireRole(writeRoles), async (re
         );
       }
 
+    const equipmentIdsToSync = new Set<string>();
+    if (record.equipmentId) equipmentIdsToSync.add(record.equipmentId);
+    if (existing.equipmentId && existing.equipmentId !== record.equipmentId) {
+      equipmentIdsToSync.add(existing.equipmentId);
+    }
+    if (equipmentIdsToSync.size > 0 && req.user) {
+      const { syncEquipmentOperationalStatus } = await import("./equipment-status-service");
+      const actor = { id: req.user.id, name: req.user.name };
+      for (const equipmentId of equipmentIdsToSync) {
+        await syncEquipmentOperationalStatus(equipmentId, actor);
+      }
+    }
+
     return res.status(200).json(record);
   } catch (error: any) {
     console.error("MAINTENANCE UPDATE ERROR:", error);
@@ -2192,9 +2226,17 @@ app.put("/api/maintenance/:id", authenticate, requireRole(writeRoles), async (re
 app.delete("/api/maintenance/:id", authenticate, requireRole(writeRoles), async (req, res) => {
   try {
     const id = parseInt(req.params.id);
+    const existing = await storage.getMaintenanceRecord(id);
     const deleted = await storage.deleteMaintenanceRecord(id);
     if (!deleted) {
       return res.status(404).json({ message: "Запись о техобслуживании не найдена" });
+    }
+    if (existing?.equipmentId && req.user) {
+      const { syncEquipmentOperationalStatus } = await import("./equipment-status-service");
+      await syncEquipmentOperationalStatus(existing.equipmentId, {
+        id: req.user.id,
+        name: req.user.name,
+      });
     }
     return res.status(200).json({ message: "Запись удалена" });
   } catch (error: any) {

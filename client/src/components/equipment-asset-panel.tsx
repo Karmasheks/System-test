@@ -41,9 +41,16 @@ interface Props {
   equipmentName: string;
   onOpenEquipment?: (equipmentId: string) => void;
   onOpenTask?: (taskId: number) => void;
+  embedded?: boolean;
 }
 
-export function EquipmentAssetPanel({ equipmentId, equipmentName, onOpenEquipment, onOpenTask }: Props) {
+export function EquipmentAssetPanel({
+  equipmentId,
+  equipmentName,
+  onOpenEquipment,
+  onOpenTask,
+  embedded = false,
+}: Props) {
   const { toast } = useToast();
   const { data: expenses = [], isLoading: loadingBudget } = useBudgetEntries({ equipmentId });
   const { data: suppliers = [] } = useSuppliers({ equipmentId });
@@ -95,7 +102,7 @@ export function EquipmentAssetPanel({ equipmentId, equipmentName, onOpenEquipmen
   };
 
   return (
-    <div className="border-t pt-4 mt-4 min-w-0 overflow-hidden">
+    <div className={embedded ? "min-w-0 overflow-hidden" : "border-t pt-4 mt-4 min-w-0 overflow-hidden"}>
       <Tabs defaultValue="budget">
         <TabsList className="grid w-full grid-cols-5">
           <TabsTrigger value="budget" className="text-xs sm:text-sm">
@@ -348,7 +355,7 @@ export function EquipmentAssetPanel({ equipmentId, equipmentName, onOpenEquipmen
 
         <TabsContent value="history" className="space-y-3 mt-3">
           <p className="text-sm text-gray-500">
-            Все действия с оборудованием: задачи, заявки, ТО, связи, статус и расположение
+            Все действия с оборудованием: задачи, заявки, ТО, связи, переносы, ремонт в других подразделениях, статус и расположение
           </p>
           <EquipmentActivityList
             items={activity}

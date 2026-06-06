@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, ClipboardList, Download, CalendarDays } from "lucide-react";
+import { equipmentOptionLabel } from "@/lib/equipment-label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/hooks/use-auth";
 import {
@@ -185,7 +186,7 @@ export default function ServiceRequestsPage() {
                       <SelectContent>
                         {activeEquipment.map((eq) => (
                           <SelectItem key={eq.id} value={eq.id}>
-                            {eq.name} ({eq.id})
+                            {equipmentOptionLabel(eq)}
                           </SelectItem>
                         ))}
                       </SelectContent>

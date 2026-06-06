@@ -17,6 +17,8 @@ import {
   type EquipmentLinkInput,
 } from "@shared/equipment-link-constants";
 import type { Equipment } from "@shared/schema";
+import { EquipmentStatusBadge } from "@/components/equipment-status-badge";
+import { equipmentOptionLabel } from "@/lib/equipment-label";
 
 interface EquipmentLinksFieldProps {
   equipmentId?: string;
@@ -100,7 +102,7 @@ export function EquipmentLinksField({
                   ) : (
                     availableEquipment.map((item) => (
                       <SelectItem key={item.id} value={item.id}>
-                        {item.name} ({item.id})
+                        {equipmentOptionLabel(item)}
                       </SelectItem>
                     ))
                   )}
@@ -156,9 +158,12 @@ export function EquipmentLinksField({
                 className="flex items-start justify-between gap-2 p-2 border rounded-md text-sm"
               >
                 <div className="min-w-0">
-                  <p className="font-medium truncate">
-                    {item?.name ?? link.linkedEquipmentId}
-                  </p>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <p className="font-medium truncate">
+                      {item?.name ?? link.linkedEquipmentId}
+                    </p>
+                    {item?.status && <EquipmentStatusBadge status={item.status} compact />}
+                  </div>
                   <p className="text-xs text-muted-foreground">
                     {item?.id ?? link.linkedEquipmentId}
                     {item?.type ? ` · ${item.type}` : ""}

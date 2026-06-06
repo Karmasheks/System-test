@@ -12,6 +12,7 @@ import { useEquipmentTypes } from "@/hooks/use-equipment-types";
 import { SubdivisionPicker } from "@/components/subdivision-picker";
 import { useEquipmentLinks } from "@/hooks/use-equipment-links";
 import { linksToFormInput, type EquipmentLinkInput } from "@shared/equipment-link-constants";
+import { EQUIPMENT_STATUSES, EQUIPMENT_STATUS_LABELS } from "@shared/equipment-status-constants";
 
 const NONE_RESPONSIBLE = "__none__";
 
@@ -172,8 +173,8 @@ export default function EquipmentForm({ initialData, allEquipment, onSave, onCan
   const maintenancePeriods = ["1М - ТО", "3М - ТО", "6М - ТО", "1Г - ТО"];
 
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
+    <div className="space-y-3 min-w-0">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <Label htmlFor="name">Название оборудования *</Label>
           <Input
@@ -242,7 +243,7 @@ export default function EquipmentForm({ initialData, allEquipment, onSave, onCan
         required
       />
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <Label htmlFor="location">Местоположение</Label>
           <Input
@@ -254,7 +255,7 @@ export default function EquipmentForm({ initialData, allEquipment, onSave, onCan
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <Label htmlFor="model">Модель</Label>
           <Input id="model" value={formData.model} onChange={(e) => handleFieldChange("model", e.target.value)} />
@@ -269,7 +270,7 @@ export default function EquipmentForm({ initialData, allEquipment, onSave, onCan
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <Label htmlFor="inventoryNumber">Инвентарный №</Label>
           <Input
@@ -301,7 +302,7 @@ export default function EquipmentForm({ initialData, allEquipment, onSave, onCan
         onChange={setLinkDrafts}
       />
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <Label htmlFor="installationDate">Дата установки</Label>
           <Input
@@ -322,7 +323,7 @@ export default function EquipmentForm({ initialData, allEquipment, onSave, onCan
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <Label htmlFor="status">Статус</Label>
           <Select value={formData.status} onValueChange={(value) => handleFieldChange('status', value)}>
@@ -330,10 +331,11 @@ export default function EquipmentForm({ initialData, allEquipment, onSave, onCan
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="active">Активно</SelectItem>
-              <SelectItem value="maintenance">ТО</SelectItem>
-              <SelectItem value="inactive">Неактивно</SelectItem>
-              <SelectItem value="decommissioned">Выведено из эксплуатации</SelectItem>
+              {EQUIPMENT_STATUSES.map((code) => (
+                <SelectItem key={code} value={code}>
+                  {EQUIPMENT_STATUS_LABELS[code]}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
@@ -363,7 +365,7 @@ export default function EquipmentForm({ initialData, allEquipment, onSave, onCan
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <Label htmlFor="lastMaintenance">Последнее ТО</Label>
           <Input

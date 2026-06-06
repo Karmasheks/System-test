@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { downloadCsv, formatRuDateTime } from "@/lib/export-utils";
 import type { Contact, Supplier, BudgetEntry, Document, DocumentCategory } from "@shared/schema";
 
 function qs(params: Record<string, string | undefined>) {
@@ -318,6 +319,78 @@ export function useBudgetReport(from?: string, to?: string, equipmentId?: string
   });
 }
 
+export type WarehouseReport = {
+  period: { from: string | null; to: string | null };
+  subdivisionId: number | null;
+  summary: {
+    totalParts: number;
+    zeroStockCount: number;
+    lowStockCount: number;
+    unresolvedAlerts: number;
+    movementsCount: number;
+    incomingQuantity: number;
+    outgoingQuantity: number;
+    estimatedStockValue: number;
+  };
+  parts: Array<{
+    id: number;
+    name: string;
+    categoryName: string | null;
+    quantity: number;
+    minStock: number;
+    reservedQuantity: number;
+    unitCost: number | null;
+    equipmentName: string | null;
+    subdivisionName: string | null;
+    storageLocation: string | null;
+    stockStatus: "zero" | "low" | "ok";
+  }>;
+  movements: Array<{
+    id: number;
+    partId: number;
+    partName: string;
+    type: string;
+    typeLabel: string;
+    quantity: number;
+    equipmentName: string | null;
+    destination: string | null;
+    comment: string | null;
+    performedByName: string;
+    createdAt: string;
+  }>;
+  alerts: Array<{
+    id: number;
+    partId: number;
+    partName: string;
+    alertType: string;
+    quantity: number;
+    minStock: number;
+    createdAt: string;
+  }>;
+};
+
+export function useWarehouseReport(
+  from?: string,
+  to?: string,
+  subdivisionId?: number | null
+) {
+  return useQuery<WarehouseReport>({
+    queryKey: ["/api/reports/warehouse", from, to, subdivisionId],
+    queryFn: async () => {
+      const res = await apiRequest(
+        "GET",
+        `/api/reports/warehouse${qs({
+          from,
+          to,
+          subdivisionId:
+            subdivisionId != null ? String(subdivisionId) : undefined,
+        })}`
+      );
+      return res.json();
+    },
+  });
+}
+
 export type StatusDurationSummary = {
   entityType: "task" | "service_request" | "maintenance";
   status: string;
@@ -404,9 +477,10 @@ export type UserWorkReport = {
   }>;
 };
 
-export function useUserWorkReport(from?: string, to?: string) {
+export function useUserWorkReport(from?: string, to?: string, enabled = true) {
   return useQuery<UserWorkReport>({
     queryKey: ["/api/reports/user-work", from, to],
+    enabled,
     queryFn: async () => {
       const res = await apiRequest("GET", `/api/reports/user-work${qs({ from, to })}`);
       return res.json();
@@ -465,23 +539,6 @@ export function useEmployeeWorkReport(userId?: number, from?: string, to?: strin
   });
 }
 
-function csvEscape(value: string): string {
-  if (/[;"\n]/.test(value)) return `"${value.replace(/"/g, '""')}"`;
-  return value;
-}
-
-function fmtCsvDate(iso: string | null | undefined): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  return d.toLocaleString("ru-RU", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
 export async function downloadEmployeeWorkReportCsv(userId: number, from: string, to: string) {
   const token = localStorage.getItem("token");
   const url = `/api/reports/employee-work${qs({ userId: String(userId), from, to })}`;
@@ -501,8 +558,8 @@ export async function downloadEmployeeWorkReportCsv(userId: number, from: string
       String(t.id),
       t.title,
       t.statusLabel,
-      fmtCsvDate(t.createdAt),
-      fmtCsvDate(t.assigneeAssignedAt),
+      formatRuDateTime(t.createdAt),
+      formatRuDateTime(t.assigneeAssignedAt),
       t.assignedDurationHours != null ? String(t.assignedDurationHours) : "",
     ]),
     [],
@@ -511,9 +568,9 @@ export async function downloadEmployeeWorkReportCsv(userId: number, from: string
     ...data.completedTasks.map((t) => [
       String(t.id),
       t.title,
-      fmtCsvDate(t.createdAt),
-      fmtCsvDate(t.assigneeAssignedAt),
-      fmtCsvDate(t.completedAt),
+      formatRuDateTime(t.createdAt),
+      formatRuDateTime(t.assigneeAssignedAt),
+      formatRuDateTime(t.completedAt),
       String(t.actualHours),
       t.assignedDurationHours != null ? String(t.assignedDurationHours) : "",
       t.completionComment ?? "",
@@ -525,12 +582,7 @@ export async function downloadEmployeeWorkReportCsv(userId: number, from: string
     ["Часов сегодня", String(data.summary.totalHoursToday)],
   ];
 
-  const csv = rows.map((r) => r.map((c) => csvEscape(c)).join(";")).join("\n");
-  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = `employee-work-${data.userName.replace(/\s+/g, "-")}-${from}-${to}.csv`;
-  a.click();
+  downloadCsv(rows, `employee-work-${data.userName.replace(/\s+/g, "-")}-${from}-${to}.csv`);
 }
 
 export async function downloadBudgetReportCsv(from: string, to: string, equipmentId?: string) {
@@ -547,12 +599,7 @@ export async function downloadBudgetReportCsv(from: string, to: string, equipmen
     ["Оборудование", "Сумма", "Записей"],
     ...data.byEquipment.map((r) => [r.equipmentName, String(r.total), String(r.count)]),
   ];
-  const csv = rows.map((r) => r.join(";")).join("\n");
-  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = `budget-report-${from}-${to}.csv`;
-  a.click();
+  downloadCsv(rows, `budget-report-${from}-${to}.csv`);
 }
 
 export async function downloadEquipmentReportCsv(from: string, to: string, equipmentId?: string) {
@@ -569,10 +616,5 @@ export async function downloadEquipmentReportCsv(from: string, to: string, equip
     ["Задач решено", data.resolvedTasks.count],
     ["Простой (ед.)", data.downtime.equipmentInMaintenance],
   ];
-  const csv = rows.map((r) => r.join(";")).join("\n");
-  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = `report-${from}-${to}.csv`;
-  a.click();
+  downloadCsv(rows, `report-${from}-${to}.csv`);
 }

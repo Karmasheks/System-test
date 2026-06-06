@@ -35,10 +35,15 @@ import { TASK_TYPES, taskTypeLabel, type TaskTypeCode } from "@shared/task-const
 import { MAINTENANCE_STATUSES, MAINTENANCE_STATUS_LABELS } from "@shared/maintenance-status-constants";
 import { useSubdivisionFilter } from "@/hooks/use-subdivision-filter";
 import { SubdivisionFilterSelect } from "@/components/subdivision-filter-select";
+import { SubdivisionPicker } from "@/components/subdivision-picker";
+import { useAccessControl } from "@/hooks/use-access-control";
+import { useTaskDialog } from "@/hooks/use-task-dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   equipmentIdsInScope,
   filterItemsBySubdivision,
 } from "@/lib/subdivision-filter";
+import { equipmentOptionLabel } from "@/lib/equipment-label";
 
 const SCHEDULE_PAGE_TITLE = "План ТО и задач";
 
@@ -61,6 +66,8 @@ const CALENDAR_FILTER_OPTIONS: { value: CalendarEventFilter; label: string }[] =
 
 export default function Schedule() {
   const { user } = useAuth();
+  const { isAdmin } = useAccessControl();
+  const { openCreate } = useTaskDialog();
   const {
     filterValue,
     setFilterValue,
@@ -72,6 +79,7 @@ export default function Schedule() {
   const { allEquipment: equipment, getActiveEquipment } = useEquipmentApi();
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const isAdminViewAll = isAdmin && filterSubdivisionId == null;
 
   const { data: tasks = [] } = useQuery<Task[]>({
     queryKey: ['/api/tasks'],
@@ -81,6 +89,8 @@ export default function Schedule() {
   const [eventFilter, setEventFilter] = useState<CalendarEventFilter>("all");
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [addDialogTab, setAddDialogTab] = useState<"main" | "subdivision">("main");
+  const [dialogSubdivisionId, setDialogSubdivisionId] = useState("");
   const [formData, setFormData] = useState({
     equipmentName: '',
     type: '1М - ТО',
@@ -215,19 +225,38 @@ export default function Schedule() {
     });
   };
 
-  // Список оборудования для выбора (берем из базы данных)
-  const equipmentList = getActiveEquipment()
-    .filter((eq) =>
-      filterSubdivisionId == null ? true : scopedEquipmentIds.has(eq.id)
-    )
-    .map((eq) => eq.name);
+  const effectiveSubdivisionId = useMemo(() => {
+    if (isAdminViewAll) {
+      return dialogSubdivisionId ? Number(dialogSubdivisionId) : null;
+    }
+    if (filterSubdivisionId != null) return filterSubdivisionId;
+    return user?.subdivisionId ?? null;
+  }, [isAdminViewAll, dialogSubdivisionId, filterSubdivisionId, user?.subdivisionId]);
+
+  const subdivisionLocked = !isAdminViewAll && effectiveSubdivisionId != null;
+
+  const equipmentList = useMemo(
+    () =>
+      getActiveEquipment().filter((eq) =>
+        effectiveSubdivisionId == null
+          ? scopedEquipmentIds.has(eq.id)
+          : eq.subdivisionId === effectiveSubdivisionId
+      ),
+    [getActiveEquipment, effectiveSubdivisionId, scopedEquipmentIds]
+  );
 
   const maintenanceResponsible = user?.name ?? "—";
 
-  // Обработчики для форм
+  const resolveDefaultDialogSubdivision = () => {
+    if (filterSubdivisionId != null) return String(filterSubdivisionId);
+    if (user?.subdivisionId) return String(user.subdivisionId);
+    return "";
+  };
+
   const handleDayClick = (day: Date) => {
-    // Всегда позволяем создать новое ТО на выбранный день
     setSelectedDate(day);
+    setDialogSubdivisionId(resolveDefaultDialogSubdivision());
+    setAddDialogTab(isAdminViewAll ? "subdivision" : "main");
     setFormData({
       equipmentName: '',
       type: '1М - ТО',
@@ -239,8 +268,36 @@ export default function Schedule() {
     setIsAddDialogOpen(true);
   };
 
+  const handleOpenTaskDialog = () => {
+    if (!selectedDate) return;
+    if (isAdminViewAll && !dialogSubdivisionId) {
+      toast({
+        title: "Выберите подразделение",
+        description: "Сначала укажите подразделение на вкладке «Подразделение»",
+        variant: "destructive",
+      });
+      setAddDialogTab("subdivision");
+      return;
+    }
+    setIsAddDialogOpen(false);
+    openCreate({
+      dueDate: selectedDate,
+      subdivisionId: effectiveSubdivisionId ?? undefined,
+    });
+  };
+
   const handleSaveAdd = async () => {
     if (!selectedDate) return;
+
+    if (isAdminViewAll && !dialogSubdivisionId) {
+      toast({
+        title: "Выберите подразделение",
+        description: "Укажите подразделение на вкладке «Подразделение»",
+        variant: "destructive",
+      });
+      setAddDialogTab("subdivision");
+      return;
+    }
 
     const equipmentItem = equipment.find((eq) => eq.name === formData.equipmentName);
     if (!equipmentItem) {
@@ -271,11 +328,14 @@ export default function Schedule() {
         priority: formData.priority,
         assigneeName: maintenanceResponsible,
         sourceType: "manual",
+        subdivisionId: effectiveSubdivisionId ?? undefined,
       });
       await queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/equipment"] });
       await queryClient.invalidateQueries({ queryKey: ["/api/calendar/events"] });
       await queryClient.invalidateQueries({ queryKey: ["/api/calendar/stats"] });
       window.dispatchEvent(new CustomEvent("taskUpdated"));
+      window.dispatchEvent(new CustomEvent("equipmentUpdated"));
       toast({ title: "ТО запланировано", description: "Запись добавлена в календарь" });
       setIsAddDialogOpen(false);
       setSelectedDate(null);
@@ -299,6 +359,121 @@ export default function Schedule() {
 
   const activeFilterLabel =
     CALENDAR_FILTER_OPTIONS.find((o) => o.value === eventFilter)?.label ?? "Все события";
+
+  const renderMaintenanceFormFields = () => (
+    <>
+      <div>
+        <Label htmlFor="equipment">Оборудование</Label>
+        <Select
+          value={formData.equipmentName}
+          onValueChange={(value) => setFormData({ ...formData, equipmentName: value })}
+          disabled={isAdminViewAll && !dialogSubdivisionId}
+        >
+          <SelectTrigger>
+            <SelectValue
+              placeholder={
+                isAdminViewAll && !dialogSubdivisionId
+                  ? "Сначала выберите подразделение"
+                  : "Выберите оборудование"
+              }
+            />
+          </SelectTrigger>
+          <SelectContent>
+            {equipmentList.map((eq) => (
+              <SelectItem key={eq.id} value={eq.name}>
+                {equipmentOptionLabel(eq)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div>
+        <Label htmlFor="type">Тип ТО</Label>
+        <Select
+          value={formData.type}
+          onValueChange={(value) => setFormData({ ...formData, type: value })}
+        >
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="1М - ТО">1М - ТО</SelectItem>
+            <SelectItem value="3М - ТО">3М - ТО</SelectItem>
+            <SelectItem value="6М - ТО">6М - ТО</SelectItem>
+            <SelectItem value="1Г - ТО">1Г - ТО</SelectItem>
+            <SelectItem value="Ремонт">Ремонт</SelectItem>
+            <SelectItem value="Незапланированные работы">Незапланированные работы</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div>
+        <Label htmlFor="duration">Длительность</Label>
+        <Select
+          value={formData.duration}
+          onValueChange={(value) => setFormData({ ...formData, duration: value })}
+        >
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="1 час">1 час</SelectItem>
+            <SelectItem value="2 часа">2 часа</SelectItem>
+            <SelectItem value="4 часа">4 часа</SelectItem>
+            <SelectItem value="8 часов">8 часов</SelectItem>
+            <SelectItem value="16 часов">16 часов</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div>
+        <Label htmlFor="status">Статус</Label>
+        <Select
+          value={formData.status}
+          onValueChange={(value) => setFormData({ ...formData, status: value })}
+        >
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {MAINTENANCE_STATUSES.map((status) => (
+              <SelectItem key={status} value={status}>
+                {MAINTENANCE_STATUS_LABELS[status]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div>
+        <Label htmlFor="priority">Приоритет</Label>
+        <Select
+          value={formData.priority}
+          onValueChange={(value) => setFormData({ ...formData, priority: value })}
+        >
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="low">Низкий</SelectItem>
+            <SelectItem value="medium">Средний</SelectItem>
+            <SelectItem value="high">Высокий</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div>
+        <Label htmlFor="notes">Примечания</Label>
+        <Textarea
+          value={formData.notes}
+          onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+          placeholder="Дополнительная информация..."
+          rows={3}
+        />
+      </div>
+    </>
+  );
 
   return (
     <>
@@ -739,117 +914,62 @@ export default function Schedule() {
             </DialogTitle>
           </DialogHeader>
           <div className={scheduleDialogBodyClass}>
-            <div>
-              <Label htmlFor="equipment">Оборудование</Label>
-              <Select 
-                value={formData.equipmentName} 
-                onValueChange={(value) => setFormData({...formData, equipmentName: value})}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Выберите оборудование" />
-                </SelectTrigger>
-                <SelectContent>
-                  {equipmentList.map((name) => (
-                    <SelectItem key={name} value={name}>
-                      {name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            
-            <div>
-              <Label htmlFor="type">Тип ТО</Label>
-              <Select 
-                value={formData.type} 
-                onValueChange={(value) => setFormData({...formData, type: value})}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="1М - ТО">1М - ТО</SelectItem>
-                  <SelectItem value="3М - ТО">3М - ТО</SelectItem>
-                  <SelectItem value="6М - ТО">6М - ТО</SelectItem>
-                  <SelectItem value="1Г - ТО">1Г - ТО</SelectItem>
-                  <SelectItem value="Ремонт">Ремонт</SelectItem>
-                  <SelectItem value="Незапланированные работы">Незапланированные работы</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div>
-              <Label htmlFor="duration">Длительность</Label>
-              <Select 
-                value={formData.duration} 
-                onValueChange={(value) => setFormData({...formData, duration: value})}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="1 час">1 час</SelectItem>
-                  <SelectItem value="2 часа">2 часа</SelectItem>
-                  <SelectItem value="4 часа">4 часа</SelectItem>
-                  <SelectItem value="8 часов">8 часов</SelectItem>
-                  <SelectItem value="16 часов">16 часов</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div>
-              <Label htmlFor="status">Статус</Label>
-              <Select 
-                value={formData.status} 
-                onValueChange={(value) => setFormData({...formData, status: value})}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {MAINTENANCE_STATUSES.map((status) => (
-                    <SelectItem key={status} value={status}>
-                      {MAINTENANCE_STATUS_LABELS[status]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div>
-              <Label htmlFor="priority">Приоритет</Label>
-              <Select 
-                value={formData.priority} 
-                onValueChange={(value) => setFormData({...formData, priority: value})}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="low">Низкий</SelectItem>
-                  <SelectItem value="medium">Средний</SelectItem>
-                  <SelectItem value="high">Высокий</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div>
-              <Label htmlFor="notes">Примечания</Label>
-              <Textarea 
-                value={formData.notes}
-                onChange={(e) => setFormData({...formData, notes: e.target.value})}
-                placeholder="Дополнительная информация..."
-                rows={3}
-              />
-            </div>
+            {isAdminViewAll ? (
+              <Tabs value={addDialogTab} onValueChange={(v) => setAddDialogTab(v as "main" | "subdivision")}>
+                <TabsList className="grid w-full grid-cols-2">
+                  <TabsTrigger value="main">ТО</TabsTrigger>
+                  <TabsTrigger value="subdivision">Подразделение</TabsTrigger>
+                </TabsList>
+                <TabsContent value="subdivision" className="mt-4 space-y-3">
+                  <SubdivisionPicker
+                    value={dialogSubdivisionId}
+                    onChange={(value) => {
+                      setDialogSubdivisionId(value);
+                      setFormData((prev) => ({ ...prev, equipmentName: "" }));
+                    }}
+                    label="Подразделение"
+                    required
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Выберите подразделение, к которому будет относиться ТО или задача на этот день.
+                  </p>
+                </TabsContent>
+                <TabsContent value="main" className="mt-4 space-y-4">
+                  {renderMaintenanceFormFields()}
+                </TabsContent>
+              </Tabs>
+            ) : (
+              <div className="space-y-4">
+                <SubdivisionPicker
+                  value={dialogSubdivisionId}
+                  onChange={(value) => {
+                    setDialogSubdivisionId(value);
+                    setFormData((prev) => ({ ...prev, equipmentName: "" }));
+                  }}
+                  label="Подразделение"
+                  required
+                  disabled={subdivisionLocked}
+                />
+                {renderMaintenanceFormFields()}
+              </div>
+            )}
           </div>
           <DialogFooter className={scheduleDialogFooterClass}>
             <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
               Отмена
             </Button>
-            <Button onClick={handleSaveAdd} disabled={!formData.equipmentName}>
+            <Button variant="secondary" onClick={handleOpenTaskDialog}>
+              <Plus className="h-4 w-4 mr-2" />
+              Задача
+            </Button>
+            <Button
+              onClick={handleSaveAdd}
+              disabled={
+                !formData.equipmentName || (isAdminViewAll && !dialogSubdivisionId)
+              }
+            >
               <Save className="h-4 w-4 mr-2" />
-              Сохранить
+              Сохранить ТО
             </Button>
           </DialogFooter>
         </DialogContent>

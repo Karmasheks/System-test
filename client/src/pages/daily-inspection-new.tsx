@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Helmet } from "react-helmet";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -33,6 +33,10 @@ import { useInspectionChecklists } from "@/hooks/use-inspection-checklists";
 import { useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useSubdivisionFilter } from "@/hooks/use-subdivision-filter";
+import { SubdivisionFilterSelect } from "@/components/subdivision-filter-select";
+import { filterItemsBySubdivision } from "@/lib/subdivision-filter";
+import { isEquipmentAvailableForInspection } from "@shared/equipment-utils";
 
 // Интерфейс для элемента чек-листа
 interface ChecklistItem {
@@ -380,6 +384,14 @@ const ChecklistAdminPanel = ({
 export default function DailyInspection() {
   const { user } = useAuth();
   const { isAdmin } = useAccessControl();
+  const {
+    filterValue,
+    setFilterValue,
+    filterSubdivisionId,
+    availableSubdivisions,
+    showFilter,
+    filterLabel,
+  } = useSubdivisionFilter();
   const { checklists, createChecklist, updateChecklist, getChecklistByEquipmentId } = useInspectionChecklists();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
@@ -390,8 +402,20 @@ export default function DailyInspection() {
     queryKey: ['/api/equipment'],
   });
 
-  // Фильтруем только активное оборудование (исключаем выведенное из эксплуатации)
-  const activeEquipment = equipment.filter((eq: Equipment) => eq.status !== 'decommissioned');
+  const activeEquipment = useMemo(
+    () => equipment.filter((eq: Equipment) => eq.status !== "decommissioned"),
+    [equipment]
+  );
+
+  const subdivisionScopedEquipment = useMemo(
+    () => filterItemsBySubdivision(activeEquipment, filterSubdivisionId),
+    [activeEquipment, filterSubdivisionId]
+  );
+
+  const inspectableEquipment = useMemo(
+    () => subdivisionScopedEquipment.filter((eq) => isEquipmentAvailableForInspection(eq)),
+    [subdivisionScopedEquipment]
+  );
 
   // Мутация для создания ежедневного осмотра
   const createDailyInspectionMutation = useMutation({
@@ -733,10 +757,16 @@ export default function DailyInspection() {
   }
 
   const categories = ["all", "Безопасность", "Механическая часть", "Гидравлика", "Электрика", "Пневматика", "Смазка", "Чистота", "Функциональность", "Система охлаждения", "Инструмент"];
-  const equipmentCategories = ["all", ...Array.from(new Set(activeEquipment.map((eq: Equipment) => eq.type)))];
+  const equipmentCategories = [
+    "all",
+    ...Array.from(new Set(inspectableEquipment.map((eq: Equipment) => eq.type))),
+  ];
 
-  // Фильтрация оборудования
-  const filteredEquipment = activeEquipment.filter((eq: Equipment) => {
+  const excludedFromInspectionCount =
+    subdivisionScopedEquipment.length - inspectableEquipment.length;
+
+  // Фильтрация оборудования для осмотра
+  const filteredEquipment = inspectableEquipment.filter((eq: Equipment) => {
     const matchesSearch = eq.name.toLowerCase().includes(searchFilter.toLowerCase());
     const matchesCategory = categoryFilter === "all" || eq.type === categoryFilter;
     const inspection = equipmentInspections[eq.id];
@@ -800,7 +830,28 @@ export default function DailyInspection() {
             </div>
 
             {/* Фильтры */}
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4 mb-4">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4 mb-4 space-y-3">
+              {showFilter && (
+                <div className="flex flex-wrap items-end gap-3">
+                  <SubdivisionFilterSelect
+                    value={filterValue}
+                    onChange={setFilterValue}
+                    subdivisions={availableSubdivisions}
+                    showAll={isAdmin}
+                    className="w-full sm:w-64"
+                  />
+                  <p className="text-xs text-muted-foreground pb-2">
+                    {filterSubdivisionId == null && isAdmin
+                      ? "Все подразделения"
+                      : filterLabel}
+                  </p>
+                </div>
+              )}
+              {!showFilter && filterLabel && (
+                <p className="text-sm text-muted-foreground">
+                  Подразделение: <span className="font-medium text-foreground">{filterLabel}</span>
+                </p>
+              )}
               <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                 <div>
                   <Label htmlFor="search" className="text-xs">Поиск</Label>
@@ -855,6 +906,7 @@ export default function DailyInspection() {
                       setSearchFilter("");
                       setCategoryFilter("all");
                       setStatusFilter("all");
+                      if (isAdmin) setFilterValue("all");
                     }}
                     variant="outline"
                     size="sm"
@@ -865,10 +917,27 @@ export default function DailyInspection() {
                   </Button>
                 </div>
               </div>
+              <p className="text-xs text-muted-foreground">
+                Для осмотра: {filteredEquipment.length} из {inspectableEquipment.length}
+                {excludedFromInspectionCount > 0 && (
+                  <span>
+                    {" "}
+                    · скрыто {excludedFromInspectionCount} (на ТО, в ремонте или неактивно)
+                  </span>
+                )}
+              </p>
             </div>
 
             {/* Список оборудования */}
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-3 gap-2">
+              {filteredEquipment.length === 0 && (
+                <div className="col-span-full py-8 text-center text-sm text-muted-foreground border rounded-lg bg-muted/20">
+                  Нет оборудования для осмотра
+                  {excludedFromInspectionCount > 0
+                    ? " — всё доступное сейчас на ТО, в ремонте в другом подразделении или неактивно"
+                    : ""}
+                </div>
+              )}
               {filteredEquipment.map((eq) => {
                 const inspection = equipmentInspections[eq.id];
                 const statusColor = inspection?.status === 'completed' ? 'green' : 
@@ -1186,7 +1255,7 @@ export default function DailyInspection() {
           </DialogHeader>
           
           <ChecklistAdminPanel
-            equipment={activeEquipment}
+            equipment={subdivisionScopedEquipment}
             onSave={handleSaveChecklist}
             getChecklistByEquipmentId={(id) => getChecklistByEquipmentId(id) ?? null}
           />

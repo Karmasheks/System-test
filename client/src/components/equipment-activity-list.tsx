@@ -13,6 +13,8 @@ const ACTIVITY_CATEGORY_LABELS: Record<string, string> = {
   link: "Связь",
   equipment_status: "Статус",
   equipment_location: "Расположение",
+  subdivision_transfer: "Перенос",
+  repair_transfer: "Ремонт",
 };
 
 interface Props {

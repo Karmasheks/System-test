@@ -304,8 +304,8 @@ export function NotificationsDropdown() {
         notifications.push({
           id,
           type: 'warning',
-          title: 'Оборудование на ТО',
-          description: `${item.name} - находится на техобслуживании`,
+          title: 'Оборудование на ТО / в ремонте',
+          description: `${item.name} — на техобслуживании или в ремонте`,
           link: '/equipment',
           equipmentId: item.id,
           priority: 'medium',

@@ -36,7 +36,9 @@ export interface EquipmentActivityItem {
     | "budget"
     | "link"
     | "equipment_status"
-    | "equipment_location";
+    | "equipment_location"
+    | "subdivision_transfer"
+    | "repair_transfer";
   entityId: number;
   title: string;
   subtitle?: string;
@@ -121,6 +123,37 @@ function mapEventRowToActivityItem(row: typeof equipmentEventLog.$inferSelect): 
       entityId: row.id,
       title: row.description,
       statusLabel: row.newValue ?? "Не указано",
+      occurredAt: row.createdAt.toISOString(),
+      actor: row.actorName ?? undefined,
+      links,
+    };
+  }
+
+  if (row.eventType === "subdivision_transferred") {
+    return {
+      id: `event-${row.id}`,
+      category: "subdivision_transfer",
+      entityId: row.id,
+      title: row.description,
+      subtitle: row.oldValue && row.newValue ? `${row.oldValue} → ${row.newValue}` : undefined,
+      statusLabel: row.newValue ?? "Перенос",
+      occurredAt: row.createdAt.toISOString(),
+      actor: row.actorName ?? undefined,
+      links,
+    };
+  }
+
+  if (row.eventType === "repair_sent" || row.eventType === "repair_returned") {
+    return {
+      id: `event-${row.id}`,
+      category: "repair_transfer",
+      entityId: row.id,
+      title: row.description,
+      subtitle: row.note ?? undefined,
+      statusLabel:
+        row.eventType === "repair_sent"
+          ? "На ремонте"
+          : "Возврат с ремонта",
       occurredAt: row.createdAt.toISOString(),
       actor: row.actorName ?? undefined,
       links,

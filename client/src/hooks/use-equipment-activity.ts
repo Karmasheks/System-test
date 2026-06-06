@@ -18,7 +18,9 @@ export interface EquipmentActivityItem {
     | "budget"
     | "link"
     | "equipment_status"
-    | "equipment_location";
+    | "equipment_location"
+    | "subdivision_transfer"
+    | "repair_transfer";
   entityId: number;
   title: string;
   subtitle?: string;

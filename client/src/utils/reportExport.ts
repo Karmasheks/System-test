@@ -1,283 +1,398 @@
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
-import * as XLSX from 'xlsx';
-import { saveAs } from 'file-saver';
+import jsPDF from "jspdf";
+import html2canvas from "html2canvas";
+import * as XLSX from "xlsx";
+import { saveAs } from "file-saver";
 import { taskStatusLabel } from "@shared/task-status-constants";
 import { maintenanceStatusLabel } from "@shared/maintenance-status-constants";
+import {
+  UTF8_BOM,
+  downloadCsv,
+  downloadTextFile,
+  formatRuDate,
+  reportFilename,
+  rowsToCsv,
+} from "@/lib/export-utils";
+
+export interface ExportTask {
+  id: number;
+  title?: string | null;
+  description?: string | null;
+  status: string;
+  priority?: string | null;
+  equipmentId?: string | null;
+  maintenanceType?: string | null;
+  dueDate?: Date | string | null;
+  createdBy?: string | null;
+  createdAt: Date | string;
+  modifiedBy?: string | null;
+  modifiedAt?: Date | string | null;
+  closedBy?: string | null;
+  closedAt?: Date | string | null;
+}
+
+export interface ExportRemark {
+  id: string | number;
+  title?: string | null;
+  description?: string | null;
+  status: string;
+  priority?: string | null;
+  type?: string | null;
+  equipmentId?: string | null;
+  equipmentName?: string | null;
+  reportedBy?: string | null;
+  createdAt: Date | string;
+  lastModifiedBy?: string | null;
+  updatedAt?: Date | string | null;
+  resolvedBy?: string | null;
+  resolvedAt?: Date | string | null;
+}
+
+export interface ExportMaintenance {
+  id: number;
+  equipmentId?: string | null;
+  equipmentName?: string | null;
+  maintenanceType?: string | null;
+  status: string;
+  priority?: string | null;
+  scheduledDate?: Date | string | null;
+  completedDate?: Date | string | null;
+  responsible?: string | null;
+  notes?: string | null;
+  duration?: string | null;
+  createdAt?: Date | string | null;
+  updatedAt?: Date | string | null;
+}
+
+export interface ExportEquipment {
+  id: string;
+  name?: string | null;
+  type?: string | null;
+  manufacturer?: string | null;
+  model?: string | null;
+  serialNumber?: string | null;
+  location?: string | null;
+  status?: string | null;
+  installationDate?: Date | string | null;
+  description?: string | null;
+}
 
 export interface ExportData {
-  tasks: any[];
-  remarks: any[];
-  maintenance: any[];
-  equipment: any[];
+  tasks: ExportTask[];
+  remarks: ExportRemark[];
+  maintenance: ExportMaintenance[];
+  equipment: ExportEquipment[];
 }
 
-export const exportToPDF = (data: ExportData, title: string) => {
-  const doc = new jsPDF();
-  
-  // Заголовок на английском языке из-за ограничений jsPDF с кириллицей
-  doc.setFontSize(18);
-  doc.text('Equipment Management System Report', 20, 20);
-  doc.text(`Generated: ${new Date().toLocaleDateString('en-US')}`, 20, 30);
-  
-  let yPosition = 50;
-  
-  // Таблица задач
-  if (data.tasks.length > 0) {
-    doc.setFontSize(14);
-    doc.text('Tasks', 20, yPosition);
-    yPosition += 10;
-    
-    const taskHeaders = ['ID', 'Title', 'Status', 'Priority', 'Equipment', 'Due Date'];
-    const taskRows = data.tasks.map(task => [
-      task.id.toString(),
-      task.title ? task.title.replace(/[^\x00-\x7F]/g, "?") : '',
-      getStatusTextEn(task.status),
-      getPriorityTextEn(task.priority),
-      task.equipmentId || '',
-      task.dueDate ? new Date(task.dueDate).toLocaleDateString('en-US') : ''
-    ]);
-    
-    autoTable(doc, {
-      head: [taskHeaders],
-      body: taskRows,
-      startY: yPosition,
-      styles: { fontSize: 8 },
-      headStyles: { fillColor: [66, 139, 202] }
-    });
-    
-    yPosition = (doc as any).lastAutoTable.finalY + 20;
-  }
-  
-  // Таблица замечаний
-  if (data.remarks.length > 0) {
-    doc.setFontSize(14);
-    doc.text('Remarks', 20, yPosition);
-    yPosition += 10;
-    
-    const remarkHeaders = ['ID', 'Title', 'Status', 'Equipment', 'Created'];
-    const remarkRows = data.remarks.map(remark => [
-      remark.id.toString(),
-      remark.title ? remark.title.replace(/[^\x00-\x7F]/g, "?") : '',
-      getStatusTextEn(remark.status),
-      remark.equipmentName ? remark.equipmentName.replace(/[^\x00-\x7F]/g, "?") : '',
-      new Date(remark.createdAt).toLocaleDateString('en-US')
-    ]);
-    
-    autoTable(doc, {
-      head: [remarkHeaders],
-      body: remarkRows,
-      startY: yPosition,
-      styles: { fontSize: 8 },
-      headStyles: { fillColor: [66, 139, 202] }
-    });
-    
-    yPosition = (doc as any).lastAutoTable.finalY + 20;
-  }
-  
-  // Таблица техобслуживания
-  if (data.maintenance.length > 0 && yPosition < 250) {
-    doc.setFontSize(14);
-    doc.text('Maintenance', 20, yPosition);
-    yPosition += 10;
-    
-    const maintenanceHeaders = ['ID', 'Equipment', 'Type', 'Status', 'Scheduled', 'Responsible'];
-    const maintenanceRows = data.maintenance.map(maintenance => [
-      maintenance.id.toString(),
-      maintenance.equipmentName ? maintenance.equipmentName.replace(/[^\x00-\x7F]/g, "?") : '',
-      maintenance.maintenanceType || '',
-      getMaintenanceStatusTextEn(maintenance.status),
-      new Date(maintenance.scheduledDate).toLocaleDateString('en-US'),
-      maintenance.responsible ? maintenance.responsible.replace(/[^\x00-\x7F]/g, "?") : ''
-    ]);
-    
-    autoTable(doc, {
-      head: [maintenanceHeaders],
-      body: maintenanceRows,
-      startY: yPosition,
-      styles: { fontSize: 8 },
-      headStyles: { fillColor: [66, 139, 202] }
-    });
-  }
-  
-  // Сохранение файла
-  const fileName = `Equipment_Report_${new Date().toISOString().split('T')[0]}.pdf`;
-  doc.save(fileName);
-};
-
-export const exportToExcel = (data: ExportData, title: string) => {
-  const workbook = XLSX.utils.book_new();
-  
-  // Лист с задачами
-  if (data.tasks.length > 0) {
-    const taskData = data.tasks.map(task => ({
-      'ID': task.id,
-      'Название': task.title || '',
-      'Описание': task.description || '',
-      'Статус': getStatusText(task.status),
-      'Приоритет': getPriorityText(task.priority),
-      'Оборудование': task.equipmentId || '',
-      'Тип ТО': task.maintenanceType || '',
-      'Срок выполнения': task.dueDate ? new Date(task.dueDate).toLocaleDateString('ru-RU') : '',
-      'Создал': task.createdBy || '',
-      'Дата создания': new Date(task.createdAt).toLocaleDateString('ru-RU'),
-      'Изменил': task.modifiedBy || '',
-      'Дата изменения': task.modifiedAt ? new Date(task.modifiedAt).toLocaleDateString('ru-RU') : '',
-      'Закрыл': task.closedBy || '',
-      'Дата закрытия': task.closedAt ? new Date(task.closedAt).toLocaleDateString('ru-RU') : ''
-    }));
-    
-    const taskSheet = XLSX.utils.json_to_sheet(taskData);
-    XLSX.utils.book_append_sheet(workbook, taskSheet, 'Задачи');
-  }
-  
-  // Лист с замечаниями
-  if (data.remarks.length > 0) {
-    const remarkData = data.remarks.map(remark => ({
-      'ID': remark.id,
-      'Название': remark.title || '',
-      'Описание': remark.description || '',
-      'Статус': getStatusText(remark.status),
-      'Приоритет': remark.priority || '',
-      'Тип': remark.type || '',
-      'Оборудование ID': remark.equipmentId || '',
-      'Оборудование': remark.equipmentName || '',
-      'Создал': remark.reportedBy || '',
-      'Дата создания': new Date(remark.createdAt).toLocaleDateString('ru-RU'),
-      'Изменил': remark.lastModifiedBy || '',
-      'Дата изменения': remark.updatedAt ? new Date(remark.updatedAt).toLocaleDateString('ru-RU') : '',
-      'Закрыл': remark.resolvedBy || '',
-      'Дата закрытия': remark.resolvedAt ? new Date(remark.resolvedAt).toLocaleDateString('ru-RU') : ''
-    }));
-    
-    const remarkSheet = XLSX.utils.json_to_sheet(remarkData);
-    XLSX.utils.book_append_sheet(workbook, remarkSheet, 'Замечания');
-  }
-  
-  // Лист с техобслуживанием
-  if (data.maintenance.length > 0) {
-    const maintenanceData = data.maintenance.map(maintenance => ({
-      'ID': maintenance.id,
-      'Оборудование ID': maintenance.equipmentId || '',
-      'Оборудование': maintenance.equipmentName || '',
-      'Тип ТО': maintenance.maintenanceType || '',
-      'Статус': getMaintenanceStatusText(maintenance.status),
-      'Приоритет': maintenance.priority || '',
-      'Плановая дата': new Date(maintenance.scheduledDate).toLocaleDateString('ru-RU'),
-      'Дата выполнения': maintenance.completedDate ? new Date(maintenance.completedDate).toLocaleDateString('ru-RU') : '',
-      'Ответственный': maintenance.responsible || '',
-      'Заметки': maintenance.notes || '',
-      'Длительность': maintenance.duration || '',
-      'Дата создания': new Date(maintenance.createdAt).toLocaleDateString('ru-RU'),
-      'Дата обновления': maintenance.updatedAt ? new Date(maintenance.updatedAt).toLocaleDateString('ru-RU') : ''
-    }));
-    
-    const maintenanceSheet = XLSX.utils.json_to_sheet(maintenanceData);
-    XLSX.utils.book_append_sheet(workbook, maintenanceSheet, 'Техобслуживание');
-  }
-  
-  // Лист с оборудованием
-  if (data.equipment.length > 0) {
-    const equipmentData = data.equipment.map(equipment => ({
-      'ID': equipment.id,
-      'Название': equipment.name || '',
-      'Тип': equipment.type || '',
-      'Производитель': equipment.manufacturer || '',
-      'Модель': equipment.model || '',
-      'Серийный номер': equipment.serialNumber || '',
-      'Расположение': equipment.location || '',
-      'Статус': equipment.status || '',
-      'Дата установки': equipment.installationDate ? new Date(equipment.installationDate).toLocaleDateString('ru-RU') : '',
-      'Описание': equipment.description || ''
-    }));
-    
-    const equipmentSheet = XLSX.utils.json_to_sheet(equipmentData);
-    XLSX.utils.book_append_sheet(workbook, equipmentSheet, 'Оборудование');
-  }
-  
-  // Сохранение файла
-  const fileName = `Отчет_система_управления_оборудованием_${new Date().toISOString().split('T')[0]}.xlsx`;
-  const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
-  const file = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-  saveAs(file, fileName);
-};
-
-export const exportToCSV = (data: ExportData, title: string) => {
-  let csvContent = `${title}\n`;
-  csvContent += `Дата формирования: ${new Date().toLocaleDateString('ru-RU')}\n\n`;
-  
-  // Задачи
-  if (data.tasks.length > 0) {
-    csvContent += 'ЗАДАЧИ\n';
-    csvContent += 'ID,Название,Статус,Приоритет,Оборудование,Срок выполнения,Создал,Дата создания\n';
-    
-    data.tasks.forEach(task => {
-      csvContent += `${task.id},"${task.title || ''}","${getStatusText(task.status)}","${getPriorityText(task.priority)}","${task.equipmentId || ''}","${task.dueDate ? new Date(task.dueDate).toLocaleDateString('ru-RU') : ''}","${task.createdBy || ''}","${new Date(task.createdAt).toLocaleDateString('ru-RU')}"\n`;
-    });
-    csvContent += '\n';
-  }
-  
-  // Замечания
-  if (data.remarks.length > 0) {
-    csvContent += 'ЗАМЕЧАНИЯ\n';
-    csvContent += 'ID,Название,Статус,Оборудование,Источник,Создал,Дата создания\n';
-    
-    data.remarks.forEach(remark => {
-      csvContent += `${remark.id},"${remark.title || ''}","${getStatusText(remark.status)}","${remark.equipmentName || ''}","${remark.type || ''}","${remark.reportedBy || ''}","${new Date(remark.createdAt).toLocaleDateString('ru-RU')}"\n`;
-    });
-    csvContent += '\n';
-  }
-  
-  // Техобслуживание
-  if (data.maintenance.length > 0) {
-    csvContent += 'ТЕХНИЧЕСКОЕ ОБСЛУЖИВАНИЕ\n';
-    csvContent += 'ID,Оборудование,Тип ТО,Статус,Плановая дата,Ответственный\n';
-    
-    data.maintenance.forEach(maintenance => {
-      csvContent += `${maintenance.id},"${maintenance.equipmentName || ''}","${maintenance.maintenanceType || ''}","${getMaintenanceStatusText(maintenance.status)}","${new Date(maintenance.scheduledDate).toLocaleDateString('ru-RU')}","${maintenance.responsible || ''}"\n`;
-    });
-  }
-  
-  // Сохранение файла с BOM для корректного отображения кириллицы
-  const fileName = `Отчет_система_управления_оборудованием_${new Date().toISOString().split('T')[0]}.csv`;
-  const BOM = '\uFEFF';
-  const file = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
-  saveAs(file, fileName);
-};
-
-// Вспомогательные функции для перевода статусов
-function getStatusText(status: string): string {
-  return taskStatusLabel(status);
-}
-
-function getStatusTextEn(status: string): string {
-  return status;
-}
-
-function getPriorityText(priority: string): string {
-  const priorityMap: { [key: string]: string } = {
-    'low': 'Низкий',
-    'medium': 'Средний',
-    'high': 'Высокий',
-    'critical': 'Критический'
+function getPriorityText(priority: string | null | undefined): string {
+  const map: Record<string, string> = {
+    low: "Низкий",
+    medium: "Средний",
+    high: "Высокий",
+    critical: "Критический",
+    urgent: "Срочный",
   };
-  return priorityMap[priority] || priority;
-}
-
-function getPriorityTextEn(priority: string): string {
-  const priorityMap: { [key: string]: string } = {
-    'low': 'Low',
-    'medium': 'Medium',
-    'high': 'High',
-    'critical': 'Critical'
-  };
-  return priorityMap[priority] || priority;
+  return priority ? map[priority] ?? priority : "";
 }
 
 function getMaintenanceStatusText(status: string): string {
+  if (status === "scheduled") return "Запланировано";
+  if (status === "pending") return "Ожидает";
   return maintenanceStatusLabel(status);
 }
 
-function getMaintenanceStatusTextEn(status: string): string {
-  return status;
+function buildTableSection(title: string, headers: string[], rows: string[][]): string {
+  if (rows.length === 0) return "";
+  const head = headers.map((h) => `<th>${escapeHtml(h)}</th>`).join("");
+  const body = rows
+    .map(
+      (row) =>
+        `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`
+    )
+    .join("");
+  return `
+    <section style="margin-bottom:24px;">
+      <h2 style="font-size:16px;margin:0 0 8px;color:#1e3a5f;">${escapeHtml(title)}</h2>
+      <table style="width:100%;border-collapse:collapse;font-size:11px;">
+        <thead><tr style="background:#e8f0fe;">${head}</tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+    </section>
+  `;
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function buildReportHtml(data: ExportData, title: string): string {
+  const taskRows = data.tasks.map((task) => [
+    String(task.id),
+    task.title ?? "",
+    taskStatusLabel(task.status),
+    getPriorityText(task.priority),
+    task.equipmentId ?? "",
+    formatRuDate(task.dueDate),
+    task.createdBy ?? "",
+    formatRuDate(task.createdAt),
+  ]);
+
+  const remarkRows = data.remarks.map((remark) => [
+    String(remark.id),
+    remark.title ?? remark.description?.slice(0, 80) ?? "",
+    remark.status,
+    remark.equipmentName ?? "",
+    remark.type ?? "",
+    remark.reportedBy ?? "",
+    formatRuDate(remark.createdAt),
+  ]);
+
+  const maintenanceRows = data.maintenance.map((item) => [
+    String(item.id),
+    item.equipmentName ?? "",
+    item.maintenanceType ?? "",
+    getMaintenanceStatusText(item.status),
+    formatRuDate(item.scheduledDate),
+    item.responsible ?? "",
+  ]);
+
+  const equipmentRows = data.equipment.map((item) => [
+    item.id,
+    item.name ?? "",
+    item.type ?? "",
+    item.status ?? "",
+    item.location ?? "",
+    formatRuDate(item.installationDate),
+  ]);
+
+  return `
+    <div style="font-family:'Segoe UI',Arial,sans-serif;color:#111;padding:24px;background:#fff;">
+      <h1 style="font-size:20px;margin:0 0 6px;">${escapeHtml(title)}</h1>
+      <p style="margin:0 0 20px;color:#555;font-size:12px;">
+        Дата формирования: ${formatRuDate(new Date())}
+      </p>
+      ${buildTableSection("Задачи", ["ID", "Название", "Статус", "Приоритет", "Оборудование", "Срок", "Создал", "Создана"], taskRows)}
+      ${buildTableSection("Замечания", ["ID", "Текст", "Статус", "Оборудование", "Источник", "Автор", "Дата"], remarkRows)}
+      ${buildTableSection("Техобслуживание", ["ID", "Оборудование", "Тип ТО", "Статус", "Плановая дата", "Ответственный"], maintenanceRows)}
+      ${buildTableSection("Оборудование", ["ID", "Название", "Тип", "Статус", "Расположение", "Установлено"], equipmentRows)}
+    </div>
+  `;
+}
+
+export async function exportToPDF(data: ExportData, title: string): Promise<void> {
+  const container = document.createElement("div");
+  container.style.cssText =
+    "position:fixed;left:-10000px;top:0;width:794px;background:#ffffff;";
+  container.innerHTML = buildReportHtml(data, title);
+  document.body.appendChild(container);
+
+  try {
+    const canvas = await html2canvas(container, {
+      scale: 2,
+      useCORS: true,
+      backgroundColor: "#ffffff",
+    });
+
+    const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const imgWidth = pageWidth;
+    const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+    let offsetY = 0;
+    let page = 0;
+
+    while (offsetY < imgHeight) {
+      if (page > 0) pdf.addPage();
+      pdf.addImage(
+        canvas.toDataURL("image/png"),
+        "PNG",
+        0,
+        -offsetY,
+        imgWidth,
+        imgHeight
+      );
+      offsetY += pageHeight;
+      page += 1;
+    }
+
+    pdf.save(reportFilename("otchet_sistema", "pdf"));
+  } finally {
+    document.body.removeChild(container);
+  }
+}
+
+export function exportToExcel(data: ExportData, _title: string): void {
+  const workbook = XLSX.utils.book_new();
+
+  if (data.tasks.length > 0) {
+    const taskData = data.tasks.map((task) => ({
+      ID: task.id,
+      Название: task.title ?? "",
+      Описание: task.description ?? "",
+      Статус: taskStatusLabel(task.status),
+      Приоритет: getPriorityText(task.priority),
+      Оборудование: task.equipmentId ?? "",
+      "Тип ТО": task.maintenanceType ?? "",
+      "Срок выполнения": formatRuDate(task.dueDate),
+      Создал: task.createdBy ?? "",
+      "Дата создания": formatRuDate(task.createdAt),
+      Изменил: task.modifiedBy ?? "",
+      "Дата изменения": formatRuDate(task.modifiedAt),
+      Закрыл: task.closedBy ?? "",
+      "Дата закрытия": formatRuDate(task.closedAt),
+    }));
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(taskData), "Задачи");
+  }
+
+  if (data.remarks.length > 0) {
+    const remarkData = data.remarks.map((remark) => ({
+      ID: remark.id,
+      Название: remark.title ?? "",
+      Описание: remark.description ?? "",
+      Статус: remark.status,
+      Приоритет: remark.priority ?? "",
+      Тип: remark.type ?? "",
+      "Оборудование ID": remark.equipmentId ?? "",
+      Оборудование: remark.equipmentName ?? "",
+      Создал: remark.reportedBy ?? "",
+      "Дата создания": formatRuDate(remark.createdAt),
+      Изменил: remark.lastModifiedBy ?? "",
+      "Дата изменения": formatRuDate(remark.updatedAt),
+      Закрыл: remark.resolvedBy ?? "",
+      "Дата закрытия": formatRuDate(remark.resolvedAt),
+    }));
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(remarkData), "Замечания");
+  }
+
+  if (data.maintenance.length > 0) {
+    const maintenanceData = data.maintenance.map((item) => ({
+      ID: item.id,
+      "Оборудование ID": item.equipmentId ?? "",
+      Оборудование: item.equipmentName ?? "",
+      "Тип ТО": item.maintenanceType ?? "",
+      Статус: getMaintenanceStatusText(item.status),
+      Приоритет: item.priority ?? "",
+      "Плановая дата": formatRuDate(item.scheduledDate),
+      "Дата выполнения": formatRuDate(item.completedDate),
+      Ответственный: item.responsible ?? "",
+      Заметки: item.notes ?? "",
+      Длительность: item.duration ?? "",
+      "Дата создания": formatRuDate(item.createdAt),
+      "Дата обновления": formatRuDate(item.updatedAt),
+    }));
+    XLSX.utils.book_append_sheet(
+      workbook,
+      XLSX.utils.json_to_sheet(maintenanceData),
+      "Техобслуживание"
+    );
+  }
+
+  if (data.equipment.length > 0) {
+    const equipmentData = data.equipment.map((item) => ({
+      ID: item.id,
+      Название: item.name ?? "",
+      Тип: item.type ?? "",
+      Производитель: item.manufacturer ?? "",
+      Модель: item.model ?? "",
+      "Серийный номер": item.serialNumber ?? "",
+      Расположение: item.location ?? "",
+      Статус: item.status ?? "",
+      "Дата установки": formatRuDate(item.installationDate),
+      Описание: item.description ?? "",
+    }));
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(equipmentData), "Оборудование");
+  }
+
+  if (workbook.SheetNames.length === 0) {
+    XLSX.utils.book_append_sheet(
+      workbook,
+      XLSX.utils.aoa_to_sheet([["Нет данных за выбранный период"]]),
+      "Отчёт"
+    );
+  }
+
+  const buffer = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+  saveAs(
+    new Blob([buffer], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    }),
+    reportFilename("otchet_sistema", "xlsx")
+  );
+}
+
+export function exportToCSV(data: ExportData, title: string): void {
+  const rows: Array<Array<string | number | null | undefined>> = [
+    [title],
+    [`Дата формирования: ${formatRuDate(new Date())}`],
+    [],
+  ];
+
+  if (data.tasks.length > 0) {
+    rows.push(["ЗАДАЧИ"]);
+    rows.push([
+      "ID",
+      "Название",
+      "Статус",
+      "Приоритет",
+      "Оборудование",
+      "Срок выполнения",
+      "Создал",
+      "Дата создания",
+    ]);
+    for (const task of data.tasks) {
+      rows.push([
+        task.id,
+        task.title ?? "",
+        taskStatusLabel(task.status),
+        getPriorityText(task.priority),
+        task.equipmentId ?? "",
+        formatRuDate(task.dueDate),
+        task.createdBy ?? "",
+        formatRuDate(task.createdAt),
+      ]);
+    }
+    rows.push([]);
+  }
+
+  if (data.remarks.length > 0) {
+    rows.push(["ЗАМЕЧАНИЯ"]);
+    rows.push(["ID", "Название", "Статус", "Оборудование", "Источник", "Создал", "Дата создания"]);
+    for (const remark of data.remarks) {
+      rows.push([
+        remark.id,
+        remark.title ?? remark.description?.slice(0, 120) ?? "",
+        remark.status,
+        remark.equipmentName ?? "",
+        remark.type ?? "",
+        remark.reportedBy ?? "",
+        formatRuDate(remark.createdAt),
+      ]);
+    }
+    rows.push([]);
+  }
+
+  if (data.maintenance.length > 0) {
+    rows.push(["ТЕХНИЧЕСКОЕ ОБСЛУЖИВАНИЕ"]);
+    rows.push(["ID", "Оборудование", "Тип ТО", "Статус", "Плановая дата", "Ответственный"]);
+    for (const item of data.maintenance) {
+      rows.push([
+        item.id,
+        item.equipmentName ?? "",
+        item.maintenanceType ?? "",
+        getMaintenanceStatusText(item.status),
+        formatRuDate(item.scheduledDate),
+        item.responsible ?? "",
+      ]);
+    }
+  }
+
+  downloadTextFile(
+    UTF8_BOM + rowsToCsv(rows),
+    reportFilename("otchet_sistema", "csv"),
+    "text/csv;charset=utf-8"
+  );
 }

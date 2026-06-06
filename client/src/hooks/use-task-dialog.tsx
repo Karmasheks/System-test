@@ -51,6 +51,8 @@ import { cn } from "@/lib/utils";
 import { taskStatusColors } from "@/lib/badge-colors";
 import { SubdivisionPicker } from "@/components/subdivision-picker";
 import { useSubdivisions } from "@/hooks/use-subdivisions";
+import { canAccessSubdivision } from "@shared/subdivision-scope";
+import { equipmentOptionLabel } from "@/lib/equipment-label";
 
 const taskTypeCodes = TASK_TYPES.map((t) => t.code) as [
   (typeof TASK_TYPES)[number]["code"],
@@ -133,6 +135,8 @@ interface TaskTreeResponse {
 interface OpenCreateOptions {
   parentTaskId?: number;
   taskType?: TaskTypeCode;
+  dueDate?: Date;
+  subdivisionId?: number;
 }
 
 interface TaskDialogContextType {
@@ -186,7 +190,9 @@ function resolveMaintenanceType(data: TaskFormData): string | undefined {
 
 export function TaskDialogProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
-  const { canConvertTaskToServiceRequest, canCreateTasks, canProcessTasks, isAdmin } = useAccessControl();
+  const { canConvertTaskToServiceRequest, canCreateTasks, canProcessTasks, isAdmin, subdivisionScope } =
+    useAccessControl();
+  const scope = subdivisionScope();
   const [, setLocation] = useLocation();
   const search = useSearch();
   const highlightCommentId = useMemo(() => {
@@ -225,6 +231,22 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
     queryKey: ["/api/equipment"],
     enabled: open,
   });
+
+  const allowedSubdivisionIds = useMemo(() => {
+    if (!scope || scope.viewAll) return undefined;
+    return scope.ids;
+  }, [scope]);
+
+  const filteredEquipment = useMemo(() => {
+    if (subdivisionId) {
+      const subId = Number(subdivisionId);
+      return equipment.filter((eq) => eq.subdivisionId === subId);
+    }
+    if (scope && !scope.viewAll) {
+      return equipment.filter((eq) => canAccessSubdivision(scope, eq.subdivisionId));
+    }
+    return editingTask ? equipment : [];
+  }, [equipment, subdivisionId, scope, editingTask]);
 
   const { data: teamUsers = [] } = useTeamUsers();
 
@@ -366,13 +388,27 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
   const watchedStatus = form.watch("status");
   const watchedEquipmentId = form.watch("equipmentId");
 
+  const handleSubdivisionChange = useCallback(
+    (value: string) => {
+      setSubdivisionId(value);
+      const currentEq = form.getValues("equipmentId");
+      if (!currentEq || currentEq === "none") return;
+      const eq = equipment.find((e) => e.id === currentEq);
+      if (value && eq?.subdivisionId !== Number(value)) {
+        form.setValue("equipmentId", "");
+      }
+    },
+    [equipment, form]
+  );
+
   useEffect(() => {
+    if (subdivisionId) return;
     if (!watchedEquipmentId || watchedEquipmentId === "none") return;
     const eq = equipment.find((e) => e.id === watchedEquipmentId);
     if (eq?.subdivisionId) {
       setSubdivisionId(String(eq.subdivisionId));
     }
-  }, [watchedEquipmentId, equipment]);
+  }, [watchedEquipmentId, equipment, subdivisionId]);
   const isCompletingTask = Boolean(
     editingTask && watchedStatus === "completed" && editingTask.status !== "completed"
   );
@@ -439,11 +475,18 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
       setCompletionWorkComment("");
       setCompletionDurationHours("");
       setCompletionDurationMinutes("");
-      setSubdivisionId(user?.subdivisionId ? String(user.subdivisionId) : "");
+      setSubdivisionId(
+        options?.subdivisionId != null
+          ? String(options.subdivisionId)
+          : user?.subdivisionId
+            ? String(user.subdivisionId)
+            : ""
+      );
       form.reset({
         ...defaultFormValues(),
         assigneeId: "",
         taskType: options?.taskType ?? "task",
+        dueDate: options?.dueDate,
       });
       setOpen(true);
     },
@@ -511,8 +554,10 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
       queryClient.invalidateQueries({ queryKey: ["/api/tasks/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/equipment"] });
       queryClient.invalidateQueries({ queryKey: ["/api/notifications"] });
       window.dispatchEvent(new CustomEvent("taskCreated"));
+      window.dispatchEvent(new CustomEvent("equipmentUpdated"));
       close();
       toast({ title: "Задача создана", description: "Задача успешно создана" });
     },
@@ -565,8 +610,10 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
     onSuccess: async () => {
       queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
       queryClient.invalidateQueries({ queryKey: ["/api/tasks/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/equipment"] });
       queryClient.invalidateQueries({ queryKey: ["/api/warehouse/parts"] });
       queryClient.invalidateQueries({ queryKey: ["/api/warehouse/activity"] });
+      window.dispatchEvent(new CustomEvent("equipmentUpdated"));
       if (treeRootId) {
         queryClient.invalidateQueries({ queryKey: ["/api/tasks", treeRootId, "tree"] });
       }
@@ -817,7 +864,12 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
       taskType: data.taskType,
       priority: data.priority,
       status: editingTask ? data.status : "pending",
-      dueDate: editingTask && isAdmin ? data.dueDate || null : null,
+      dueDate:
+        isAdmin && data.dueDate
+          ? data.dueDate
+          : editingTask
+            ? null
+            : null,
       reminderDate: editingTask ? data.reminderDate || null : null,
       estimatedHours: editingTask && isAdmin ? data.estimatedHours || null : null,
       actualHours: editingTask
@@ -836,6 +888,15 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
         ? { completingTask: true, completionComment: completionWorkComment.trim() }
         : {}),
     };
+
+    if (!editingTask && !subdivisionId) {
+      toast({
+        title: "Выберите подразделение",
+        description: "Сначала укажите подразделение для новой задачи",
+        variant: "destructive",
+      });
+      return;
+    }
 
     if (editingTask) {
       updateTask.mutate(cleanData);
@@ -1097,51 +1158,46 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
                 </p>
               )}
               <fieldset disabled={!canModify} className="space-y-4 border-0 p-0 m-0 min-w-0">
+              <SubdivisionPicker
+                value={subdivisionId}
+                onChange={handleSubdivisionChange}
+                label="Подразделение"
+                required={!editingTask}
+                disabled={!canModify}
+                allowedIds={allowedSubdivisionIds}
+              />
+
               <FormField
                 control={form.control}
                 name="equipmentId"
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Оборудование</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value || ""}>
+                    <Select
+                      onValueChange={field.onChange}
+                      value={field.value || ""}
+                      disabled={!editingTask && !subdivisionId}
+                    >
                       <FormControl>
                         <SelectTrigger>
-                          <SelectValue placeholder="Выберите оборудование" />
+                          <SelectValue
+                            placeholder={
+                              !editingTask && !subdivisionId
+                                ? "Сначала выберите подразделение"
+                                : "Выберите оборудование"
+                            }
+                          />
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
                         <SelectItem value="none">Не связано с оборудованием</SelectItem>
-                        {equipment.map((eq) => (
+                        {filteredEquipment.map((eq) => (
                           <SelectItem key={eq.id} value={eq.id}>
-                            {eq.name} ({eq.type})
+                            {equipmentOptionLabel(eq)}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <SubdivisionPicker
-                value={subdivisionId}
-                onChange={setSubdivisionId}
-                label="Подразделение"
-                disabled={!canModify}
-              />
-              <p className="text-xs text-muted-foreground -mt-2">
-                Привязка к подразделению: из выбранного значения, оборудования или профиля сотрудника.
-              </p>
-
-              <FormField
-                control={form.control}
-                name="description"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Описание</FormLabel>
-                    <FormControl>
-                      <Textarea {...field} placeholder="Что произошло, что нужно сделать..." rows={3} />
-                    </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -1207,6 +1263,20 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
                   )}
                 />
               )}
+
+              <FormField
+                control={form.control}
+                name="description"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Описание</FormLabel>
+                    <FormControl>
+                      <Textarea {...field} placeholder="Что произошло, что нужно сделать..." rows={3} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
               {canManageParticipants && (
                 <div className="rounded-lg border bg-muted/20 p-4 space-y-3">

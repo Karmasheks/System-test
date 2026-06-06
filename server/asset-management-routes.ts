@@ -42,6 +42,7 @@ import { getEmployeeWorkReport } from "./employee-work-report";
 import {
   createWarehousePartFromBudget,
   addWarehouseMovement,
+  getWarehouseReport,
 } from "./warehouse-storage";
 
 async function syncBudgetWithWarehouse(
@@ -486,6 +487,27 @@ export function registerAssetManagementRoutes(
       res.json(report);
     } catch {
       res.status(500).json({ message: "Ошибка формирования отчёта по сотрудникам" });
+    }
+  });
+
+  app.get("/api/reports/warehouse", authenticate, async (req, res) => {
+    try {
+      const { from, to, subdivisionId } = req.query;
+      const subId =
+        subdivisionId != null && subdivisionId !== ""
+          ? Number(subdivisionId)
+          : undefined;
+      const scope = await getSubdivisionScopeForRequest(req);
+      res.json(
+        await getWarehouseReport({
+          from: from as string | undefined,
+          to: to as string | undefined,
+          subdivisionId: subId && !Number.isNaN(subId) ? subId : undefined,
+          scope: scope ?? undefined,
+        })
+      );
+    } catch {
+      res.status(500).json({ message: "Ошибка формирования отчёта по складу" });
     }
   });
 

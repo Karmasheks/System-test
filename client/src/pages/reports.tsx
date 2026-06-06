@@ -19,6 +19,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { EquipmentStatusBadge } from "@/components/equipment-status-badge";
+import { EQUIPMENT_STATUS_LABELS } from "@shared/equipment-status-constants";
 import { Progress } from "@/components/ui/progress";
 
 import { 
@@ -39,12 +41,18 @@ import {
   FileSpreadsheet,
   FileImage,
   Printer,
-  Users
+  Users,
+  Wallet,
+  Package
 } from "lucide-react";
 import { format, startOfMonth, endOfMonth, subMonths, addDays } from "date-fns";
 import { ru } from "date-fns/locale";
 import { exportToPDF, exportToExcel, exportToCSV, ExportData } from "@/utils/reportExport";
+import { downloadJson } from "@/lib/export-utils";
+import { useToast } from "@/hooks/use-toast";
 import { EmployeeWorkReportPanel } from "@/components/reports/employee-work-report-panel";
+import { BudgetReportPanel } from "@/components/reports/budget-report-panel";
+import { WarehouseReportPanel } from "@/components/reports/warehouse-report-panel";
 
 export default function Reports() {
   const { user, isLoading, isAuthenticated } = useAuth();
@@ -60,6 +68,7 @@ export default function Reports() {
   const { equipment: equipmentData } = useEquipmentData();
   const { remarks } = useRemarksData();
   const [, setLocation] = useLocation();
+  const { toast } = useToast();
 
   // Загрузка данных по задачам
   const { data: tasks = [] } = useQuery<Task[]>({
@@ -254,77 +263,63 @@ export default function Reports() {
     return null;
   }
 
-  // Функции экспорта
-  const exportSimpleCsv = (data: any[], filename: string) => {
-    const csvContent = [
-      Object.keys(data[0]).join(','),
-      ...data.map(row => Object.values(row).join(','))
-    ].join('\n');
-    
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${filename}_${format(new Date(), 'dd-MM-yyyy')}.csv`;
-    a.click();
-    window.URL.revokeObjectURL(url);
-  };
-
-  const exportToJSON = (data: any, filename: string) => {
-    const jsonString = JSON.stringify(data, null, 2);
-    const blob = new Blob([jsonString], { type: 'application/json' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${filename}_${format(new Date(), 'dd-MM-yyyy')}.json`;
-    a.click();
-    window.URL.revokeObjectURL(url);
-  };
-
-  const handleExport = (exportFormat: string) => {
+  const handleExport = async (exportFormat: string) => {
     setReportLoading(true);
-    
-    setTimeout(() => {
-      const exportData: ExportData = {
-        tasks: scopedTasks || [],
-        remarks: scopedRemarks || [],
-        maintenance: scopedMaintenance || [],
-        equipment: scopedEquipment || [],
-      };
 
-      const reportTitle = `Отчет системы управления оборудованием за период ${format(dateRange.from, 'd MMM', { locale: ru })} - ${format(dateRange.to, 'd MMM yyyy', { locale: ru })}`;
+    const exportData: ExportData = {
+      tasks: scopedTasks || [],
+      remarks: scopedRemarks || [],
+      maintenance: scopedMaintenance || [],
+      equipment: scopedEquipment || [],
+    };
 
+    const reportTitle = `Отчёт системы управления оборудованием за период ${format(dateRange.from, "d MMM", { locale: ru })} — ${format(dateRange.to, "d MMM yyyy", { locale: ru })}`;
+
+    try {
       switch (exportFormat) {
         case "csv":
           exportToCSV(exportData, reportTitle);
           break;
-        case 'excel':
+        case "excel":
           exportToExcel(exportData, reportTitle);
           break;
-        case 'pdf':
-          exportToPDF(exportData, reportTitle);
+        case "pdf":
+          await exportToPDF(exportData, reportTitle);
           break;
-        case 'json':
-          exportToJSON({
-            ...exportData,
-            summary: {
-              totalEquipment: scopedEquipment.length,
-              totalTasks: scopedTasks.length,
-              totalRemarks: scopedRemarks.length,
-              totalMaintenance: scopedMaintenance.length,
-              subdivisionFilter: filterLabel,
-              generatedAt: new Date().toISOString(),
-              period: {
-                from: dateRange.from,
-                to: dateRange.to
-              }
-            }
-          }, 'full_report');
+        case "json":
+          downloadJson(
+            {
+              ...exportData,
+              summary: {
+                totalEquipment: scopedEquipment.length,
+                totalTasks: scopedTasks.length,
+                totalRemarks: scopedRemarks.length,
+                totalMaintenance: scopedMaintenance.length,
+                subdivisionFilter: filterLabel,
+                generatedAt: new Date().toISOString(),
+                period: {
+                  from: dateRange.from,
+                  to: dateRange.to,
+                },
+              },
+            },
+            `full_report_${format(new Date(), "dd-MM-yyyy")}.json`
+          );
           break;
       }
-      
+      toast({
+        title: "Отчёт сформирован",
+        description: "Файл загружен на ваш компьютер",
+      });
+    } catch (error) {
+      toast({
+        title: "Ошибка экспорта",
+        description: error instanceof Error ? error.message : "Не удалось сформировать отчёт",
+        variant: "destructive",
+      });
+    } finally {
       setReportLoading(false);
-    }, 500);
+    }
   };
 
   return (
@@ -379,13 +374,13 @@ export default function Reports() {
                         <SelectItem value="csv">
                           <div className="flex items-center">
                             <FileImage className="mr-2 h-4 w-4" />
-                            CSV файл (с кириллицей)
+                            CSV для Excel (UTF-8)
                           </div>
                         </SelectItem>
                         <SelectItem value="pdf">
                           <div className="flex items-center">
                             <FileText className="mr-2 h-4 w-4" />
-                            PDF отчет (базовый)
+                            PDF (кириллица)
                           </div>
                         </SelectItem>
                         <SelectItem value="json">
@@ -442,7 +437,7 @@ export default function Reports() {
                           <SelectContent>
                             <SelectItem value="all">Все статусы</SelectItem>
                             <SelectItem value="active">Активное</SelectItem>
-                            <SelectItem value="maintenance">На ТО</SelectItem>
+                            <SelectItem value="maintenance">{EQUIPMENT_STATUS_LABELS.maintenance}</SelectItem>
                             <SelectItem value="inactive">Неактивное</SelectItem>
                           </SelectContent>
                         </Select>
@@ -502,7 +497,7 @@ export default function Reports() {
                           {reportData.statusCounts.maintenance > 0 && (
                             <div className="flex items-center gap-2 text-xs">
                               <Clock className="h-3 w-3 text-yellow-600" />
-                              <span className="text-yellow-600">{reportData.statusCounts.maintenance} на ТО</span>
+                              <span className="text-yellow-600">{reportData.statusCounts.maintenance} {EQUIPMENT_STATUS_LABELS.maintenance.toLowerCase()}</span>
                             </div>
                           )}
                           {reportData.statusCounts.inactive > 0 && (
@@ -600,7 +595,7 @@ export default function Reports() {
 
               {/* Табы с детальными отчетами */}
               <Tabs value={selectedTab} onValueChange={setSelectedTab} className="space-y-6">
-                <TabsList className="grid w-full grid-cols-7">
+                <TabsList className="flex w-full flex-wrap h-auto gap-1">
                   <TabsTrigger value="overview" className="flex items-center gap-2">
                     <BarChart3 className="h-4 w-4" />
                     Обзор
@@ -627,7 +622,15 @@ export default function Reports() {
                   </TabsTrigger>
                   <TabsTrigger value="user-work" className="flex items-center gap-2">
                     <Users className="h-4 w-4" />
-                    Сотрудники
+                    Работы сотрудников
+                  </TabsTrigger>
+                  <TabsTrigger value="budget" className="flex items-center gap-2">
+                    <Wallet className="h-4 w-4" />
+                    Затраты
+                  </TabsTrigger>
+                  <TabsTrigger value="warehouse" className="flex items-center gap-2">
+                    <Package className="h-4 w-4" />
+                    Склад
                   </TabsTrigger>
                 </TabsList>
 
@@ -690,17 +693,7 @@ export default function Reports() {
                                 <td className="p-2 font-medium">{item.name}</td>
                                 <td className="p-2 text-sm">{item.type}</td>
                                 <td className="p-2">
-                                  <Badge 
-                                    variant={
-                                      item.status === 'active' ? 'default' : 
-                                      item.status === 'maintenance' ? 'secondary' : 
-                                      'destructive'
-                                    }
-                                  >
-                                    {item.status === 'active' ? 'Активно' : 
-                                     item.status === 'maintenance' ? 'На ТО' : 
-                                     'Неактивно'}
-                                  </Badge>
+                                  <EquipmentStatusBadge status={item.status} compact />
                                 </td>
                                 <td className="p-2 text-sm">{item.responsible}</td>
                                 <td className="p-2 text-sm">{item.lastMaintenance}</td>
@@ -1173,6 +1166,14 @@ export default function Reports() {
 
                 <TabsContent value="user-work">
                   <EmployeeWorkReportPanel />
+                </TabsContent>
+
+                <TabsContent value="budget">
+                  <BudgetReportPanel />
+                </TabsContent>
+
+                <TabsContent value="warehouse">
+                  <WarehouseReportPanel />
                 </TabsContent>
               </Tabs>
         </div>

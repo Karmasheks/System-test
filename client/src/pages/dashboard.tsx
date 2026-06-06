@@ -485,7 +485,7 @@ export default function Dashboard() {
                         <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Всего оборудования</p>
                         <p className="text-3xl font-bold text-gray-900 dark:text-gray-100">{equipmentData.total}</p>
                         <p className="text-sm text-green-600">
-                          {equipmentData.active} активно, {equipmentData.maintenance} на ТО
+                          {equipmentData.active} активно, {equipmentData.maintenance} на ТО / в ремонте
                         </p>
                       </div>
                     </div>

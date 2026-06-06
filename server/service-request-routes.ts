@@ -90,9 +90,11 @@ import {
 type AuthMiddleware = (req: Request, res: Response, next: Function) => void;
 type RoleMiddleware = (roles: string[]) => (req: Request, res: Response, next: Function) => void;
 
+const CSV_DELIMITER = ";";
+
 function csvEscape(val: unknown): string {
   const s = String(val ?? "");
-  if (s.includes(",") || s.includes('"') || s.includes("\n")) {
+  if (s.includes(CSV_DELIMITER) || s.includes('"') || s.includes("\n") || s.includes("\r")) {
     return `"${s.replace(/"/g, '""')}"`;
   }
   return s;
@@ -213,7 +215,7 @@ export function registerServiceRequestRoutes(
           "Часы",
           "Комментарий",
           "Закрыта",
-        ].join(",");
+        ].map(csvEscape).join(CSV_DELIMITER);
         const lines = report.map((r) =>
           [
             r.id,
@@ -225,7 +227,7 @@ export function registerServiceRequestRoutes(
             r.closedAt,
           ]
             .map(csvEscape)
-            .join(",")
+            .join(CSV_DELIMITER)
         );
         res.setHeader("Content-Type", "text/csv; charset=utf-8");
         res.setHeader(

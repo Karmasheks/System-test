@@ -57,10 +57,22 @@ export async function findTaskBySource(sourceType: TaskSourceType, sourceId: num
   return row;
 }
 
+async function syncEquipmentAfterLinkedTask(input: CreateLinkedTaskInput): Promise<void> {
+  if (!input.equipmentId) return;
+  const { syncEquipmentOperationalStatus } = await import("./equipment-status-service");
+  await syncEquipmentOperationalStatus(input.equipmentId, {
+    id: input.createdById,
+    name: input.createdBy,
+  });
+}
+
 export async function createLinkedTask(input: CreateLinkedTaskInput): Promise<Task> {
   if (input.sourceId != null) {
     const existing = await findTaskBySource(input.sourceType, input.sourceId);
-    if (existing) return existing;
+    if (existing) {
+      await syncEquipmentAfterLinkedTask(input);
+      return existing;
+    }
   }
 
   const assigneeId = input.assigneeId ?? null;
@@ -102,6 +114,8 @@ export async function createLinkedTask(input: CreateLinkedTaskInput): Promise<Ta
     changedByName: input.createdBy,
     comment: `Создано из источника: ${input.sourceType}`,
   });
+
+  await syncEquipmentAfterLinkedTask(input);
 
   return task;
 }

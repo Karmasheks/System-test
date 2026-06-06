@@ -12,6 +12,7 @@ import {
   type InsertWarehousePart,
 } from "@shared/schema";
 import { DEFAULT_WAREHOUSE_CATEGORIES, warehouseCategoryForBudget } from "@shared/warehouse-constants";
+import { filterBySubdivisionScope, type SubdivisionScope } from "@shared/subdivision-scope";
 import { eq, and, desc } from "drizzle-orm";
 import {
   backfillWriteOffBudgetEntries,
@@ -504,5 +505,120 @@ export async function getWarehouseDashboardStats() {
     zeroStockParts: zeroStock.slice(0, 10),
     lowStockParts: lowStock.slice(0, 10),
     alerts: alerts.slice(0, 10),
+  };
+}
+
+function parseReportDateRange(from?: string, to?: string) {
+  const fromDate = from ? new Date(`${from}T00:00:00`) : null;
+  const toDate = to ? new Date(`${to}T23:59:59.999`) : null;
+  return { fromDate, toDate };
+}
+
+function warehouseStockStatus(quantity: number, minStock: number): "zero" | "low" | "ok" {
+  if (quantity <= 0) return "zero";
+  if (minStock > 0 && quantity <= minStock) return "low";
+  return "ok";
+}
+
+export async function getWarehouseReport(filters?: {
+  from?: string;
+  to?: string;
+  subdivisionId?: number;
+  scope?: SubdivisionScope;
+}) {
+  const { fromDate, toDate } = parseReportDateRange(filters?.from, filters?.to);
+
+  let parts = await db.select().from(warehouseParts);
+  if (filters?.scope) {
+    parts = filterBySubdivisionScope(parts, filters.scope);
+  }
+  if (filters?.subdivisionId != null) {
+    parts = parts.filter((p) => p.subdivisionId === filters.subdivisionId);
+  }
+  const partIds = new Set(parts.map((p) => p.id));
+  const partById = new Map(parts.map((p) => [p.id, p]));
+
+  let movements = await db
+    .select()
+    .from(warehouseMovements)
+    .orderBy(desc(warehouseMovements.createdAt));
+  movements = movements.filter((m) => partIds.has(m.partId));
+  if (fromDate || toDate) {
+    movements = movements.filter((m) => {
+      const d = new Date(m.createdAt);
+      if (fromDate && d < fromDate) return false;
+      if (toDate && d > toDate) return false;
+      return true;
+    });
+  }
+
+  const zeroStock = parts.filter((p) => (p.quantity ?? 0) <= 0);
+  const lowStock = parts.filter(
+    (p) =>
+      (p.quantity ?? 0) > 0 &&
+      (p.minStock ?? 0) > 0 &&
+      (p.quantity ?? 0) <= (p.minStock ?? 0)
+  );
+  const alerts = (await listUnresolvedStockAlerts()).filter((a) => partIds.has(a.partId));
+
+  const incomingQuantity = movements
+    .filter((m) => m.type === "in")
+    .reduce((sum, m) => sum + (m.quantity ?? 0), 0);
+  const outgoingQuantity = movements
+    .filter((m) => m.type === "out")
+    .reduce((sum, m) => sum + (m.quantity ?? 0), 0);
+  const estimatedStockValue = parts.reduce(
+    (sum, p) => sum + (p.quantity ?? 0) * (p.unitCost ?? 0),
+    0
+  );
+
+  return {
+    period: { from: filters?.from ?? null, to: filters?.to ?? null },
+    subdivisionId: filters?.subdivisionId ?? null,
+    summary: {
+      totalParts: parts.length,
+      zeroStockCount: zeroStock.length,
+      lowStockCount: lowStock.length,
+      unresolvedAlerts: alerts.length,
+      movementsCount: movements.length,
+      incomingQuantity: Math.round(incomingQuantity * 100) / 100,
+      outgoingQuantity: Math.round(outgoingQuantity * 100) / 100,
+      estimatedStockValue: Math.round(estimatedStockValue * 100) / 100,
+    },
+    parts: parts.map((p) => ({
+      id: p.id,
+      name: p.name,
+      categoryName: p.categoryName,
+      quantity: p.quantity,
+      minStock: p.minStock,
+      reservedQuantity: p.reservedQuantity,
+      unitCost: p.unitCost,
+      equipmentName: p.equipmentName,
+      subdivisionName: p.subdivisionName,
+      storageLocation: p.storageLocation,
+      stockStatus: warehouseStockStatus(p.quantity ?? 0, p.minStock ?? 0),
+    })),
+    movements: movements.slice(0, 300).map((m) => ({
+      id: m.id,
+      partId: m.partId,
+      partName: partById.get(m.partId)?.name ?? "",
+      type: m.type,
+      typeLabel: m.type === "in" ? "Приход" : "Списание",
+      quantity: m.quantity,
+      equipmentName: m.equipmentName,
+      destination: m.destination,
+      comment: m.comment,
+      performedByName: m.performedByName,
+      createdAt: m.createdAt,
+    })),
+    alerts: alerts.map((a) => ({
+      id: a.id,
+      partId: a.partId,
+      partName: a.part?.name ?? "",
+      alertType: a.alertType,
+      quantity: a.part?.quantity ?? 0,
+      minStock: a.part?.minStock ?? 0,
+      createdAt: a.createdAt,
+    })),
   };
 }

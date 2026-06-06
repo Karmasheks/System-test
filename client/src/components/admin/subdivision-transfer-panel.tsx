@@ -15,7 +15,9 @@ type Props = {
   entityId: string | number;
   entityLabel?: string;
   currentSubdivisionId?: number | null;
+  currentSubdivisionName?: string | null;
   repairSubdivisionId?: number | null;
+  repairSubdivisionName?: string | null;
   homeSubdivisionName?: string | null;
   onSuccess?: () => void;
 };
@@ -31,7 +33,9 @@ export function SubdivisionTransferPanel({
   entityId,
   entityLabel,
   currentSubdivisionId,
+  currentSubdivisionName,
   repairSubdivisionId,
+  repairSubdivisionName,
   homeSubdivisionName,
   onSuccess,
 }: Props) {
@@ -45,6 +49,10 @@ export function SubdivisionTransferPanel({
     queryClient.invalidateQueries({ queryKey: ["/api/equipment"] });
     queryClient.invalidateQueries({ queryKey: ["/api/warehouse/parts"] });
     queryClient.invalidateQueries({ queryKey: ["/api/users"] });
+    if (entityType === "equipment") {
+      queryClient.invalidateQueries({ queryKey: ["/api/equipment", entityId, "activity"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/equipment", entityId, "link-history"] });
+    }
     onSuccess?.();
   };
 
@@ -116,42 +124,52 @@ export function SubdivisionTransferPanel({
   });
 
   const onRepair = entityType === "equipment" && repairSubdivisionId != null;
+  const currentLabel =
+    currentSubdivisionName?.trim() ||
+    (currentSubdivisionId ? `Подразделение #${currentSubdivisionId}` : "не указано");
 
   return (
-    <div className="space-y-4 rounded-md border border-amber-200 bg-amber-50/50 p-4 dark:border-amber-900 dark:bg-amber-950/20">
-      <div className="flex items-center gap-2">
-        <ArrowRightLeft className="h-4 w-4 text-amber-700 dark:text-amber-400" />
-        <h4 className="font-medium text-sm">Перенос между подразделениями</h4>
-      </div>
-      <p className="text-xs text-muted-foreground">
-        Доступно системному администратору. Текущее подразделение:{" "}
-        {currentSubdivisionId ? `#${currentSubdivisionId}` : "не указано"}
-        {onRepair && homeSubdivisionName ? ` · домашнее: ${homeSubdivisionName}` : ""}
-      </p>
-
-      <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
-        <div className="flex-1 space-y-1">
-          <Label className="text-xs">Целевое подразделение</Label>
-          <SubdivisionPicker value={targetSubdivisionId} onChange={setTargetSubdivisionId} />
+    <div className="space-y-4">
+      <div className="rounded-md border border-amber-200 bg-amber-50/50 p-4 dark:border-amber-900 dark:bg-amber-950/20 space-y-3">
+        <div className="flex items-center gap-2">
+          <ArrowRightLeft className="h-4 w-4 text-amber-700 dark:text-amber-400" />
+          <h4 className="font-medium text-sm">Перенос между подразделениями</h4>
         </div>
-        <Button
-          size="sm"
-          onClick={() => transferMutation.mutate()}
-          disabled={transferMutation.isPending || !targetSubdivisionId}
-        >
-          Перенести
-        </Button>
+        <p className="text-xs text-muted-foreground">
+          Доступно системному администратору. Текущее подразделение: {currentLabel}
+          {homeSubdivisionName && homeSubdivisionName !== currentSubdivisionName
+            ? ` · домашнее: ${homeSubdivisionName}`
+            : ""}
+        </p>
+
+        <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
+          <div className="flex-1 space-y-1">
+            <Label className="text-xs">Целевое подразделение</Label>
+            <SubdivisionPicker value={targetSubdivisionId} onChange={setTargetSubdivisionId} />
+          </div>
+          <Button
+            size="sm"
+            onClick={() => transferMutation.mutate()}
+            disabled={transferMutation.isPending || !targetSubdivisionId}
+          >
+            Перенести
+          </Button>
+        </div>
       </div>
 
       {entityType === "equipment" && (
-        <div className="space-y-3 border-t pt-3">
+        <div className="rounded-md border border-orange-200 bg-orange-50/50 p-4 dark:border-orange-900 dark:bg-orange-950/20 space-y-3">
+          <div className="flex items-center gap-2">
+            <Wrench className="h-4 w-4 text-orange-600" />
+            <h4 className="font-medium text-sm">Ремонт в другом подразделении</h4>
+          </div>
+
           {onRepair ? (
-            <div className="flex flex-wrap items-center gap-2">
-              <Wrench className="h-4 w-4 text-orange-600" />
-              <span className="text-sm">
-                На ремонте в подразделении #{repairSubdivisionId}
+            <div className="space-y-2">
+              <p className="text-sm">
+                Сейчас на ремонте в «{repairSubdivisionName ?? `подразделение #${repairSubdivisionId}`}»
                 {homeSubdivisionName ? ` (из «${homeSubdivisionName}»)` : ""}
-              </span>
+              </p>
               <Button
                 size="sm"
                 variant="outline"
@@ -164,10 +182,9 @@ export function SubdivisionTransferPanel({
             </div>
           ) : (
             <>
-              <div className="flex items-center gap-2">
-                <Wrench className="h-4 w-4 text-orange-600" />
-                <Label className="text-sm font-medium">Отправить на ремонт в другое подразделение</Label>
-              </div>
+              <p className="text-xs text-muted-foreground">
+                Оборудование временно переводится в другое подразделение для ремонта. Домашнее подразделение сохраняется.
+              </p>
               <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
                 <div className="flex-1 space-y-1">
                   <Label className="text-xs">Подразделение ремонта</Label>

@@ -127,6 +127,37 @@ export function EquipmentImageGallery({ urls }: { urls?: string[] | null }) {
   );
 }
 
+export function EquipmentImageThumbnail({
+  url,
+  className = "w-10 h-10",
+}: {
+  url?: string | null;
+  className?: string;
+}) {
+  const [failed, setFailed] = useState(false);
+  const trimmed = url?.trim();
+
+  if (!trimmed || failed) {
+    return (
+      <div
+        className={`${className} rounded object-cover border dark:border-gray-700 bg-gray-100 dark:bg-gray-800 flex items-center justify-center shrink-0`}
+      >
+        <ImageIcon className="h-4 w-4 text-gray-400" />
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={trimmed}
+      alt=""
+      className={`${className} rounded object-cover border dark:border-gray-700 shrink-0`}
+      loading="lazy"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
 function EquipmentImagePreview({ url, index }: { url: string; index: number }) {
   const [failed, setFailed] = useState(false);
 
@@ -146,7 +177,7 @@ function EquipmentImagePreview({ url, index }: { url: string; index: number }) {
         <img
           src={url}
           alt={`Фото оборудования ${index + 1}`}
-          className="w-full h-full object-cover"
+          className="w-full h-full object-contain"
           loading="lazy"
           onError={() => setFailed(true)}
         />
