@@ -1,6 +1,14 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useToast } from '@/hooks/use-toast';
 import type { MaintenanceRecord, InsertMaintenanceRecord } from '../../../shared/schema';
+
+function syncMaintenanceEverywhere(queryClient: QueryClient) {
+  queryClient.invalidateQueries({ queryKey: ['/api/maintenance'] });
+  queryClient.invalidateQueries({ queryKey: ['/api/calendar/events'] });
+  queryClient.invalidateQueries({ queryKey: ['/api/calendar/stats'] });
+  queryClient.invalidateQueries({ queryKey: ['/api/tasks'] });
+  window.dispatchEvent(new CustomEvent('maintenanceDataChanged'));
+}
 
 export function useMaintenanceApi() {
   const queryClient = useQueryClient();
@@ -42,7 +50,7 @@ export function useMaintenanceApi() {
       return response.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/maintenance'] });
+      syncMaintenanceEverywhere(queryClient);
       toast({
         title: "Успешно",
         description: "Запись ТО создана",
@@ -87,7 +95,7 @@ export function useMaintenanceApi() {
       return response.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/maintenance'] });
+      syncMaintenanceEverywhere(queryClient);
       toast({
         title: "Успешно",
         description: "Запись ТО обновлена",
@@ -120,7 +128,7 @@ export function useMaintenanceApi() {
       return response.json();
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/maintenance'] });
+      syncMaintenanceEverywhere(queryClient);
       toast({
         title: "Успешно",
         description: "Запись ТО удалена",

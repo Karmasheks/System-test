@@ -1,13 +1,18 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Helmet } from "react-helmet";
 import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
+import { useAccessControl } from "@/hooks/use-access-control";
+import { useSubdivisionFilter } from "@/hooks/use-subdivision-filter";
+import { SubdivisionFilterSelect } from "@/components/subdivision-filter-select";
+import { SubdivisionsPanel } from "@/components/admin/subdivisions-panel";
+import { equipmentIdsInScope } from "@/lib/subdivision-filter";
+import type { Task } from "@/types/api";
+import type { Equipment as EquipmentRecord } from "@shared/schema";
 import { useEquipmentData } from "@/hooks/use-equipment-data";
 import { useRemarksData } from "@/hooks/use-remarks-data";
 import { useMaintenanceData } from "@/hooks/use-maintenance-data";
-import { Sidebar } from "@/components/layout/sidebar";
-import { Header } from "@/components/layout/header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -34,30 +39,36 @@ import {
   Eye,
   FileSpreadsheet,
   FileImage,
-  Printer
+  Printer,
+  Users
 } from "lucide-react";
 import { format, startOfMonth, endOfMonth, subMonths, addDays } from "date-fns";
 import { ru } from "date-fns/locale";
 import { exportToPDF, exportToExcel, exportToCSV, ExportData } from "@/utils/reportExport";
+import { EmployeeWorkReportPanel } from "@/components/reports/employee-work-report-panel";
 
 export default function Reports() {
   const { user, isLoading, isAuthenticated } = useAuth();
+  const { isAdmin } = useAccessControl();
+  const {
+    filterValue,
+    setFilterValue,
+    filterSubdivisionId,
+    availableSubdivisions,
+    showFilter,
+    filterLabel,
+  } = useSubdivisionFilter();
   const { equipment: equipmentData } = useEquipmentData();
   const { remarks } = useRemarksData();
   const { maintenanceRecords } = useMaintenanceData();
   const [, setLocation] = useLocation();
 
   // Загрузка данных по задачам
-  const { data: tasks = [] } = useQuery({
-    queryKey: ['/api/tasks'],
-    enabled: !!user
+  const { data: tasks = [] } = useQuery<Task[]>({
+    queryKey: ["/api/tasks"],
+    enabled: !!user,
   });
 
-  // Загрузка статистики задач
-  const { data: taskStats = { total: 0, pending: 0, inProgress: 0, completed: 0, overdue: 0 } } = useQuery({
-    queryKey: ['/api/tasks/stats']
-  });
-  
   // Состояния фильтрации
   const [selectedTab, setSelectedTab] = useState("overview");
   const [dateRange, setDateRange] = useState({
@@ -67,6 +78,134 @@ export default function Reports() {
   const [equipmentFilter, setEquipmentFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [reportLoading, setReportLoading] = useState(false);
+
+  const equipmentWithSubdivision = equipmentData as (EquipmentRecord & { subdivisionId?: number | null })[];
+
+  const scopedEquipment = useMemo(() => {
+    if (filterSubdivisionId == null) return equipmentWithSubdivision;
+    return equipmentWithSubdivision.filter((e) => e.subdivisionId === filterSubdivisionId);
+  }, [equipmentWithSubdivision, filterSubdivisionId]);
+
+  const scopedEquipmentIds = useMemo(
+    () => equipmentIdsInScope(equipmentWithSubdivision, filterSubdivisionId, null),
+    [equipmentWithSubdivision, filterSubdivisionId]
+  );
+
+  const scopedTasks = useMemo(() => {
+    if (filterSubdivisionId == null) return tasks;
+    return tasks.filter((t) => t.subdivisionId === filterSubdivisionId);
+  }, [tasks, filterSubdivisionId]);
+
+  const scopedRemarks = useMemo(
+    () =>
+      remarks.filter(
+        (r) =>
+          scopedEquipmentIds.has(r.equipmentId) ||
+          (r as { subdivisionId?: number }).subdivisionId === filterSubdivisionId
+      ),
+    [remarks, scopedEquipmentIds, filterSubdivisionId]
+  );
+
+  const scopedMaintenance = useMemo(
+    () => maintenanceRecords.filter((r) => scopedEquipmentIds.has(r.equipmentId)),
+    [maintenanceRecords, scopedEquipmentIds]
+  );
+
+  const scopedTaskStats = useMemo(
+    () => ({
+      total: scopedTasks.length,
+      pending: scopedTasks.filter((t) => t.status === "pending").length,
+      inProgress: scopedTasks.filter((t) => t.status === "in_progress").length,
+      completed: scopedTasks.filter((t) => t.status === "completed").length,
+      overdue: scopedTasks.filter((t) => {
+        if (!t.dueDate || t.status === "completed") return false;
+        return new Date(t.dueDate) < new Date();
+      }).length,
+    }),
+    [scopedTasks]
+  );
+
+  const equipmentTypes = useMemo(() => {
+    const types = new Set(scopedEquipment.map((e) => e.type).filter(Boolean));
+    return Array.from(types).sort();
+  }, [scopedEquipment]);
+
+  const reportData = useMemo(() => {
+    const filtered = scopedEquipment.filter((item) => {
+      if (equipmentFilter !== "all" && item.type !== equipmentFilter) return false;
+      if (statusFilter !== "all" && item.status !== statusFilter) return false;
+      return true;
+    });
+    const statusCounts = {
+      active: filtered.filter((item) => item.status === "active").length,
+      maintenance: filtered.filter((item) => item.status === "maintenance").length,
+      inactive: filtered.filter((item) => item.status === "inactive").length,
+    };
+    const typeDistribution = scopedEquipment.reduce(
+      (acc, item) => {
+        acc[item.type] = (acc[item.type] || 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>
+    );
+    return { total: filtered.length, statusCounts, typeDistribution, filtered };
+  }, [scopedEquipment, equipmentFilter, statusFilter]);
+
+  const inspectionData = useMemo(() => {
+    const today = new Date();
+    const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const todayEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59);
+    const todayInspections = scopedRemarks.filter((remark) => {
+      const remarkDate = new Date(remark.createdAt);
+      return remark.type === "inspection" && remarkDate >= todayStart && remarkDate <= todayEnd;
+    });
+    const inspectedEquipmentIds = new Set(todayInspections.map((remark) => remark.equipmentId));
+    const inspected = inspectedEquipmentIds.size;
+    const issues = todayInspections.length;
+    const criticalIssues = todayInspections.filter((remark) => remark.priority === "critical").length;
+    return {
+      totalInspections: scopedEquipment.length,
+      completed: inspected,
+      pending: scopedEquipment.length - inspected,
+      issues,
+      criticalIssues,
+    };
+  }, [scopedRemarks, scopedEquipment]);
+
+  const maintenanceData = useMemo(() => {
+    const today = new Date();
+    const planned = scopedMaintenance.filter((record) => record.status === "scheduled").length;
+    const completed = scopedMaintenance.filter((record) => record.status === "completed").length;
+    const inProgress = scopedMaintenance.filter((record) => record.status === "in_progress").length;
+    const overdue = scopedMaintenance.filter((record) => {
+      if (record.status !== "scheduled") return false;
+      return new Date(record.scheduledDate) < today;
+    }).length;
+    const byType = scopedMaintenance.reduce(
+      (acc, record) => {
+        acc[record.maintenanceType] = (acc[record.maintenanceType] || 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>
+    );
+    const total = planned + completed + inProgress;
+    const efficiency = total > 0 ? Math.round((completed / total) * 100) : 0;
+    const completedWithDuration = scopedMaintenance.filter(
+      (r) => r.status === "completed" && r.duration
+    );
+    const avgDuration =
+      completedWithDuration.length > 0
+        ? Math.round(
+            (completedWithDuration.reduce((sum, r) => {
+              const match = String(r.duration).match(/(\d+)/);
+              return sum + (match ? Number(match[1]) : 0);
+            }, 0) /
+              completedWithDuration.length) *
+              10
+          ) / 10
+        : 0;
+    return { planned, completed, overdue, inProgress, byType, efficiency, avgDuration };
+  }, [scopedMaintenance]);
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated()) {
@@ -86,104 +225,8 @@ export default function Reports() {
     return null;
   }
 
-
-
-  // Расчет статистики на основе реальных данных
-  const getReportData = () => {
-    const filtered = equipmentData.filter(item => {
-      if (equipmentFilter !== "all" && item.type !== equipmentFilter) return false;
-      if (statusFilter !== "all" && item.status !== statusFilter) return false;
-      return true;
-    });
-
-    const statusCounts = {
-      active: filtered.filter(item => item.status === "active").length,
-      maintenance: filtered.filter(item => item.status === "maintenance").length,
-      inactive: filtered.filter(item => item.status === "inactive").length
-    };
-
-    const typeDistribution = equipmentData.reduce((acc, item) => {
-      acc[item.type] = (acc[item.type] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-
-    return {
-      total: filtered.length,
-      statusCounts,
-      typeDistribution,
-      filtered
-    };
-  };
-
-  const reportData = getReportData();
-
-  // Получение реальных данных ежедневных осмотров из базы данных замечаний
-  const getDailyInspectionData = () => {
-    const today = new Date();
-    const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-    const todayEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59);
-    
-    // Фильтруем замечания по сегодняшней дате и типу "inspection"
-    const todayInspections = remarks.filter(remark => {
-      const remarkDate = new Date(remark.createdAt);
-      return remark.type === 'inspection' && 
-             remarkDate >= todayStart && 
-             remarkDate <= todayEnd;
-    });
-    
-    // Получаем уникальные единицы оборудования, которые были осмотрены сегодня
-    const inspectedEquipmentIds = new Set(todayInspections.map(remark => remark.equipmentId));
-    const inspected = inspectedEquipmentIds.size;
-    const issues = todayInspections.length;
-    const criticalIssues = todayInspections.filter(remark => remark.priority === 'critical').length;
-    
-    return {
-      totalInspections: equipmentData.length,
-      completed: inspected,
-      pending: equipmentData.length - inspected,
-      issues,
-      criticalIssues
-    };
-  };
-
-  // Получение реальных данных ТО из базы данных
-  const getMaintenanceData = () => {
-    const today = new Date();
-    
-    // Подсчет записей ТО по статусам
-    const planned = maintenanceRecords.filter(record => record.status === 'scheduled').length;
-    const completed = maintenanceRecords.filter(record => record.status === 'completed').length;
-    const inProgress = maintenanceRecords.filter(record => record.status === 'in_progress').length;
-    
-    // Просроченные ТО (запланированные, но дата прошла)
-    const overdue = maintenanceRecords.filter(record => {
-      if (record.status !== 'scheduled') return false;
-      const scheduledDate = new Date(record.scheduledDate);
-      return scheduledDate < today;
-    }).length;
-    
-    // Распределение по типам ТО
-    const byType = maintenanceRecords.reduce((acc, record) => {
-      acc[record.maintenanceType] = (acc[record.maintenanceType] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-    
-    return {
-      planned,
-      completed,
-      overdue,
-      inProgress,
-      byType
-    };
-  };
-
-  const maintenanceData = getMaintenanceData();
-
-  // Получение актуальных данных осмотров
-  const inspectionData = getDailyInspectionData();
-
   // Функции экспорта
-  const exportToCSV = (data: any[], filename: string) => {
+  const exportSimpleCsv = (data: any[], filename: string) => {
     const csvContent = [
       Object.keys(data[0]).join(','),
       ...data.map(row => Object.values(row).join(','))
@@ -214,16 +257,16 @@ export default function Reports() {
     
     setTimeout(() => {
       const exportData: ExportData = {
-        tasks: tasks || [],
-        remarks: remarks || [],
-        maintenance: maintenanceRecords || [],
-        equipment: equipmentData || []
+        tasks: scopedTasks || [],
+        remarks: scopedRemarks || [],
+        maintenance: scopedMaintenance || [],
+        equipment: scopedEquipment || [],
       };
 
       const reportTitle = `Отчет системы управления оборудованием за период ${format(dateRange.from, 'd MMM', { locale: ru })} - ${format(dateRange.to, 'd MMM yyyy', { locale: ru })}`;
 
       switch (exportFormat) {
-        case 'csv':
+        case "csv":
           exportToCSV(exportData, reportTitle);
           break;
         case 'excel':
@@ -236,10 +279,11 @@ export default function Reports() {
           exportToJSON({
             ...exportData,
             summary: {
-              totalEquipment: equipmentData.length,
-              totalTasks: (tasks as any[])?.length || 0,
-              totalRemarks: remarks.length,
-              totalMaintenance: maintenanceRecords.length,
+              totalEquipment: scopedEquipment.length,
+              totalTasks: scopedTasks.length,
+              totalRemarks: scopedRemarks.length,
+              totalMaintenance: scopedMaintenance.length,
+              subdivisionFilter: filterLabel,
               generatedAt: new Date().toISOString(),
               period: {
                 from: dateRange.from,
@@ -255,32 +299,34 @@ export default function Reports() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <>
       <Helmet>
         <title>Отчеты и аналитика - Система управления оборудованием</title>
         <meta name="description" content="Подробные отчеты по оборудованию, техническому обслуживанию и эффективности работы" />
       </Helmet>
-      
-      <div className="flex">
-        <Sidebar />
-        <div className="flex-1 flex flex-col min-h-screen lg:ml-64">
-          <Header />
-          
-          <main className="flex-1 p-6">
-            <div className="max-w-7xl mx-auto">
+
+      <div className="p-6">
+        <div className="max-w-7xl mx-auto">
               {/* Заголовок и фильтры */}
               <div className="mb-8">
-                <div className="flex justify-between items-start mb-6">
+                <div className="flex flex-wrap justify-between items-start gap-4 mb-6">
                   <div>
                     <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">
                       Отчеты и аналитика
                     </h1>
                     <p className="text-gray-600 dark:text-gray-400 mt-2">
-                      Анализ работы оборудования за период {format(dateRange.from, 'd MMM', { locale: ru })} - {format(dateRange.to, 'd MMM yyyy', { locale: ru })}
+                      Анализ работы оборудования за период {format(dateRange.from, "d MMM", { locale: ru })} —{" "}
+                      {format(dateRange.to, "d MMM yyyy", { locale: ru })}
                     </p>
+                    {filterSubdivisionId != null && (
+                      <p className="text-sm text-primary-600 dark:text-primary-400 mt-1">
+                        Подразделение: {filterLabel}
+                      </p>
+                    )}
                   </div>
-                  
-                  <div className="flex gap-3">
+
+                  <div className="flex flex-wrap gap-3 items-center">
+                    {isAdmin && <SubdivisionsPanel />}
                     <Button 
                       variant="outline" 
                       onClick={() => window.location.reload()}
@@ -333,7 +379,14 @@ export default function Reports() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+                      {showFilter && (
+                        <SubdivisionFilterSelect
+                          value={filterValue}
+                          onChange={setFilterValue}
+                          subdivisions={availableSubdivisions}
+                        />
+                      )}
                       <div>
                         <Label>Тип оборудования</Label>
                         <Select value={equipmentFilter} onValueChange={setEquipmentFilter}>
@@ -342,10 +395,11 @@ export default function Reports() {
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="all">Все типы</SelectItem>
-                            <SelectItem value="Фрезерные станки">Фрезерные станки</SelectItem>
-                            <SelectItem value="Шлифовальные станки">Шлифовальные станки</SelectItem>
-                            <SelectItem value="Электроэрозия">Электроэрозия</SelectItem>
-                            <SelectItem value="Заточные станки">Заточные станки</SelectItem>
+                            {equipmentTypes.map((type) => (
+                              <SelectItem key={type} value={type}>
+                                {type}
+                              </SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                       </div>
@@ -517,7 +571,7 @@ export default function Reports() {
 
               {/* Табы с детальными отчетами */}
               <Tabs value={selectedTab} onValueChange={setSelectedTab} className="space-y-6">
-                <TabsList className="grid w-full grid-cols-6">
+                <TabsList className="grid w-full grid-cols-7">
                   <TabsTrigger value="overview" className="flex items-center gap-2">
                     <BarChart3 className="h-4 w-4" />
                     Обзор
@@ -541,6 +595,10 @@ export default function Reports() {
                   <TabsTrigger value="remarks" className="flex items-center gap-2">
                     <AlertTriangle className="h-4 w-4" />
                     Замечания
+                  </TabsTrigger>
+                  <TabsTrigger value="user-work" className="flex items-center gap-2">
+                    <Users className="h-4 w-4" />
+                    Сотрудники
                   </TabsTrigger>
                 </TabsList>
 
@@ -765,7 +823,7 @@ export default function Reports() {
                               <BarChart3 className="h-5 w-5 text-blue-600" />
                               <span className="font-medium">Всего задач</span>
                             </div>
-                            <span className="text-2xl font-bold text-blue-600">{taskStats.total}</span>
+                            <span className="text-2xl font-bold text-blue-600">{scopedTaskStats.total}</span>
                           </div>
                           
                           <div className="flex justify-between items-center p-3 bg-orange-50 dark:bg-orange-950 rounded-lg">
@@ -773,7 +831,7 @@ export default function Reports() {
                               <Clock className="h-5 w-5 text-orange-600" />
                               <span className="font-medium">В работе</span>
                             </div>
-                            <span className="text-2xl font-bold text-orange-600">{taskStats.inProgress}</span>
+                            <span className="text-2xl font-bold text-orange-600">{scopedTaskStats.inProgress}</span>
                           </div>
                           
                           <div className="flex justify-between items-center p-3 bg-yellow-50 dark:bg-yellow-950 rounded-lg">
@@ -781,7 +839,7 @@ export default function Reports() {
                               <TrendingUp className="h-5 w-5 text-yellow-600" />
                               <span className="font-medium">Ожидают</span>
                             </div>
-                            <span className="text-2xl font-bold text-yellow-600">{taskStats.pending}</span>
+                            <span className="text-2xl font-bold text-yellow-600">{scopedTaskStats.pending}</span>
                           </div>
                           
                           <div className="flex justify-between items-center p-3 bg-green-50 dark:bg-green-950 rounded-lg">
@@ -789,7 +847,7 @@ export default function Reports() {
                               <CheckCircle className="h-5 w-5 text-green-600" />
                               <span className="font-medium">Завершены</span>
                             </div>
-                            <span className="text-2xl font-bold text-green-600">{taskStats.completed}</span>
+                            <span className="text-2xl font-bold text-green-600">{scopedTaskStats.completed}</span>
                           </div>
                           
                           <div className="flex justify-between items-center p-3 bg-red-50 dark:bg-red-950 rounded-lg">
@@ -797,7 +855,7 @@ export default function Reports() {
                               <AlertTriangle className="h-5 w-5 text-red-600" />
                               <span className="font-medium">Просрочены</span>
                             </div>
-                            <span className="text-2xl font-bold text-red-600">{taskStats.overdue}</span>
+                            <span className="text-2xl font-bold text-red-600">{scopedTaskStats.overdue}</span>
                           </div>
                         </div>
                       </CardContent>
@@ -816,11 +874,11 @@ export default function Reports() {
                             <div className="flex justify-between items-center">
                               <span className="text-sm font-medium">Процент выполнения</span>
                               <span className="text-sm font-bold">
-                                {taskStats.total > 0 ? Math.round((taskStats.completed / taskStats.total) * 100) : 0}%
+                                {scopedTaskStats.total > 0 ? Math.round((scopedTaskStats.completed / scopedTaskStats.total) * 100) : 0}%
                               </span>
                             </div>
                             <Progress 
-                              value={taskStats.total > 0 ? (taskStats.completed / taskStats.total) * 100 : 0} 
+                              value={scopedTaskStats.total > 0 ? (scopedTaskStats.completed / scopedTaskStats.total) * 100 : 0} 
                               className="h-3"
                             />
                           </div>
@@ -829,11 +887,11 @@ export default function Reports() {
                             <div className="flex justify-between items-center">
                               <span className="text-sm font-medium">Активные задачи</span>
                               <span className="text-sm font-bold">
-                                {taskStats.total > 0 ? Math.round(((taskStats.pending + taskStats.inProgress) / taskStats.total) * 100) : 0}%
+                                {scopedTaskStats.total > 0 ? Math.round(((scopedTaskStats.pending + scopedTaskStats.inProgress) / scopedTaskStats.total) * 100) : 0}%
                               </span>
                             </div>
                             <Progress 
-                              value={taskStats.total > 0 ? ((taskStats.pending + taskStats.inProgress) / taskStats.total) * 100 : 0} 
+                              value={scopedTaskStats.total > 0 ? ((scopedTaskStats.pending + scopedTaskStats.inProgress) / scopedTaskStats.total) * 100 : 0} 
                               className="h-3"
                             />
                           </div>
@@ -1083,11 +1141,13 @@ export default function Reports() {
                     </Card>
                   </div>
                 </TabsContent>
+
+                <TabsContent value="user-work">
+                  <EmployeeWorkReportPanel />
+                </TabsContent>
               </Tabs>
-            </div>
-          </main>
         </div>
       </div>
-    </div>
+    </>
   );
 }

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 
 interface SidebarContextType {
   isCollapsed: boolean;
@@ -14,6 +14,13 @@ export function SidebarProvider({ children }: { children: ReactNode }) {
   const toggleCollapsed = () => {
     setIsCollapsed(!isCollapsed);
   };
+
+  useEffect(() => {
+    document.documentElement.style.setProperty(
+      '--sidebar-width',
+      isCollapsed ? '4rem' : '16rem'
+    );
+  }, [isCollapsed]);
 
   return (
     <SidebarContext.Provider value={{ isCollapsed, setIsCollapsed, toggleCollapsed }}>

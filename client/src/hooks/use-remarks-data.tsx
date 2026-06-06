@@ -15,6 +15,7 @@ export interface Remark {
   updatedAt: Date;
   resolvedAt?: Date;
   notes: string[];
+  source?: 'daily_inspection' | 'maintenance' | 'manual' | string;
 }
 
 interface RemarksContextType {

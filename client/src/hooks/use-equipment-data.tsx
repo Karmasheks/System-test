@@ -354,32 +354,30 @@ export function EquipmentProvider({ children }: { children: ReactNode }) {
   const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Загружаем данные из API при монтировании
-  useEffect(() => {
-    const loadEquipment = async () => {
-      try {
-        const response = await fetch('/api/equipment', {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`,
-            'Content-Type': 'application/json',
-          },
-        });
-        
-        if (response.ok) {
-          const data = await response.json();
-          setEquipment(data);
-        } else {
-          console.error('Ошибка загрузки оборудования:', response.statusText);
-          setEquipment(initialEquipmentData);
-        }
-      } catch (error) {
-        console.error('Ошибка подключения к серверу:', error);
-        setEquipment(initialEquipmentData);
-      } finally {
-        setIsLoading(false);
-      }
-    };
+  const loadEquipment = async () => {
+    try {
+      const response = await fetch('/api/equipment', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'application/json',
+        },
+      });
 
+      if (response.ok) {
+        const data = await response.json();
+        setEquipment(data);
+      } else {
+        setEquipment([]);
+      }
+    } catch (error) {
+      console.error('Ошибка загрузки оборудования:', error);
+      setEquipment([]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
     loadEquipment();
   }, []);
 
@@ -399,6 +397,7 @@ export function EquipmentProvider({ children }: { children: ReactNode }) {
       if (response.ok) {
         const createdEquipment = await response.json();
         setEquipment(prev => [...prev, createdEquipment]);
+        window.dispatchEvent(new CustomEvent('equipmentUpdated'));
       } else {
         console.error('Ошибка создания оборудования');
       }
@@ -423,6 +422,7 @@ export function EquipmentProvider({ children }: { children: ReactNode }) {
         setEquipment(prev => prev.map(item => 
           item.id === id ? updatedEquipment : item
         ));
+        window.dispatchEvent(new CustomEvent('equipmentUpdated'));
       } else {
         console.error('Ошибка обновления оборудования');
       }
@@ -442,6 +442,7 @@ export function EquipmentProvider({ children }: { children: ReactNode }) {
 
       if (response.ok) {
         setEquipment(prev => prev.filter(item => item.id !== id));
+        window.dispatchEvent(new CustomEvent('equipmentUpdated'));
       } else {
         console.error('Ошибка удаления оборудования');
       }
@@ -463,7 +464,7 @@ export function EquipmentProvider({ children }: { children: ReactNode }) {
   };
 
   const refreshData = () => {
-    setEquipment(initialEquipmentData);
+    loadEquipment();
   };
 
   const value: EquipmentContextType = {

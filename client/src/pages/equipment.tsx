@@ -1,13 +1,11 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { Helmet } from "react-helmet";
 import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
-import { Sidebar } from "@/components/layout/sidebar";
-import { Header } from "@/components/layout/header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { PlusCircle, FileEdit, Trash2, Eye, Settings, Calendar, Clock } from "lucide-react";
+import { PlusCircle, FileEdit, Trash2, Eye, Settings, Calendar, Clock, ExternalLink } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -18,21 +16,56 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import EquipmentForm from "@/components/equipment-form";
-import EquipmentDialogForm from "@/components/equipment-dialog-form";
+import { useEquipmentTypes, useEquipmentTypeMutations } from "@/hooks/use-equipment-types";
+import { useSubdivisions } from "@/hooks/use-subdivisions";
+import { SubdivisionsPanel } from "@/components/admin/subdivisions-panel";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { EquipmentImageGallery } from "@/components/equipment-image-urls";
+import { EquipmentAssetPanel } from "@/components/equipment-asset-panel";
 import { apiRequest } from "@/lib/queryClient";
+import { normalizeEquipmentRecord, generateNextEquipmentId, formatEquipmentResponsible } from "@shared/equipment-utils";
+import type { Equipment } from "@shared/schema";
+import { syncEquipmentLinksApi } from "@/hooks/use-equipment-links";
+import { useTaskDialog, type TaskRecord } from "@/hooks/use-task-dialog";
 
 export default function Equipment() {
   const { user, isLoading, isAuthenticated } = useAuth();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { openEdit } = useTaskDialog();
 
-  const { data: equipment = [] } = useQuery<any[]>({
+  const { data: equipmentRaw = [] } = useQuery<Equipment[]>({
     queryKey: ["/api/equipment"],
   });
+  const equipment = equipmentRaw.map((item) => normalizeEquipmentRecord(item));
+  const { data: equipmentTypesList = [] } = useEquipmentTypes();
+  const { createType } = useEquipmentTypeMutations();
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [subdivisionFilter, setSubdivisionFilter] = useState("all");
+  const [newEquipmentType, setNewEquipmentType] = useState("");
+  const { data: subdivisions = [] } = useSubdivisions();
+
+  const typeNames = useMemo(() => {
+    const fromDb = equipmentTypesList.map((t) => t.name);
+    const fromItems = equipment.map((e) => e.type).filter(Boolean) as string[];
+    return [...new Set([...fromDb, ...fromItems])].sort((a, b) => a.localeCompare(b, "ru"));
+  }, [equipmentTypesList, equipment]);
+
+  const filteredEquipment = useMemo(() => {
+    let list = equipment;
+    if (subdivisionFilter !== "all") {
+      list = list.filter((e) => String(e.subdivisionId ?? "") === subdivisionFilter);
+    }
+    if (typeFilter !== "all") {
+      list = list.filter((e) => e.type === typeFilter);
+    }
+    return list;
+  }, [equipment, typeFilter, subdivisionFilter]);
 
   const createEquipmentMutation = useMutation({
     mutationFn: async (newEquipment: any) => {
@@ -41,15 +74,16 @@ export default function Equipment() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/equipment"] });
+      window.dispatchEvent(new CustomEvent("equipmentUpdated"));
       toast({
         title: "Успешно",
         description: "Оборудование добавлено",
       });
     },
-    onError: () => {
+    onError: (error: Error) => {
       toast({
         title: "Ошибка",
-        description: "Не удалось добавить оборудование",
+        description: error.message.replace(/^\d+:\s*/, "") || "Не удалось добавить оборудование",
         variant: "destructive",
       });
     },
@@ -60,17 +94,20 @@ export default function Equipment() {
       const response = await apiRequest("PUT", `/api/equipment/${id}`, data);
       return response.json();
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ["/api/equipment"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/equipment", variables.id, "activity"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/equipment", variables.id, "link-history"] });
+      window.dispatchEvent(new CustomEvent("equipmentUpdated"));
       toast({
         title: "Успешно",
         description: "Оборудование обновлено",
       });
     },
-    onError: () => {
+    onError: (error: Error) => {
       toast({
         title: "Ошибка",
-        description: "Не удалось обновить оборудование",
+        description: error.message.replace(/^\d+:\s*/, "") || "Не удалось обновить оборудование",
         variant: "destructive",
       });
     },
@@ -83,6 +120,7 @@ export default function Equipment() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/equipment"] });
+      window.dispatchEvent(new CustomEvent("equipmentUpdated"));
       toast({
         title: "Успешно",
         description: "Оборудование удалено",
@@ -125,21 +163,6 @@ export default function Equipment() {
     { value: "1Г - ТО", label: "1Г - ТО (ежегодно)" },
   ];
 
-  const equipmentTypes = [
-    "Фрезерные станки",
-    "Шлифовальные станки",
-    "Токарные станки",
-    "Электроэрозия",
-    "Измерительное",
-    "Автоматизация",
-    "Вспомогательное",
-    "Складское",
-    "Заточные станки",
-    "Отрезные станки",
-  ];
-
-  const responsibleOptions = ["Купцов Денис", "Калюжный Никита", "Пырихин Илья"];
-
   useEffect(() => {
     if (!isLoading && !isAuthenticated()) {
       setLocation("/login");
@@ -171,7 +194,7 @@ export default function Equipment() {
     (equipmentItem: any) => {
       setSelectedEquipment(equipmentItem);
 
-      const isCustomEquipmentType = !equipmentTypes.includes(equipmentItem.type);
+      const isCustomEquipmentType = !typeNames.includes(equipmentItem.type);
       setIsCustomType(isCustomEquipmentType);
       setCustomType(isCustomEquipmentType ? equipmentItem.type : "");
 
@@ -189,7 +212,7 @@ export default function Equipment() {
 
       setEditDialogOpen(true);
     },
-    [equipmentTypes],
+    [typeNames],
   );
 
   const openViewDialog = useCallback((equipmentItem: any) => {
@@ -197,13 +220,41 @@ export default function Equipment() {
     setViewDialogOpen(true);
   }, []);
 
+  const openEquipmentById = useCallback(
+    (equipmentId: string) => {
+      const item = equipment.find((eq) => eq.id === equipmentId);
+      if (item) {
+        setSelectedEquipment(item);
+        setViewDialogOpen(true);
+      }
+    },
+    [equipment]
+  );
+
+  const openTaskById = useCallback(
+    async (taskId: number) => {
+      try {
+        const res = await apiRequest("GET", `/api/tasks/${taskId}`);
+        if (!res.ok) {
+          throw new Error("Задача не найдена");
+        }
+        const task = (await res.json()) as TaskRecord;
+        openEdit(task);
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : "Не удалось открыть задачу";
+        toast({ title: "Ошибка", description: message, variant: "destructive" });
+      }
+    },
+    [openEdit, toast]
+  );
+
   const openDeleteDialog = useCallback((equipmentItem: any) => {
     setSelectedEquipment(equipmentItem);
     setDeleteDialogOpen(true);
   }, []);
 
   const handleAddEquipment = useCallback(() => {
-    if (!formData.name || !formData.type || !formData.responsible) {
+    if (!formData.name || !formData.type) {
       toast({
         title: "Ошибка",
         description: "Заполните все обязательные поля",
@@ -212,7 +263,7 @@ export default function Equipment() {
       return;
     }
 
-    const newId = `EQ${String(equipment.length + 1).padStart(3, "0")}`;
+    const newId = generateNextEquipmentId(equipment.map((item) => item.id));
     const newEquipment = {
       ...formData,
       id: newId,
@@ -345,7 +396,7 @@ export default function Equipment() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <>
       <Helmet>
         <title>Оборудование - Система управления оборудованием</title>
         <meta
@@ -354,13 +405,8 @@ export default function Equipment() {
         />
       </Helmet>
 
-      <div className="flex">
-        <Sidebar />
-        <div className="flex-1 flex flex-col min-h-screen lg:ml-64">
-          <Header />
-
-          <main className="flex-1 p-6">
-            <div className="max-w-7xl mx-auto">
+      <main className="p-6">
+        <div className="max-w-7xl mx-auto">
               <div className="flex justify-between items-center mb-6">
                 <div>
                   <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Оборудование</h1>
@@ -369,42 +415,50 @@ export default function Equipment() {
                   </p>
                 </div>
 
-                <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
-                  <DialogTrigger asChild>
-                    <Button onClick={openAddDialog} className="bg-blue-600 hover:bg-blue-700 text-white">
-                      <PlusCircle className="h-4 w-4 mr-2" />
-                      Добавить оборудование
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent className="max-w-2xl">
+                <div className="flex gap-2">
+                  <SubdivisionsPanel />
+                  <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
+                    <DialogTrigger asChild>
+                      <Button onClick={openAddDialog} className="bg-blue-600 hover:bg-blue-700 text-white">
+                        <PlusCircle className="h-4 w-4 mr-2" />
+                        Добавить оборудование
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
                       <DialogTitle>Добавить новое оборудование</DialogTitle>
                       <DialogDescription>
                         Заполните информацию о новом оборудовании и настройте периодичность ТО
                       </DialogDescription>
                     </DialogHeader>
-                    <EquipmentDialogForm
-                      formData={formData}
-                      customType={customType}
-                      isCustomType={isCustomType}
-                      setIsCustomType={setIsCustomType}
-                      handleFormFieldChange={handleFormFieldChange}
-                      handleNameChange={handleNameChange}
-                      handleCustomTypeChange={handleCustomTypeChange}
-                      handleDescriptionChange={handleDescriptionChange}
-                      handleMaintenancePeriodChange={handleMaintenancePeriodChange}
-                      handleAddEquipment={handleAddEquipment}
-                      handleEditEquipment={handleEditEquipment}
-                      resetForm={resetForm}
-                      setAddDialogOpen={setAddDialogOpen}
-                      setEditDialogOpen={setEditDialogOpen}
-                      equipmentTypes={equipmentTypes}
-                      responsibleOptions={responsibleOptions}
-                      maintenancePeriodOptions={maintenancePeriodOptions}
-                      getPeriodBadge={getPeriodBadge}
+                    <EquipmentForm
+                      allEquipment={equipment}
+                      onSave={async (data, links) => {
+                        const newId = generateNextEquipmentId(equipment.map((item) => item.id));
+                        try {
+                          await createEquipmentMutation.mutateAsync({
+                            ...data,
+                            id: newId,
+                            department: data.department || "",
+                          });
+                          if (links.length > 0) {
+                            await syncEquipmentLinksApi(newId, links, queryClient);
+                          }
+                          queryClient.invalidateQueries({ queryKey: ["/api/equipment"] });
+                          setAddDialogOpen(false);
+                        } catch (error: any) {
+                          toast({
+                            title: "Ошибка",
+                            description: error.message?.replace(/^\d+:\s*/, "") ?? "Не удалось сохранить",
+                            variant: "destructive",
+                          });
+                        }
+                      }}
+                      onCancel={() => setAddDialogOpen(false)}
                     />
                   </DialogContent>
                 </Dialog>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
@@ -467,13 +521,78 @@ export default function Equipment() {
                 <CardHeader>
                   <CardTitle>Список оборудования</CardTitle>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="space-y-4">
+                  <div className="flex flex-wrap gap-3 items-end">
+                    <div className="w-56">
+                      <Label>Подразделение</Label>
+                      <Select value={subdivisionFilter} onValueChange={setSubdivisionFilter}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">Все подразделения</SelectItem>
+                          {subdivisions.map((s) => (
+                            <SelectItem key={s.id} value={String(s.id)}>
+                              {s.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="w-56">
+                      <Label>Категория (тип)</Label>
+                      <Select value={typeFilter} onValueChange={setTypeFilter}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">Все категории</SelectItem>
+                          {typeNames.map((name) => (
+                            <SelectItem key={name} value={name}>
+                              {name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex gap-2 items-end">
+                      <div>
+                        <Label className="sr-only">Новая категория</Label>
+                        <Input
+                          placeholder="Новая категория"
+                          value={newEquipmentType}
+                          onChange={(e) => setNewEquipmentType(e.target.value)}
+                          className="w-44"
+                        />
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={async () => {
+                          if (!newEquipmentType.trim()) return;
+                          try {
+                            await createType.mutateAsync(newEquipmentType.trim());
+                            setNewEquipmentType("");
+                            toast({ title: "Категория добавлена" });
+                          } catch {
+                            toast({ title: "Не удалось добавить категорию", variant: "destructive" });
+                          }
+                        }}
+                      >
+                        +
+                      </Button>
+                    </div>
+                    <p className="text-sm text-muted-foreground pb-2">
+                      Показано: {filteredEquipment.length} из {equipment.length}
+                    </p>
+                  </div>
                   <div className="overflow-x-auto">
                     <table className="w-full">
                       <thead>
                         <tr className="border-b border-gray-200 dark:border-gray-700">
                           <th className="text-left p-4 font-medium text-gray-900 dark:text-gray-100">ID</th>
                           <th className="text-left p-4 font-medium text-gray-900 dark:text-gray-100">Название</th>
+                          <th className="text-left p-4 font-medium text-gray-900 dark:text-gray-100 w-16">Фото</th>
                           <th className="text-left p-4 font-medium text-gray-900 dark:text-gray-100">Тип</th>
                           <th className="text-left p-4 font-medium text-gray-900 dark:text-gray-100">Статус</th>
                           <th className="text-left p-4 font-medium text-gray-900 dark:text-gray-100">Периодичность ТО</th>
@@ -482,13 +601,25 @@ export default function Equipment() {
                         </tr>
                       </thead>
                       <tbody>
-                        {equipment.map((equipmentItem) => (
+                        {filteredEquipment.map((equipmentItem) => (
                           <tr
                             key={equipmentItem.id}
                             className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800"
                           >
                             <td className="p-4 text-gray-900 dark:text-gray-100 font-mono text-sm">{equipmentItem.id}</td>
                             <td className="p-4 text-gray-900 dark:text-gray-100 font-medium">{equipmentItem.name}</td>
+                            <td className="p-4">
+                              {equipmentItem.imageUrls?.[0] ? (
+                                <img
+                                  src={equipmentItem.imageUrls[0]}
+                                  alt=""
+                                  className="w-10 h-10 rounded object-cover border dark:border-gray-700"
+                                  loading="lazy"
+                                />
+                              ) : (
+                                <span className="text-gray-300 text-xs">—</span>
+                              )}
+                            </td>
                             <td className="p-4 text-gray-600 dark:text-gray-400">{equipmentItem.type}</td>
                             <td className="p-4">{getStatusBadge(equipmentItem.status)}</td>
                             <td className="p-4">
@@ -498,7 +629,9 @@ export default function Equipment() {
                                 )}
                               </div>
                             </td>
-                            <td className="p-4 text-gray-600 dark:text-gray-400">{equipmentItem.responsible}</td>
+                            <td className="p-4 text-gray-600 dark:text-gray-400">
+                              {formatEquipmentResponsible(equipmentItem.responsible)}
+                            </td>
                             <td className="p-4">
                               <div className="flex gap-2">
                                 <Button size="sm" variant="outline" onClick={() => openViewDialog(equipmentItem)}>
@@ -524,23 +657,32 @@ export default function Equipment() {
                   </div>
                 </CardContent>
               </Card>
-            </div>
-          </main>
         </div>
-      </div>
+      </main>
 
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Редактировать оборудование</DialogTitle>
             <DialogDescription>Измените информацию об оборудовании и настройки периодичности ТО</DialogDescription>
           </DialogHeader>
           <EquipmentForm
             initialData={selectedEquipment}
-            onSave={(data) => {
-              updateEquipmentMutation.mutate({ id: selectedEquipment.id, data });
-              setEditDialogOpen(false);
-              setSelectedEquipment(null);
+            allEquipment={equipment}
+            onSave={async (data, links) => {
+              if (!selectedEquipment) return;
+              try {
+                await updateEquipmentMutation.mutateAsync({ id: selectedEquipment.id, data });
+                await syncEquipmentLinksApi(selectedEquipment.id, links, queryClient);
+                setEditDialogOpen(false);
+                setSelectedEquipment(null);
+              } catch (error: any) {
+                toast({
+                  title: "Ошибка",
+                  description: error.message?.replace(/^\d+:\s*/, "") ?? "Не удалось сохранить",
+                  variant: "destructive",
+                });
+              }
             }}
             onCancel={() => {
               setEditDialogOpen(false);
@@ -552,13 +694,13 @@ export default function Equipment() {
       </Dialog>
 
       <Dialog open={viewDialogOpen} onOpenChange={setViewDialogOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-5xl w-[95vw] max-h-[90vh] overflow-y-auto overflow-x-hidden">
           <DialogHeader>
             <DialogTitle>Информация об оборудовании</DialogTitle>
             <DialogDescription>Подробная информация об оборудовании и настройках ТО</DialogDescription>
           </DialogHeader>
           {selectedEquipment && (
-            <div className="space-y-4">
+            <div className="space-y-4 min-w-0">
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label className="font-medium">ID:</Label>
@@ -586,6 +728,68 @@ export default function Equipment() {
               )}
 
               <div className="grid grid-cols-2 gap-4">
+                {selectedEquipment.department && (
+                  <div>
+                    <Label className="font-medium">Подразделение:</Label>
+                    <p className="text-gray-600 dark:text-gray-400">{selectedEquipment.department}</p>
+                  </div>
+                )}
+                {selectedEquipment.location && (
+                  <div>
+                    <Label className="font-medium">Местоположение:</Label>
+                    <p className="text-gray-600 dark:text-gray-400">{selectedEquipment.location}</p>
+                  </div>
+                )}
+                {selectedEquipment.model && (
+                  <div>
+                    <Label className="font-medium">Модель:</Label>
+                    <p className="text-gray-600 dark:text-gray-400">{selectedEquipment.model}</p>
+                  </div>
+                )}
+                {selectedEquipment.serialNumber && (
+                  <div>
+                    <Label className="font-medium">Серийный №:</Label>
+                    <p className="text-gray-600 dark:text-gray-400">{selectedEquipment.serialNumber}</p>
+                  </div>
+                )}
+                {selectedEquipment.inventoryNumber && (
+                  <div>
+                    <Label className="font-medium">Инвентарный №:</Label>
+                    <p className="text-gray-600 dark:text-gray-400">{selectedEquipment.inventoryNumber}</p>
+                  </div>
+                )}
+                {selectedEquipment.installationDate && (
+                  <div>
+                    <Label className="font-medium">Дата установки:</Label>
+                    <p className="text-gray-600 dark:text-gray-400">{selectedEquipment.installationDate}</p>
+                  </div>
+                )}
+                {selectedEquipment.warrantyUntil && (
+                  <div>
+                    <Label className="font-medium">Гарантия до:</Label>
+                    <p className="text-gray-600 dark:text-gray-400">{selectedEquipment.warrantyUntil}</p>
+                  </div>
+                )}
+              </div>
+
+              {selectedEquipment.confluenceUrl && (
+                <div>
+                  <Label className="font-medium">Confluence:</Label>
+                  <a
+                    href={selectedEquipment.confluenceUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-1 inline-flex items-center gap-1 text-blue-600 hover:underline break-all"
+                  >
+                    <ExternalLink className="h-4 w-4 shrink-0" />
+                    {selectedEquipment.confluenceUrl}
+                  </a>
+                </div>
+              )}
+
+              <EquipmentImageGallery urls={selectedEquipment.imageUrls} />
+
+              <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label className="font-medium">Последнее ТО:</Label>
                   <p className="text-gray-600 dark:text-gray-400">{selectedEquipment.lastMaintenance || "Не указано"}</p>
@@ -596,7 +800,9 @@ export default function Equipment() {
                 </div>
                 <div>
                   <Label className="font-medium">Ответственный:</Label>
-                  <p className="text-gray-600 dark:text-gray-400">{selectedEquipment.responsible}</p>
+                  <p className="text-gray-600 dark:text-gray-400">
+                    {formatEquipmentResponsible(selectedEquipment.responsible)}
+                  </p>
                 </div>
               </div>
 
@@ -610,6 +816,13 @@ export default function Equipment() {
                   )}
                 </div>
               </div>
+
+              <EquipmentAssetPanel
+                equipmentId={selectedEquipment.id}
+                equipmentName={selectedEquipment.name}
+                onOpenEquipment={openEquipmentById}
+                onOpenTask={openTaskById}
+              />
             </div>
           )}
           <DialogFooter>
@@ -645,6 +858,6 @@ export default function Equipment() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   );
 }

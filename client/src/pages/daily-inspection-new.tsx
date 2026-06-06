@@ -28,16 +28,11 @@ import {
 import { format } from "date-fns";
 import { ru } from "date-fns/locale";
 import { useAuth } from "@/hooks/use-auth";
-import { useEquipmentData } from "@/hooks/use-equipment-data";
-import { useRemarksData } from "@/hooks/use-remarks-data";
+import { useAccessControl } from "@/hooks/use-access-control";
 import { useInspectionChecklists } from "@/hooks/use-inspection-checklists";
-import { useSidebarState } from "@/hooks/use-sidebar-state";
-import { Sidebar } from "@/components/layout/sidebar";
-import { Header } from "@/components/layout/header";
 import { useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { apiRequest } from '@/lib/queryClient';
 
 // Интерфейс для элемента чек-листа
 interface ChecklistItem {
@@ -52,7 +47,46 @@ interface InspectionItem {
   item: string;
   checked: boolean;
   status: 'ok' | 'attention' | 'critical';
-  notes?: string;
+}
+
+function mapStatusToCheckResult(status: InspectionItem['status']): string {
+  if (status === 'attention') return 'issue';
+  return status;
+}
+
+function getDeviatedItems(items: InspectionItem[]): InspectionItem[] {
+  return items.filter((item) => item.status === 'attention' || item.status === 'critical');
+}
+
+function buildInspectionCommentLines(items: InspectionItem[], generalComment: string): string[] {
+  const deviated = getDeviatedItems(items);
+  const lines: string[] = [];
+
+  if (deviated.length > 0) {
+    lines.push('Пункты с отклонениями:');
+    for (const item of deviated) {
+      const label = item.status === 'critical' ? 'Критично' : 'Требует внимания';
+      lines.push(`• ${item.category}: ${item.item} — ${label}`);
+    }
+  }
+
+  if (generalComment.trim()) {
+    if (lines.length > 0) lines.push('');
+    lines.push(`Комментарий: ${generalComment.trim()}`);
+  }
+
+  return lines;
+}
+
+function getStatusLabel(status: InspectionItem['status']): string {
+  switch (status) {
+    case 'critical':
+      return 'Критично';
+    case 'attention':
+      return 'Требует внимания';
+    default:
+      return 'В норме';
+  }
 }
 
 // Интерфейс для данных осмотра оборудования
@@ -345,11 +379,10 @@ const ChecklistAdminPanel = ({
 
 export default function DailyInspection() {
   const { user } = useAuth();
-  const { addRemark } = useRemarksData();
+  const { isAdmin } = useAccessControl();
   const { checklists, createChecklist, updateChecklist, getChecklistByEquipmentId } = useInspectionChecklists();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
-  const { isCollapsed } = useSidebarState();
   const queryClient = useQueryClient();
 
   // Загрузка оборудования из API
@@ -461,8 +494,8 @@ export default function DailyInspection() {
           status: 'completed',
           inspectedBy: inspection.inspectedBy,
           inspectionDate: new Date(inspection.inspectionDate),
-          issues: inspection.issues || 0,
-          workingStatus: inspection.workingStatus || 'working',
+          issues: Array.isArray(inspection.comments) ? inspection.comments.length : 0,
+          workingStatus: inspection.status === 'completed' ? 'working' : 'not_working',
           notes: Array.isArray(inspection.comments) ? inspection.comments.join('; ') : (inspection.comments || '')
         };
       });
@@ -477,6 +510,15 @@ export default function DailyInspection() {
 
   // Функция сохранения кастомного чек-листа
   const handleSaveChecklist = async (equipmentId: string, equipmentName: string, selectedItems: ChecklistItem[]) => {
+    if (!isAdmin) {
+      toast({
+        variant: "destructive",
+        title: "Недостаточно прав",
+        description: "Настройка осмотров доступна только администратору",
+      });
+      return;
+    }
+
     try {
       const checkItems = selectedItems.map(item => `${item.category}: ${item.item}`);
       
@@ -521,46 +563,12 @@ export default function DailyInspection() {
   const handleSaveInspection = async () => {
     if (!selectedEquipment) return;
 
-    const criticalIssues = inspectionItems.filter(item => item.status === 'critical').length;
-    const attentionIssues = inspectionItems.filter(item => item.status === 'attention').length;
-    const totalIssues = criticalIssues + attentionIssues;
+    const deviatedItems = getDeviatedItems(inspectionItems);
+    const criticalIssues = deviatedItems.filter((item) => item.status === 'critical').length;
+    const attentionIssues = deviatedItems.filter((item) => item.status === 'attention').length;
+    const totalIssues = deviatedItems.length;
+    const commentLines = buildInspectionCommentLines(inspectionItems, generalNotes);
 
-    // Добавляем замечания в централизованную систему с уникальными идентификаторами
-    const timestamp = new Date().toISOString();
-    inspectionItems.forEach((item, index) => {
-      if ((item.status === 'critical' || item.status === 'attention') && (item.notes?.trim() || item.status === 'critical')) {
-        addRemark({
-          title: `Осмотр ${format(new Date(), 'HH:mm')}: ${item.item}`,
-          description: item.notes || `Статус: ${item.status === 'critical' ? 'Критично' : 'Требует внимания'}`,
-          equipmentName: selectedEquipment.name,
-          equipmentId: selectedEquipment.id,
-          type: 'inspection',
-          priority: item.status === 'critical' ? 'critical' : 'medium',
-          status: 'open',
-          reportedBy: user?.name || 'Система',
-          assignedTo: 'Купцов Денис',
-          notes: []
-        });
-      }
-    });
-
-    // Добавляем общее замечание если есть
-    if (generalNotes.trim()) {
-      addRemark({
-        title: `Общие замечания ${format(new Date(), 'HH:mm')}: ${selectedEquipment.name}`,
-        description: generalNotes,
-        equipmentName: selectedEquipment.name,
-        equipmentId: selectedEquipment.id,
-        type: 'inspection',
-        priority: 'medium',
-        status: 'open',
-        reportedBy: user?.name || 'Система',
-        assignedTo: 'Купцов Денис',
-        notes: []
-      });
-    }
-
-    // Определяем общий статус работоспособности оборудования
     let workingStatus: 'working' | 'not_working' | 'maintenance' = 'working';
     if (criticalIssues > 0) {
       workingStatus = 'not_working';
@@ -568,22 +576,16 @@ export default function DailyInspection() {
       workingStatus = 'maintenance';
     }
 
-    // Сохраняем осмотр в базу данных
-    const allComments = [
-      ...inspectionItems
-        .filter(item => item.notes?.trim())
-        .map(item => `${item.item}: ${item.notes}`),
-      ...(generalNotes.trim() ? [`Общие замечания: ${generalNotes}`] : [])
-    ];
-
     const inspectionData = {
       equipmentId: selectedEquipment.id,
       equipmentName: selectedEquipment.name,
-      inspectionDate: new Date().toISOString(),
+      inspectionDate: new Date(),
       inspectedBy: user?.name || 'Неизвестно',
       status: 'completed',
-      checkResults: inspectionItems.map(item => item.status),
-      comments: allComments
+      checkResults: inspectionItems.map((item) => mapStatusToCheckResult(item.status)),
+      comments: commentLines,
+      issuesCount: totalIssues,
+      workingStatus,
     };
 
     try {
@@ -599,7 +601,7 @@ export default function DailyInspection() {
           inspectionDate: new Date(),
           issues: totalIssues,
           workingStatus,
-          notes: inspectionData.comments.join('; ')
+          notes: commentLines.join('; ')
         }
       }));
 
@@ -665,7 +667,6 @@ export default function DailyInspection() {
       item: item.item,
       checked: false,
       status: 'ok',
-      notes: ''
     }));
 
     // Если есть сохраненный прогресс, восстанавливаем только статусы и заметки
@@ -684,7 +685,6 @@ export default function DailyInspection() {
               ...baseItem,
               checked: savedItem.checked,
               status: savedItem.status,
-              notes: savedItem.notes || ''
             };
           }
           
@@ -769,18 +769,13 @@ export default function DailyInspection() {
   };
 
   return (
-    <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
+    <>
       <Helmet>
         <title>Ежедневный осмотр оборудования - StarLine</title>
         <meta name="description" content="Система ежедневного осмотра и контроля состояния производственного оборудования" />
       </Helmet>
 
-      <Sidebar />
-      
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <Header />
-        
-        <main className={`flex-1 overflow-x-hidden overflow-y-auto bg-gray-50 dark:bg-gray-900 p-4 transition-all duration-300 ${isCollapsed ? 'ml-16' : 'ml-64'}`}>
+      <div className="p-4">
           <div className="w-full">
             <div className="mb-4">
               <div className="flex items-center justify-between">
@@ -790,7 +785,7 @@ export default function DailyInspection() {
                   </h1>
                 </div>
                 
-                {user?.role === 'admin' && (
+                {isAdmin && (
                   <Button
                     onClick={() => setIsAdminDialogOpen(true)}
                     variant="outline"
@@ -962,7 +957,6 @@ export default function DailyInspection() {
               </div>
             )}
           </div>
-        </main>
       </div>
 
       {/* Диалог проведения осмотра */}
@@ -994,7 +988,7 @@ export default function DailyInspection() {
               {/* Кнопки управления */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                 {/* Кнопка "Отметить все как норма" для администратора */}
-                {user?.role === 'admin' && (
+                {isAdmin && (
                   <Button
                     onClick={() => {
                       setInspectionItems(prev => prev.map(item => ({
@@ -1081,32 +1075,33 @@ export default function DailyInspection() {
                             Критично
                           </Button>
                         </div>
-
-                        {(item.status === 'attention' || item.status === 'critical') && (
-                          <Textarea
-                            placeholder="Опишите проблему..."
-                            value={item.notes || ''}
-                            onChange={(e) => setInspectionItems(prev => prev.map(i => 
-                              i.id === item.id ? { ...i, notes: e.target.value } : i
-                            ))}
-                            className="text-sm h-16"
-                          />
-                        )}
                       </div>
                     </div>
                   </Card>
                 ))}
               </div>
 
-              {/* Общие замечания по осмотру */}
+              {getDeviatedItems(inspectionItems).length > 0 && (
+                <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30">
+                  <Label>Пункты с изменённым статусом</Label>
+                  <ul className="space-y-1 text-sm text-muted-foreground">
+                    {getDeviatedItems(inspectionItems).map((item) => (
+                      <li key={item.id}>
+                        {item.category}: {item.item} — {getStatusLabel(item.status)}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               <div className="space-y-2">
-                <Label htmlFor="general-notes">Общие замечания по осмотру</Label>
+                <Label htmlFor="general-notes">Комментарий к осмотру</Label>
                 <Textarea
                   id="general-notes"
-                  placeholder="Введите общие замечания или комментарии по результатам осмотра..."
+                  placeholder="Общий комментарий по результатам осмотра. Пункты с отклонениями будут добавлены автоматически."
                   value={generalNotes}
                   onChange={(e) => setGeneralNotes(e.target.value)}
-                  className="h-20"
+                  className="min-h-24"
                 />
               </div>
 
@@ -1180,6 +1175,7 @@ export default function DailyInspection() {
       </Dialog>
 
       {/* Диалог настройки чек-листов */}
+      {isAdmin && (
       <Dialog open={isAdminDialogOpen} onOpenChange={setIsAdminDialogOpen}>
         <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -1192,10 +1188,11 @@ export default function DailyInspection() {
           <ChecklistAdminPanel
             equipment={activeEquipment}
             onSave={handleSaveChecklist}
-            getChecklistByEquipmentId={getChecklistByEquipmentId}
+            getChecklistByEquipmentId={(id) => getChecklistByEquipmentId(id) ?? null}
           />
         </DialogContent>
       </Dialog>
-    </div>
+      )}
+    </>
   );
 }

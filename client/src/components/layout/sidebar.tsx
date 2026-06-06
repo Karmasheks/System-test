@@ -1,15 +1,36 @@
+import { useEffect, useRef } from "react";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
+import { useAccessControl } from "@/hooks/use-access-control";
 import { useUserStatus } from "@/hooks/use-user-status";
 import { useSidebarState } from "@/hooks/use-sidebar-state";
-import { UserStatusSelector, getStatusBadge } from "@/components/layout/user-status";
+import { UserStatusSelector, getStatusDotColor } from "@/components/layout/user-status";
+import { EmployeePresencePanel } from "@/components/layout/employee-presence-panel";
+import { UserAvatar } from "@/components/user-avatar";
 import { Button } from "@/components/ui/button";
-import { BarChart2, Users, Calendar, Wrench, FileText, Settings, CheckSquare, Clipboard, ChartBar, ClipboardCheck, CheckCircle } from "lucide-react";
+import { cn } from "@/lib/utils";
+import {
+  BarChart2,
+  Users,
+  Calendar,
+  Wrench,
+  CheckSquare,
+  ChartBar,
+  ClipboardCheck,
+  UserCircle,
+  Building2,
+  Wallet,
+  FolderOpen,
+  Package,
+  PanelLeftClose,
+  PanelLeftOpen,
+} from "lucide-react";
 
 export function Sidebar() {
   const [location] = useLocation();
   const { user } = useAuth();
-  const { users, getCurrentUserStatus, setCurrentUserStatus } = useUserStatus();
+  const { canViewModule, canAccessTasksSection, canViewEmployeePresence } = useAccessControl();
+  const { users, getCurrentUserStatus, getCurrentUserActivityStatus, isCurrentUserOnVacation, getCurrentUserExpiresAt, setCurrentUserStatus } = useUserStatus();
   const { isCollapsed, toggleCollapsed } = useSidebarState();
 
 
@@ -19,40 +40,75 @@ export function Sidebar() {
       section: "Основное",
       items: [
         {
+          module: "dashboard" as const,
           name: "Панель управления",
           href: "/dashboard",
           icon: <BarChart2 className="w-5 h-5" />,
           active: location === "/dashboard" || location === "/",
         },
         {
-          name: "График ТО",
+          module: "schedule" as const,
+          name: "План ТО и задач",
           href: "/schedule",
           icon: <Calendar className="w-5 h-5" />,
           active: location === "/schedule",
         },
         {
+          module: "equipment" as const,
           name: "Оборудование",
           href: "/equipment",
           icon: <Wrench className="w-5 h-5" />,
           active: location === "/equipment",
         },
         {
+          module: "daily_inspection" as const,
           name: "Ежедневные осмотры",
           href: "/daily-inspection",
           icon: <ClipboardCheck className="w-5 h-5" />,
           active: location === "/daily-inspection",
         },
         {
-          name: "Техническое обслуживание",
-          href: "/maintenance",
-          icon: <Clipboard className="w-5 h-5" />,
-          active: location === "/maintenance",
-        },
-        {
-          name: "Задачи",
+          module: "tasks" as const,
+          alsoModule: "service_requests" as const,
+          name: "Задачи и заявки",
           href: "/tasks",
           icon: <CheckSquare className="w-5 h-5" />,
-          active: location === "/tasks",
+          active: location === "/tasks" || location.startsWith("/tasks?"),
+        },
+        {
+          module: "contacts" as const,
+          name: "Контакты",
+          href: "/contacts",
+          icon: <UserCircle className="w-5 h-5" />,
+          active: location === "/contacts",
+        },
+        {
+          module: "suppliers" as const,
+          name: "Поставщики",
+          href: "/suppliers",
+          icon: <Building2 className="w-5 h-5" />,
+          active: location === "/suppliers",
+        },
+        {
+          module: "warehouse" as const,
+          name: "Склад",
+          href: "/warehouse",
+          icon: <Package className="w-5 h-5" />,
+          active: location === "/warehouse",
+        },
+        {
+          module: "budget" as const,
+          name: "Затраты (Бюджет)",
+          href: "/budget",
+          icon: <Wallet className="w-5 h-5" />,
+          active: location === "/budget",
+        },
+        {
+          module: "documents" as const,
+          name: "Документы",
+          href: "/documents",
+          icon: <FolderOpen className="w-5 h-5" />,
+          active: location === "/documents",
         }
       ]
     },
@@ -60,12 +116,14 @@ export function Sidebar() {
       section: "Администрирование",
       items: [
         {
+          module: "users" as const,
           name: "Пользователи",
           href: "/users",
           icon: <Users className="w-5 h-5" />,
           active: location === "/users",
         },
         {
+          module: "reports" as const,
           name: "Отчеты",
           href: "/reports",
           icon: <ChartBar className="w-5 h-5" />,
@@ -75,69 +133,107 @@ export function Sidebar() {
     }
   ];
 
-  // Получаем только пользователей со статусом "на работе" для отображения в боковой панели
-  const workingUsers = users.filter(user => user.status === 'working');
-  const displayUsers = workingUsers.slice(0, 5);
+  const showEmployeePresence = canViewEmployeePresence();
+  const navRef = useRef<HTMLElement>(null);
+  const SIDEBAR_SCROLL_KEY = "sidebar-nav-scroll";
+
+  useEffect(() => {
+    const nav = navRef.current;
+    if (!nav) return;
+
+    const saved = sessionStorage.getItem(SIDEBAR_SCROLL_KEY);
+    if (saved) {
+      nav.scrollTop = Number.parseInt(saved, 10);
+    }
+
+    const saveScroll = () => {
+      sessionStorage.setItem(SIDEBAR_SCROLL_KEY, String(nav.scrollTop));
+    };
+
+    nav.addEventListener("scroll", saveScroll, { passive: true });
+    return () => nav.removeEventListener("scroll", saveScroll);
+  }, []);
 
   return (
-    <aside className={`sidebar fixed left-0 top-0 z-40 hidden lg:flex flex-col h-full bg-gray-900 border-r border-gray-700 shadow-sm transition-all duration-300 ${
-      isCollapsed ? 'w-16' : 'w-64'
-    }`}>
-      <div className="p-5 border-b border-gray-700">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center">
-            <div className="w-8 h-8 rounded-md bg-blue-600 flex items-center justify-center">
-              <BarChart2 className="text-white text-sm" />
+    <aside
+      className={cn(
+        "sidebar fixed left-0 top-0 z-40 hidden lg:flex flex-col h-full bg-gray-900 border-r border-gray-700 shadow-sm transition-all duration-300",
+        isCollapsed ? "w-16" : "w-64"
+      )}
+    >
+      <div className={cn("border-b border-gray-700 shrink-0", isCollapsed ? "p-2" : "p-4")}>
+        <div
+          className={cn(
+            "flex items-center gap-2",
+            isCollapsed ? "flex-col" : "justify-between"
+          )}
+        >
+          <div className={cn("flex items-center min-w-0", !isCollapsed && "flex-1")}>
+            <div className="w-8 h-8 shrink-0 rounded-md bg-blue-600 flex items-center justify-center">
+              <BarChart2 className="text-white w-4 h-4" />
             </div>
             {!isCollapsed && (
-              <div className="ml-3">
-                <h1 className="text-xl font-semibold text-white">StarLine</h1>
-                <p className="text-sm text-gray-400">Победит 4</p>
+              <div className="ml-3 min-w-0">
+                <h1 className="text-lg font-semibold text-white truncate">StarLine</h1>
               </div>
             )}
           </div>
-          <Button 
-            variant="ghost" 
-            size="icon" 
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={toggleCollapsed}
-            className="text-gray-400 hover:text-gray-200"
+            title={isCollapsed ? "Развернуть меню" : "Свернуть меню"}
+            aria-label={isCollapsed ? "Развернуть меню" : "Свернуть меню"}
+            className="shrink-0 text-gray-300 hover:text-white hover:bg-gray-800"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
-            </svg>
+            {isCollapsed ? (
+              <PanelLeftOpen className="h-5 w-5" />
+            ) : (
+              <PanelLeftClose className="h-5 w-5" />
+            )}
           </Button>
         </div>
       </div>
-      
-      <nav className="flex-grow overflow-y-auto p-4">
-        {navigation.map((section, idx) => (
-          <div key={`section-${idx}`} className="mb-6">
+
+      <nav
+        ref={navRef}
+        className={cn("flex-grow overflow-y-auto overflow-x-hidden", isCollapsed ? "px-1 py-2" : "p-4")}
+      >
+        {navigation.map((section, idx) => {
+          const visibleItems = section.items.filter((item) => {
+            if (item.module === "tasks") {
+              return canAccessTasksSection();
+            }
+            return canViewModule(item.module);
+          });
+          if (visibleItems.length === 0) return null;
+          return (
+          <div key={`section-${idx}`} className={cn(isCollapsed ? "mb-2" : "mb-6")}>
             {!isCollapsed && (
-              <p className="uppercase text-xs font-semibold text-white mb-2">{section.section}</p>
+              <p className="uppercase text-xs font-semibold text-gray-400 mb-2 px-2">
+                {section.section}
+              </p>
             )}
-            <ul className="space-y-2">
-              {section.items.map((item, itemIdx) => (
+            {isCollapsed && idx > 0 && (
+              <div className="my-2 mx-auto w-8 border-t border-gray-700" />
+            )}
+            <ul className={cn(isCollapsed ? "space-y-1" : "space-y-2")}>
+              {visibleItems.map((item, itemIdx) => (
                 <li key={`item-${idx}-${itemIdx}`}>
                   <Link href={item.href}>
-                    <div className={`flex items-center px-4 py-3 rounded-md font-medium cursor-pointer
-                      ${item.active 
-                        ? "text-white bg-blue-900/20"
-                        : "text-gray-300 hover:bg-gray-700/50 hover:text-white"}`}>
-                      {item.icon}
-                      {!isCollapsed && (
-                        <>
-                          <span className="ml-3">{item.name}</span>
-                          {item.badge && item.badge > 0 && (
-                            <span className="ml-auto bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full">
-                              {item.badge}
-                            </span>
-                          )}
-                        </>
+                    <div
+                      title={isCollapsed ? item.name : undefined}
+                      className={cn(
+                        "flex items-center rounded-md font-medium cursor-pointer transition-colors",
+                        isCollapsed ? "justify-center p-2.5" : "px-3 py-2.5",
+                        item.active
+                          ? "text-white bg-blue-600/30 ring-1 ring-blue-500/40"
+                          : "text-gray-300 hover:bg-gray-800 hover:text-white"
                       )}
-                      {isCollapsed && item.badge && item.badge > 0 && (
-                        <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold px-1.5 py-0.5 rounded-full">
-                          {item.badge}
-                        </span>
+                    >
+                      <span className="shrink-0">{item.icon}</span>
+                      {!isCollapsed && (
+                        <span className="ml-3 truncate text-sm">{item.name}</span>
                       )}
                     </div>
                   </Link>
@@ -145,88 +241,53 @@ export function Sidebar() {
               ))}
             </ul>
           </div>
-        ))}
+          );
+        })}
         
-        {!isCollapsed && (
+        {!isCollapsed && showEmployeePresence && (
           <div className="mt-8 pt-6 border-t border-gray-700">
-            <h3 className="px-4 text-xs font-semibold text-gray-400 uppercase tracking-wider flex items-center justify-between">
-              Сотрудники на работе
-              <span className="bg-green-900 text-green-300 text-xs px-2 py-1 rounded-full">
-                {workingUsers.length}
-              </span>
+            <h3 className="px-4 text-xs font-semibold text-gray-400 uppercase tracking-wider">
+              Присутствие
             </h3>
-            <ul className="mt-3 space-y-2">
-              {displayUsers.length > 0 ? (
-                displayUsers.map((member) => (
-                  <li key={member.id}>
-                    <div className="flex items-center px-4 py-2 text-sm text-gray-300 hover:bg-gray-700/50 rounded-md">
-                      <div className="w-7 h-7 rounded-full bg-gray-700 flex items-center justify-center text-xs font-medium text-white">
-                        {member.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
-                      </div>
-                      <div className="ml-3 flex-1 min-w-0">
-                        <p className="text-sm font-medium text-white truncate">
-                          {member.name.split(' ')[1]} {member.name.split(' ')[2]?.[0]}.
-                        </p>
-                        <div className="mt-1">
-                          {getStatusBadge(member.status, true)}
-                        </div>
-                      </div>
-                    </div>
-                  </li>
-                ))
-              ) : (
-                <li className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400 text-center">
-                  Нет сотрудников на работе
-                </li>
-              )}
-            </ul>
+            <EmployeePresencePanel users={users} variant="sidebar" className="mt-2" />
           </div>
         )}
-        
-        {isCollapsed && displayUsers.length > 0 && (
-          <div className="mt-8 pt-6 border-t border-gray-200 dark:border-gray-700">
-            <div className="flex flex-col items-center space-y-2 px-2">
-              {displayUsers.slice(0, 3).map((member) => (
-                <div 
-                  key={member.id}
-                  className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-xs font-medium"
-                  title={member.name}
-                >
-                  {member.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
-                </div>
-              ))}
-              {workingUsers.length > 3 && (
-                <div className="w-6 h-6 rounded-full bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300 flex items-center justify-center text-xs font-bold">
-                  +{workingUsers.length - 3}
-                </div>
-              )}
-            </div>
+
+        {isCollapsed && showEmployeePresence && (
+          <div className="mt-4 pt-4 border-t border-gray-700">
+            <EmployeePresencePanel users={users} variant="sidebar-collapsed" />
           </div>
         )}
       </nav>
-      
-      {/* User profile with status */}
-      <div className="p-4 border-t border-gray-200 dark:border-gray-700">
+
+      <div className={cn("border-t border-gray-700 shrink-0", isCollapsed ? "p-2" : "p-4")}>
         {!isCollapsed ? (
           <UserStatusSelector
             currentStatus={getCurrentUserStatus()}
+            activityStatus={getCurrentUserActivityStatus()}
+            onVacation={isCurrentUserOnVacation()}
+            expiresAt={getCurrentUserExpiresAt()}
             onStatusChange={setCurrentUserStatus}
-            userName={user?.name || "Алекс Морган"}
+            userName={user?.name || "Пользователь"}
+            avatarUrl={user?.avatar}
           />
         ) : (
           <div className="flex justify-center">
-            <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center relative">
-              <span className="text-xs font-medium text-white">
-                {user?.name?.split(' ').map(n => n[0]).join('').slice(0, 2) || "АМ"}
-              </span>
-              <div className={`absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-gray-900 ${
-                getCurrentUserStatus() === 'working' ? 'bg-blue-500' :
-                getCurrentUserStatus() === 'online' ? 'bg-green-500' :
-                getCurrentUserStatus() === 'break' ? 'bg-yellow-500' :
-                getCurrentUserStatus() === 'vacation' ? 'bg-purple-500' :
-                getCurrentUserStatus() === 'busy' ? 'bg-orange-500' :
-                'bg-red-500'
-              }`}></div>
+            <div className="relative">
+              <UserAvatar
+                name={user?.name}
+                avatarUrl={user?.avatar}
+                className="h-8 w-8"
+                fallbackClassName="text-xs bg-gray-700 text-white"
+              />
+              <div
+                className={`absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-gray-900 ${getStatusDotColor(
+                  isCurrentUserOnVacation() &&
+                    (getCurrentUserActivityStatus() === "absent" || getCurrentUserActivityStatus() === "vacation")
+                    ? "vacation"
+                    : getCurrentUserActivityStatus()
+                )}`}
+              />
             </div>
           </div>
         )}

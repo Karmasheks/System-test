@@ -1,40 +1,34 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import type { Equipment } from '../../../shared/schema';
+import { EquipmentImageUrlsField } from '@/components/equipment-image-urls';
+import { EquipmentLinksField } from '@/components/equipment-links-field';
+import { useTeamUsers } from "@/hooks/use-warehouse";
+import { useEquipmentTypes } from "@/hooks/use-equipment-types";
+import { SubdivisionPicker } from "@/components/subdivision-picker";
+import { useEquipmentLinks } from "@/hooks/use-equipment-links";
+import { linksToFormInput, type EquipmentLinkInput } from "@shared/equipment-link-constants";
+
+const NONE_RESPONSIBLE = "__none__";
 
 interface EquipmentFormProps {
   initialData?: Equipment;
-  onSave: (data: Equipment) => void;
+  allEquipment: Equipment[];
+  onSave: (data: Equipment, links: EquipmentLinkInput[]) => void;
   onCancel: () => void;
   isEdit?: boolean;
 }
 
-const equipmentTypes = [
-  "Фрезерный станок",
-  "Токарный станок", 
-  "Шлифовальный станок",
-  "Сверлильный станок",
-  "Гравировальный станок",
-  "Плазменная резка",
-  "Лазерная резка",
-  "Гибочный станок",
-  "Прессовое оборудование",
-  "Сварочное оборудование",
-  "Другое"
-];
-
-const responsibleOptions = [
-  "Иванов И.И.",
-  "Петров П.П.", 
-  "Сидоров С.С.",
-  "Калюжный Никита"
-];
-
-export default function EquipmentForm({ initialData, onSave, onCancel, isEdit = false }: EquipmentFormProps) {
+export default function EquipmentForm({ initialData, allEquipment, onSave, onCancel, isEdit = false }: EquipmentFormProps) {
+  const { data: teamUsers = [] } = useTeamUsers();
+  const { data: typesFromApi = [] } = useEquipmentTypes();
+  const { data: existingLinks = [] } = useEquipmentLinks(initialData?.id);
+  const [linkDrafts, setLinkDrafts] = useState<EquipmentLinkInput[]>([]);
+  const [linksLoaded, setLinksLoaded] = useState(false);
   const [formData, setFormData] = useState({
     id: "",
     name: "",
@@ -44,11 +38,52 @@ export default function EquipmentForm({ initialData, onSave, onCancel, isEdit = 
     lastMaintenance: "",
     nextMaintenance: "",
     responsible: "",
-    maintenancePeriods: [] as string[]
+    department: "",
+    subdivisionId: "",
+    maintenancePeriods: [] as string[],
+    model: "",
+    serialNumber: "",
+    inventoryNumber: "",
+    installationDate: "",
+    warrantyUntil: "",
+    location: "",
+    confluenceUrl: "",
+    imageUrls: [] as string[],
   });
 
   const [customType, setCustomType] = useState("");
   const [isCustomType, setIsCustomType] = useState(false);
+
+  const equipmentTypes = useMemo(() => {
+    const names = typesFromApi.map((t) => t.name);
+    const set = new Set(names);
+    if (formData.type?.trim() && !set.has(formData.type.trim())) {
+      names.push(formData.type.trim());
+    }
+    return names.sort((a, b) => a.localeCompare(b, "ru"));
+  }, [typesFromApi, formData.type]);
+
+  const responsibleOptions = useMemo(() => {
+    const names = teamUsers.map((user) => user.name).filter(Boolean);
+    if (formData.responsible && !names.includes(formData.responsible)) {
+      return [formData.responsible, ...names];
+    }
+    return names;
+  }, [teamUsers, formData.responsible]);
+
+  useEffect(() => {
+    if (initialData?.id && !linksLoaded && existingLinks) {
+      setLinkDrafts(linksToFormInput(existingLinks));
+      setLinksLoaded(true);
+    }
+  }, [initialData?.id, existingLinks, linksLoaded]);
+
+  useEffect(() => {
+    if (!initialData?.id) {
+      setLinkDrafts([]);
+      setLinksLoaded(false);
+    }
+  }, [initialData?.id]);
 
   useEffect(() => {
     if (initialData) {
@@ -61,16 +96,26 @@ export default function EquipmentForm({ initialData, onSave, onCancel, isEdit = 
         lastMaintenance: initialData.lastMaintenance || "",
         nextMaintenance: initialData.nextMaintenance || "",
         responsible: initialData.responsible || "",
-        maintenancePeriods: initialData.maintenancePeriods || []
+        department: initialData.department || "",
+        subdivisionId: initialData.subdivisionId ? String(initialData.subdivisionId) : "",
+        maintenancePeriods: initialData.maintenancePeriods || [],
+        model: initialData.model || "",
+        serialNumber: initialData.serialNumber || "",
+        inventoryNumber: initialData.inventoryNumber || "",
+        installationDate: initialData.installationDate || "",
+        warrantyUntil: initialData.warrantyUntil || "",
+        location: initialData.location || "",
+        confluenceUrl: initialData.confluenceUrl || "",
+        imageUrls: initialData.imageUrls ?? [],
       });
-      
+
       const isCustom = !equipmentTypes.includes(initialData.type || "");
       setIsCustomType(isCustom);
       if (isCustom) {
         setCustomType(initialData.type || "");
       }
     }
-  }, [initialData]);
+  }, [initialData, equipmentTypes]);
 
   const handleFieldChange = useCallback((field: string, value: string) => {
     setFormData(prev => ({
@@ -103,7 +148,25 @@ export default function EquipmentForm({ initialData, onSave, onCancel, isEdit = 
   }, []);
 
   const handleSave = () => {
-    onSave(formData);
+    if (!formData.name.trim() || !formData.type.trim()) {
+      return;
+    }
+    onSave({
+      ...formData,
+      name: formData.name.trim(),
+      type: formData.type.trim(),
+      subdivisionId: formData.subdivisionId ? Number(formData.subdivisionId) : null,
+      responsible: formData.responsible.trim(),
+      description: formData.description || null,
+      model: formData.model || null,
+      serialNumber: formData.serialNumber || null,
+      inventoryNumber: formData.inventoryNumber || null,
+      installationDate: formData.installationDate || null,
+      warrantyUntil: formData.warrantyUntil || null,
+      location: formData.location || null,
+      confluenceUrl: formData.confluenceUrl || null,
+      imageUrls: formData.imageUrls.filter((u) => u.trim()),
+    } as Equipment, linkDrafts);
   };
 
   const maintenancePeriods = ["1М - ТО", "3М - ТО", "6М - ТО", "1Г - ТО"];
@@ -173,6 +236,92 @@ export default function EquipmentForm({ initialData, onSave, onCancel, isEdit = 
         />
       </div>
 
+      <SubdivisionPicker
+        value={formData.subdivisionId}
+        onChange={(id) => handleFieldChange("subdivisionId", id)}
+        required
+      />
+
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <Label htmlFor="location">Местоположение</Label>
+          <Input
+            id="location"
+            value={formData.location}
+            onChange={(e) => handleFieldChange("location", e.target.value)}
+            placeholder="Цех / участок"
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <Label htmlFor="model">Модель</Label>
+          <Input id="model" value={formData.model} onChange={(e) => handleFieldChange("model", e.target.value)} />
+        </div>
+        <div>
+          <Label htmlFor="serialNumber">Серийный №</Label>
+          <Input
+            id="serialNumber"
+            value={formData.serialNumber}
+            onChange={(e) => handleFieldChange("serialNumber", e.target.value)}
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <Label htmlFor="inventoryNumber">Инвентарный №</Label>
+          <Input
+            id="inventoryNumber"
+            value={formData.inventoryNumber}
+            onChange={(e) => handleFieldChange("inventoryNumber", e.target.value)}
+          />
+        </div>
+        <div>
+          <Label htmlFor="confluenceUrl">Confluence</Label>
+          <Input
+            id="confluenceUrl"
+            value={formData.confluenceUrl}
+            onChange={(e) => handleFieldChange("confluenceUrl", e.target.value)}
+            placeholder="https://..."
+          />
+        </div>
+      </div>
+
+      <EquipmentImageUrlsField
+        urls={formData.imageUrls}
+        onChange={(imageUrls) => setFormData((prev) => ({ ...prev, imageUrls }))}
+      />
+
+      <EquipmentLinksField
+        equipmentId={initialData?.id}
+        allEquipment={allEquipment}
+        value={linkDrafts}
+        onChange={setLinkDrafts}
+      />
+
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <Label htmlFor="installationDate">Дата установки</Label>
+          <Input
+            id="installationDate"
+            type="date"
+            value={formData.installationDate}
+            onChange={(e) => handleFieldChange("installationDate", e.target.value)}
+          />
+        </div>
+        <div>
+          <Label htmlFor="warrantyUntil">Гарантия до</Label>
+          <Input
+            id="warrantyUntil"
+            type="date"
+            value={formData.warrantyUntil}
+            onChange={(e) => handleFieldChange("warrantyUntil", e.target.value)}
+          />
+        </div>
+      </div>
+
       <div className="grid grid-cols-2 gap-4">
         <div>
           <Label htmlFor="status">Статус</Label>
@@ -189,17 +338,28 @@ export default function EquipmentForm({ initialData, onSave, onCancel, isEdit = 
           </Select>
         </div>
         <div>
-          <Label htmlFor="responsible">Ответственный *</Label>
-          <Select value={formData.responsible} onValueChange={(value) => handleFieldChange('responsible', value)}>
+          <Label htmlFor="responsible">Ответственный</Label>
+          <Select
+            value={formData.responsible || NONE_RESPONSIBLE}
+            onValueChange={(value) =>
+              handleFieldChange("responsible", value === NONE_RESPONSIBLE ? "" : value)
+            }
+          >
             <SelectTrigger>
-              <SelectValue placeholder="Выберите ответственного" />
+              <SelectValue placeholder="Не назначен" />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value={NONE_RESPONSIBLE}>Не назначен</SelectItem>
               {responsibleOptions.map((person) => (
                 <SelectItem key={person} value={person}>{person}</SelectItem>
               ))}
             </SelectContent>
           </Select>
+          {teamUsers.length === 0 && (
+            <p className="text-xs text-muted-foreground mt-1">
+              В системе пока нет пользователей — можно сохранить без ответственного
+            </p>
+          )}
         </div>
       </div>
 
@@ -246,7 +406,7 @@ export default function EquipmentForm({ initialData, onSave, onCancel, isEdit = 
         <Button variant="outline" onClick={onCancel}>
           Отмена
         </Button>
-        <Button onClick={handleSave}>
+        <Button onClick={handleSave} disabled={!formData.name.trim() || !formData.type.trim()}>
           {isEdit ? 'Сохранить изменения' : 'Добавить оборудование'}
         </Button>
       </div>

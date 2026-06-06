@@ -1,7 +1,8 @@
 import { eq, desc, and, gte, lte } from "drizzle-orm";
 import { db } from "./db";
 import {
-  users, roles, campaigns, tasks, metrics, activities, equipment, maintenanceRecords,
+  users, roles, campaigns, tasks, taskStatusHistory, metrics, activities, equipment, maintenanceRecords,
+  maintenanceStatusHistory,
   remarks, inspectionChecklists, dailyInspections, notifications,
   type User, type Role, type Campaign, type Task, type Metric, type Activity,
   type Equipment, type MaintenanceRecord, type Remark, type InspectionChecklist,
@@ -9,7 +10,8 @@ import {
   type InsertUser, type InsertRole, type InsertCampaign, type InsertTask,
   type InsertMetric, type InsertActivity, type InsertEquipment,
   type InsertMaintenanceRecord, type InsertRemark, type InsertInspectionChecklist,
-  type InsertDailyInspection, type InsertNotification
+  type InsertDailyInspection, type InsertNotification,
+  type TaskStatusHistory, type MaintenanceStatusHistory,
 } from "../shared/schema";
 
 export interface IStorage {
@@ -110,6 +112,7 @@ export interface IStorage {
   updateNotification(id: number, notification: Partial<InsertNotification>): Promise<Notification | undefined>;
   markNotificationAsRead(id: number): Promise<Notification | undefined>;
   archiveNotification(id: number): Promise<Notification | undefined>;
+  archiveAllNotificationsForUser(userId: number): Promise<number>;
   deleteNotification(id: number): Promise<boolean>;
 }
 
@@ -132,12 +135,16 @@ export class PostgreSQLStorage implements IStorage {
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
-    const result = await db.insert(users).values(insertUser).returning();
+    const result = await db.insert(users).values(insertUser as typeof users.$inferInsert).returning();
     return result[0];
   }
 
   async updateUser(id: number, updateData: Partial<InsertUser>): Promise<User | undefined> {
-    const result = await db.update(users).set(updateData).where(eq(users.id, id)).returning();
+    const result = await db
+      .update(users)
+      .set(updateData as Partial<typeof users.$inferInsert>)
+      .where(eq(users.id, id))
+      .returning();
     return result[0];
   }
 
@@ -536,7 +543,7 @@ export class PostgreSQLStorage implements IStorage {
 
   async markNotificationAsRead(id: number): Promise<Notification | undefined> {
     const result = await db.update(notifications)
-      .set({ isRead: true })
+      .set({ isRead: true, readAt: new Date() })
       .where(eq(notifications.id, id))
       .returning();
     return result[0];
@@ -544,15 +551,66 @@ export class PostgreSQLStorage implements IStorage {
 
   async archiveNotification(id: number): Promise<Notification | undefined> {
     const result = await db.update(notifications)
-      .set({ isArchived: true })
+      .set({ isArchived: true, isRead: true, readAt: new Date() })
       .where(eq(notifications.id, id))
       .returning();
     return result[0];
   }
 
+  async archiveAllNotificationsForUser(userId: number): Promise<number> {
+    const result = await db.update(notifications)
+      .set({ isArchived: true, isRead: true, readAt: new Date() })
+      .where(and(
+        eq(notifications.userId, userId),
+        eq(notifications.isArchived, false)
+      ))
+      .returning();
+    return result.length;
+  }
+
   async deleteNotification(id: number): Promise<boolean> {
     const result = await db.delete(notifications).where(eq(notifications.id, id)).returning();
     return result.length > 0;
+  }
+
+  async createTaskStatusHistory(data: {
+    taskId: number;
+    fromStatus?: string | null;
+    toStatus: string;
+    changedById: number;
+    changedByName: string;
+    comment?: string;
+  }): Promise<TaskStatusHistory> {
+    const [row] = await db.insert(taskStatusHistory).values(data).returning();
+    return row;
+  }
+
+  async getTaskStatusHistory(taskId: number): Promise<TaskStatusHistory[]> {
+    return db
+      .select()
+      .from(taskStatusHistory)
+      .where(eq(taskStatusHistory.taskId, taskId))
+      .orderBy(desc(taskStatusHistory.createdAt));
+  }
+
+  async createMaintenanceStatusHistory(data: {
+    maintenanceRecordId: number;
+    fromStatus?: string | null;
+    toStatus: string;
+    changedById: number;
+    changedByName: string;
+    comment?: string;
+  }): Promise<MaintenanceStatusHistory> {
+    const [row] = await db.insert(maintenanceStatusHistory).values(data).returning();
+    return row;
+  }
+
+  async getMaintenanceStatusHistory(maintenanceRecordId: number): Promise<MaintenanceStatusHistory[]> {
+    return db
+      .select()
+      .from(maintenanceStatusHistory)
+      .where(eq(maintenanceStatusHistory.maintenanceRecordId, maintenanceRecordId))
+      .orderBy(desc(maintenanceStatusHistory.createdAt));
   }
 }
 

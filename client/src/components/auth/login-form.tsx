@@ -14,7 +14,7 @@ import { Eye, EyeOff, LogIn } from "lucide-react";
 
 const loginSchema = z.object({
   email: z.string().email("Пожалуйста, введите корректный email"),
-  password: z.string().min(6, "Пароль должен содержать минимум 6 символов"),
+  password: z.string().min(5, "Пароль должен содержать минимум 5 символов"),
 });
 
 type LoginFormValues = z.infer<typeof loginSchema>;

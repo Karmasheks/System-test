@@ -1,3 +1,6 @@
 node_modules
 dist/
 .env
+env
+supabase-config.env
+uploads/

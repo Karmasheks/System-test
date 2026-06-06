@@ -14,7 +14,107 @@ declare global {
 }
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { loginSchema, registerSchema, insertUserSchema } from "@shared/schema";
+import {
+  normalizeEquipmentRecord,
+  parseEquipmentCreatePayload,
+  parseEquipmentUpdatePayload,
+  generateNextEquipmentId,
+} from "@shared/equipment-utils";
+import { registerServiceRequestRoutes } from "./service-request-routes";
+import { registerAssetManagementRoutes } from "./asset-management-routes";
+import { registerWarehouseRoutes } from "./warehouse-routes";
+import { registerPermissionsRoutes } from "./permissions-routes";
+import { roleProfileExists } from "./permissions-service";
+import { registerUploadRoutes } from "./upload-routes";
+import {
+  deleteEquipmentLinksForEquipment,
+  getEquipmentLinksForEquipment,
+  syncEquipmentLinks,
+} from "./equipment-link-service";
+import { getEquipmentActivity, getEquipmentLinkHistory } from "./equipment-activity-service";
+import {
+  logEquipmentLocationChange,
+  logEquipmentStatusChange,
+} from "./equipment-event-log";
+import {
+  reservePartForWork,
+  issueTaskReservations,
+  issueMaintenanceReservations,
+  cancelTaskReservations,
+  listTaskReservations,
+} from "./part-reservation-service";
+import { listTaskComments, addTaskComment } from "./task-comments-service";
+import {
+  assertCanAddTaskComment,
+  assertCanViewTaskComments,
+  assertCanViewTaskDetails,
+  assertCanUpdateTask,
+  TaskAccessError,
+} from "./task-access-service";
+import { notifyTaskCommentAdded, notifyNewTaskCreated } from "./task-notifications";
+import { syncTaskReminderNotifications } from "./notification-sync-service";
+
+const lastReminderSyncByUser = new Map<number, number>();
+const REMINDER_SYNC_INTERVAL_MS = 15 * 60 * 1000;
+import {
+  getTaskCoexecutors,
+  addTaskCoexecutor,
+  removeTaskCoexecutor,
+} from "./task-coexecutors-service";
+import { addTaskCommentSchema, addCoexecutorSchema, reservePartSchema } from "@shared/schema";
+import {
+  createTaskFromRemark,
+  createTaskFromMaintenance,
+  createTaskFromServiceRequest,
+  createSubtask,
+  listSubtasks,
+  listTaskTree,
+  summarizeTaskTree,
+  cascadeCompleteSubtasks,
+  convertTaskToServiceRequest,
+  createMaintenanceFromServiceRequest,
+  createRemarkFromDailyInspection,
+  countIssuesFromCheckResults,
+  deriveWorkingStatus,
+  getServiceRequestWorkProgress,
+  taskCompletionBlockedByServiceRequest,
+  tryCompleteParentTaskForServiceRequest,
+} from "./task-orchestration-service";
+import { getEffectivePermissionsForUser, ensureDefaultRoleProfiles } from "./permissions-service";
+import { canCreateTasks, canViewCreatedTasks } from "@shared/permissions-constants";
+import { normalizeActualHours } from "@shared/task-hours";
+import {
+  buildPresenceUpdate,
+  expireStalePresenceUsers,
+  resolvePresence,
+  toPresenceApiRow,
+} from "./presence-service";
+import {
+  createEquipmentType,
+  findOrCreateEquipmentType,
+  listEquipmentTypes,
+} from "./equipment-types-service";
+import { registerSubdivisionRoutes } from "./subdivision-routes";
+import { initSubdivisionSystem, resolveSubdivisionFields } from "./subdivision-service";
+import { resolveTaskSubdivisionId } from "./subdivision-resolve";
+import {
+  assertSubdivisionAccess,
+  getSubdivisionScopeForRequest,
+  subdivisionForbidden,
+} from "./subdivision-scope-middleware";
+import { filterBySubdivisionScope } from "@shared/subdivision-scope";
+import { addPresenceSubscriber, notifyPresenceUpdated } from "./presence-events";
+import {
+  loginSchema,
+  registerSchema,
+  insertUserSchema,
+  syncEquipmentLinksSchema,
+  updateProfileSchema,
+  avatarUrlSchema,
+  updatePresenceSchema,
+  adminUpdatePresenceSchema,
+  updateVacationPeriodsSchema,
+} from "@shared/schema";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import session from "express-session";
@@ -45,7 +145,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);
   const jwtSecret = requireSecret("JWT_SECRET");
   const sessionSecret = requireSecret("SESSION_SECRET");
-  const writeRoles = ["admin", "operator", "engineer", "technician"];
+  const writeRoles = ["admin", "manager", "operator", "engineer", "technician", "service_engineer"];
+  const equipmentEditRoles = ["admin", "manager", "engineer", "technician", "service_engineer"];
   
   // Session setup
   const SessionStore = MemoryStore(session);
@@ -194,6 +295,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         { expiresIn: "1d" }
       );
       
+      await storage.updateUser(user.id, { lastLoginAt: new Date() });
+
       // Create login activity
       await storage.createActivity({
         userId: user.id,
@@ -224,11 +327,113 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!user) {
         return res.status(404).json({ message: "User not found" });
       }
+
+      const effectivePermissions = await getEffectivePermissionsForUser(user);
       
       // Return user without password
       const { password, ...userWithoutPassword } = user;
-      return res.status(200).json(userWithoutPassword);
+      return res.status(200).json({ ...userWithoutPassword, effectivePermissions });
     } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.patch("/api/auth/profile", authenticate, async (req, res) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ message: "Authentication required" });
+      }
+
+      const payload = updateProfileSchema.parse(req.body);
+
+      if (payload.email) {
+        const existingUser = await storage.getUserByEmail(payload.email);
+        if (existingUser && existingUser.id !== req.user.id) {
+          return res.status(400).json({ message: "Пользователь с таким email уже существует" });
+        }
+      }
+
+      const updateData: Record<string, unknown> = {};
+      if (payload.name !== undefined) updateData.name = payload.name;
+      if (payload.email !== undefined) updateData.email = payload.email;
+      if (payload.position !== undefined) updateData.position = payload.position || null;
+      if (payload.phone !== undefined) updateData.phone = payload.phone || null;
+      if (payload.avatar !== undefined) {
+        updateData.avatar = payload.avatar?.trim() || null;
+      }
+
+      const updatedUser = await storage.updateUser(req.user.id, updateData);
+      if (!updatedUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const effectivePermissions = await getEffectivePermissionsForUser(updatedUser);
+      const { password, ...userWithoutPassword } = updatedUser;
+      return res.status(200).json({ ...userWithoutPassword, effectivePermissions });
+    } catch (error: any) {
+      if (error.name === "ZodError") {
+        return res.status(400).json({ message: error.errors?.[0]?.message ?? "Неверные данные" });
+      }
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.patch("/api/auth/presence", authenticate, async (req, res) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ message: "Authentication required" });
+      }
+
+      const { status } = updatePresenceSchema.parse(req.body);
+      const updatedUser = await storage.updateUser(
+        req.user.id,
+        buildPresenceUpdate(status)
+      );
+      if (!updatedUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const resolved = resolvePresence(updatedUser);
+      notifyPresenceUpdated(req.user.id);
+      const { password, ...userWithoutPassword } = updatedUser;
+      return res.status(200).json({
+        status: resolved.status,
+        activityStatus: resolved.activityStatus,
+        onVacation: resolved.onVacation,
+        lastSeen: resolved.lastSeen,
+        expiresAt: resolved.expiresAt,
+        user: userWithoutPassword,
+      });
+    } catch (error: any) {
+      if (error.name === "ZodError") {
+        return res.status(400).json({ message: error.errors?.[0]?.message ?? "Неверные данные" });
+      }
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/auth/vacation-periods", authenticate, async (req, res) => {
+    try {
+      if (!req.user) return res.status(401).json({ message: "Authentication required" });
+      const user = await storage.getUser(req.user.id);
+      if (!user) return res.status(404).json({ message: "User not found" });
+      return res.json({ periods: user.vacationPeriods ?? [] });
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.put("/api/auth/vacation-periods", authenticate, async (req, res) => {
+    try {
+      if (!req.user) return res.status(401).json({ message: "Authentication required" });
+      const { periods } = updateVacationPeriodsSchema.parse(req.body);
+      const updatedUser = await storage.updateUser(req.user.id, { vacationPeriods: periods });
+      if (!updatedUser) return res.status(404).json({ message: "User not found" });
+      return res.json({ periods: updatedUser.vacationPeriods ?? [] });
+    } catch (error: any) {
+      if (error.name === "ZodError") {
+        return res.status(400).json({ message: error.errors?.[0]?.message ?? "Неверные данные" });
+      }
       return res.status(500).json({ message: error.message });
     }
   });
@@ -360,17 +565,65 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // TASK ROUTES
   app.get("/api/tasks", authenticate, async (req, res) => {
     try {
+      if (!req.user) {
+        return res.status(401).json({ message: "Authentication required" });
+      }
+
       let tasks;
-      
-      if (req.query.userId) {
+      const workScope = req.query.scope as string | undefined;
+
+      if (workScope === "assigned" || workScope === "created") {
+        const fullUser = await storage.getUser(req.user.id);
+        if (!fullUser) return res.status(401).json({ message: "User not found" });
+        const perms = await getEffectivePermissionsForUser(fullUser);
+
+        if (workScope === "created") {
+          if (!canViewCreatedTasks(perms.taskCapabilities) && req.user.role !== "admin") {
+            return res.status(403).json({ message: "Недостаточно прав для просмотра созданных задач" });
+          }
+        }
+
+        const { listTasksForUserScope } = await import("./user-work-service");
+        tasks = await listTasksForUserScope(req.user.id, workScope);
+      } else if (req.query.userId) {
         tasks = await storage.getTasksByUserId(parseInt(req.query.userId as string));
       } else if (req.query.campaignId) {
         tasks = await storage.getTasksByCampaignId(parseInt(req.query.campaignId as string));
       } else {
         tasks = await storage.getAllTasks();
       }
+
+      const subScope = await getSubdivisionScopeForRequest(req);
+      if (subScope) {
+        tasks = filterBySubdivisionScope(tasks, subScope);
+      }
       
       return res.status(200).json(tasks);
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/tasks/stats", authenticate, async (req, res) => {
+    try {
+      let allTasks = await storage.getAllTasks();
+      const subScope = await getSubdivisionScopeForRequest(req);
+      if (subScope) {
+        allTasks = filterBySubdivisionScope(allTasks, subScope);
+      }
+
+      const stats = {
+        total: allTasks.length,
+        pending: allTasks.filter((t) => t.status === "pending").length,
+        inProgress: allTasks.filter((t) => t.status === "in_progress").length,
+        completed: allTasks.filter((t) => t.status === "completed").length,
+        overdue: allTasks.filter((t) => {
+          if (!t.dueDate || t.status === "completed") return false;
+          return new Date(t.dueDate) < new Date();
+        }).length,
+      };
+
+      return res.status(200).json(stats);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }
@@ -381,15 +634,107 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!req.user) {
         return res.status(401).json({ message: "Authentication required" });
       }
+
+      const fullUser = await storage.getUser(req.user.id);
+      if (!fullUser) return res.status(401).json({ message: "User not found" });
+      const perms = await getEffectivePermissionsForUser(fullUser);
+      if (!canCreateTasks(perms.taskCapabilities)) {
+        return res.status(403).json({ message: "Недостаточно прав для создания задач" });
+      }
       
       console.log('Received task data:', req.body);
+
+      const isAdminRole =
+        req.user.role === "admin" || req.user.role === "marketing_manager";
+
+      if (req.body.parentTaskId) {
+        const subAssigneeId =
+          isAdminRole && req.body.assigneeId ? Number(req.body.assigneeId) : null;
+        const subtask = await createSubtask(
+          Number(req.body.parentTaskId),
+          {
+            title: String(req.body.title ?? "Подзадача"),
+            description: req.body.description ?? null,
+            priority: req.body.priority ?? "medium",
+            status: req.body.status ?? "pending",
+            taskType: req.body.taskType ?? "task",
+            maintenanceType: req.body.maintenanceType ?? null,
+            equipmentId: req.body.equipmentId ?? null,
+            dueDate:
+              isAdminRole && req.body.dueDate ? new Date(req.body.dueDate) : null,
+            assigneeId: subAssigneeId ?? undefined,
+            assigneeName: subAssigneeId ? (req.body.assigneeName ?? null) : null,
+            createdBy: req.user.name,
+            createdById: req.user.id,
+          },
+          req.user
+        );
+        await storage.createTaskStatusHistory({
+          taskId: subtask.id,
+          fromStatus: null,
+          toStatus: subtask.status ?? "pending",
+          changedById: req.user.id,
+          changedByName: req.user.name,
+          comment: `Создана как подзадача #${req.body.parentTaskId}`,
+        });
+        return res.status(201).json(subtask);
+      }
       
-      // Обрабатываем даты правильно и обязательные поля
+      const hasAssignee =
+        isAdminRole &&
+        req.body.assigneeId != null &&
+        req.body.assigneeId !== "" &&
+        !Number.isNaN(Number(req.body.assigneeId));
+      const assigneeId = hasAssignee ? Number(req.body.assigneeId) : null;
+      const assigneeName = hasAssignee ? (req.body.assigneeName ?? null) : null;
+      const partReservation = req.body.partReservation as
+        | { partId?: number; quantity?: number }
+        | undefined;
+
+      const subdivisionId = await resolveTaskSubdivisionId({
+        explicitId: req.body.subdivisionId != null ? Number(req.body.subdivisionId) : null,
+        equipmentId: req.body.equipmentId ?? null,
+        userSubdivisionId: fullUser.subdivisionId,
+      });
+      if (subdivisionId) {
+        const subScope = await getSubdivisionScopeForRequest(req);
+        if (subScope) {
+          try {
+            assertSubdivisionAccess(subScope, subdivisionId);
+          } catch {
+            return subdivisionForbidden(res);
+          }
+        }
+      }
+
       const taskData = {
-        ...req.body,
+        title: String(req.body.title ?? ""),
+        description: req.body.description ? String(req.body.description) : null,
         userId: req.user.id,
-        dueDate: req.body.dueDate ? new Date(req.body.dueDate) : null,
+        assigneeId,
+        assigneeName,
+        status: req.body.status ?? "pending",
+        priority: req.body.priority ?? "medium",
+        taskType: req.body.taskType ?? null,
+        maintenanceType: req.body.maintenanceType ?? null,
+        equipmentId: req.body.equipmentId ?? null,
+        subdivisionId,
+        dueDate:
+          isAdminRole && req.body.dueDate ? new Date(req.body.dueDate) : null,
         reminderDate: req.body.reminderDate ? new Date(req.body.reminderDate) : null,
+        estimatedHours:
+          isAdminRole &&
+          req.body.estimatedHours != null &&
+          req.body.estimatedHours !== ""
+            ? Math.round(Number(req.body.estimatedHours))
+            : null,
+        actualHours:
+          req.body.actualHours != null && req.body.actualHours !== ""
+            ? normalizeActualHours(Number(req.body.actualHours))
+            : null,
+        assigneeAssignedAt: assigneeId ? new Date() : null,
+        createdBy: req.user.name,
+        createdById: req.user.id,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -397,6 +742,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log('Processed task data:', taskData);
       
       const task = await storage.createTask(taskData);
+
+      if (partReservation?.partId && partReservation?.quantity) {
+        await reservePartForWork(
+          Number(partReservation.partId),
+          Number(partReservation.quantity),
+          req.user,
+          {
+            taskId: task.id,
+            taskTitle: task.title,
+            equipmentId: task.equipmentId ?? undefined,
+          }
+        );
+      }
+
+      await storage.createTaskStatusHistory({
+        taskId: task.id,
+        fromStatus: null,
+        toStatus: task.status ?? "pending",
+        changedById: req.user.id,
+        changedByName: req.user.name,
+        comment: "Создание задачи",
+      });
+
+      await notifyNewTaskCreated(task, req.user.id);
       
       // Create activity
       await storage.createActivity({
@@ -419,30 +788,169 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!req.user) {
         return res.status(401).json({ message: "Authentication required" });
       }
-      
-      const taskId = parseInt(req.params.id);
-      const task = await storage.getTask(taskId);
-      
-      // Check if user is authorized to update the task
-      if (task && task.userId !== req.user.id && req.user.role !== "admin" && req.user.role !== "marketing_manager") {
-        return res.status(403).json({ message: "Not authorized to update this task" });
+
+      const fullUser = await storage.getUser(req.user.id);
+      if (!fullUser) return res.status(401).json({ message: "User not found" });
+      const perms = await getEffectivePermissionsForUser(fullUser);
+      if (!perms.taskCapabilities.process) {
+        return res.status(403).json({ message: "Недостаточно прав для изменения задач" });
       }
       
-      console.log('Received task update data:', req.body);
+      const taskId = parseInt(req.params.id);
+      const task = await assertCanUpdateTask(req.user, taskId);
       
+      console.log('Received task update data:', req.body);
+
+      const isAdminRole =
+        req.user.role === "admin" || req.user.role === "marketing_manager";
+      
+      const partReservation = req.body.partReservation as
+        | { partId?: number; quantity?: number }
+        | undefined;
+
       // Обрабатываем даты правильно
-      const taskUpdateData = {
+      const taskUpdateData: Record<string, unknown> = {
         ...req.body,
-        dueDate: req.body.dueDate ? new Date(req.body.dueDate) : null,
+        lastModifiedBy: req.user.name,
+        lastModifiedById: req.user.id,
+        dueDate: isAdminRole
+          ? req.body.dueDate
+            ? new Date(req.body.dueDate)
+            : null
+          : task.dueDate,
         reminderDate: req.body.reminderDate ? new Date(req.body.reminderDate) : null,
+        estimatedHours: isAdminRole
+          ? req.body.estimatedHours != null && req.body.estimatedHours !== ""
+            ? Math.round(Number(req.body.estimatedHours))
+            : null
+          : task.estimatedHours,
+        updatedAt: new Date(),
       };
+
+      if (isAdminRole && "assigneeId" in req.body) {
+        const rawAssignee = req.body.assigneeId;
+        if (rawAssignee == null || rawAssignee === "" || rawAssignee === "none") {
+          taskUpdateData.assigneeId = null;
+          taskUpdateData.assigneeName = null;
+          taskUpdateData.assigneeAssignedAt = null;
+          taskUpdateData.userId = task.createdById ?? task.userId;
+        } else {
+          const assigneeId = Number(rawAssignee);
+          if (!Number.isNaN(assigneeId)) {
+            let assigneeName = req.body.assigneeName as string | null | undefined;
+            if (!assigneeName) {
+              const assigneeUser = await storage.getUser(assigneeId);
+              assigneeName = assigneeUser?.name ?? null;
+            }
+            taskUpdateData.userId = assigneeId;
+            taskUpdateData.assigneeId = assigneeId;
+            taskUpdateData.assigneeName = assigneeName;
+            if (assigneeId !== task.assigneeId) {
+              taskUpdateData.assigneeAssignedAt = new Date();
+            }
+          }
+        }
+      } else if (
+        req.body.assigneeId != null &&
+        req.body.assigneeId !== "" &&
+        req.body.assigneeId !== "none" &&
+        perms.taskCapabilities.process
+      ) {
+        const requestedId = Number(req.body.assigneeId);
+        if (!Number.isNaN(requestedId) && requestedId === req.user.id) {
+          if (task.assigneeId && task.assigneeId !== req.user.id) {
+            return res.status(403).json({ message: "Задача уже назначена другому исполнителю" });
+          }
+          taskUpdateData.userId = req.user.id;
+          taskUpdateData.assigneeId = req.user.id;
+          taskUpdateData.assigneeName = req.user.name;
+          if (!task.assigneeId) {
+            taskUpdateData.assigneeAssignedAt = new Date();
+          }
+        }
+      }
+
+      if (req.body.actualHours != null && req.body.actualHours !== "") {
+        taskUpdateData.actualHours = normalizeActualHours(Number(req.body.actualHours));
+      }
+
+      if (req.body.completionComment != null && String(req.body.completionComment).trim()) {
+        taskUpdateData.completionComment = String(req.body.completionComment).trim();
+      }
+
+      if (req.body.status && req.body.status !== task.status) {
+        if (req.body.status === "completed" && task.serviceRequestId) {
+          const progress = await getServiceRequestWorkProgress(task.serviceRequestId);
+          const blockMsg = taskCompletionBlockedByServiceRequest(task, progress);
+          if (blockMsg) {
+            return res.status(400).json({ message: blockMsg });
+          }
+        }
+
+        await storage.createTaskStatusHistory({
+          taskId,
+          fromStatus: task.status,
+          toStatus: req.body.status,
+          changedById: req.user.id,
+          changedByName: req.user.name,
+          comment:
+            req.body.status === "completed" && req.body.completionComment
+              ? String(req.body.completionComment).trim()
+              : undefined,
+        });
+
+        if (req.body.status === "in_progress" && !task.openedAt) {
+          taskUpdateData.openedAt = new Date();
+          taskUpdateData.openedById = req.user.id;
+          taskUpdateData.openedByName = req.user.name;
+        }
+
+        if (req.body.status === "completed") {
+          taskUpdateData.completedAt = new Date();
+          taskUpdateData.completedBy = req.user.name;
+          taskUpdateData.completedById = req.user.id;
+        }
+      }
       
       console.log('Processed task update data:', taskUpdateData);
       
-      const updatedTask = await storage.updateTask(taskId, taskUpdateData);
+      const updatedTask = await storage.updateTask(taskId, taskUpdateData as any);
       
       if (!updatedTask) {
         return res.status(404).json({ message: "Task not found" });
+      }
+
+      if (req.body.status === "completed" && task.status !== "completed") {
+        await issueTaskReservations(taskId, req.user, updatedTask.title);
+
+        if (task.serviceRequestId && task.parentTaskId) {
+          await tryCompleteParentTaskForServiceRequest(task.serviceRequestId, req.user);
+        }
+
+        const rootId = task.rootTaskId ?? task.id;
+        if (task.id === rootId && !task.serviceRequestId) {
+          const cascaded = await cascadeCompleteSubtasks(rootId, req.user, taskId);
+          if (cascaded > 0) {
+            console.log(`Auto-completed ${cascaded} subtask(s) for root task #${rootId}`);
+          }
+        }
+      }
+
+      if (
+        partReservation?.partId &&
+        partReservation?.quantity &&
+        req.body.status !== "completed"
+      ) {
+        await reservePartForWork(
+          Number(partReservation.partId),
+          Number(partReservation.quantity),
+          req.user,
+          {
+            taskId,
+            taskTitle: updatedTask.title,
+            equipmentId: updatedTask.equipmentId ?? undefined,
+          }
+        );
       }
       
       // Create activity
@@ -457,7 +965,233 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(200).json(updatedTask);
     } catch (error: any) {
       console.error('Task update error:', error);
+      const status = error instanceof TaskAccessError ? error.status : 500;
+      return res.status(status).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/tasks/:id", authenticate, async (req, res) => {
+    try {
+      const task = await storage.getTask(parseInt(req.params.id, 10));
+      if (!task) {
+        return res.status(404).json({ message: "Задача не найдена" });
+      }
+      return res.status(200).json(task);
+    } catch (error: any) {
       return res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/tasks/:id/history", authenticate, async (req, res) => {
+    try {
+      if (!req.user) return res.status(401).json({ message: "Authentication required" });
+      const taskId = parseInt(req.params.id, 10);
+      await assertCanViewTaskDetails(req.user, taskId);
+      const history = await storage.getTaskStatusHistory(taskId);
+      return res.status(200).json(history);
+    } catch (error: any) {
+      const status = error instanceof TaskAccessError ? error.status : 500;
+      return res.status(status).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/tasks/:id/service-request-history", authenticate, async (req, res) => {
+    try {
+      if (!req.user) return res.status(401).json({ message: "Authentication required" });
+      const taskId = parseInt(req.params.id, 10);
+      await assertCanViewTaskDetails(req.user, taskId);
+      const task = await storage.getTask(taskId);
+      if (!task?.serviceRequestId) {
+        return res.status(200).json({ serviceRequestId: null, history: [], workProgress: null });
+      }
+      const { getStatusHistory } = await import("./service-request-storage");
+      const history = await getStatusHistory(task.serviceRequestId);
+      const workProgress = await getServiceRequestWorkProgress(task.serviceRequestId);
+      return res.status(200).json({ serviceRequestId: task.serviceRequestId, history, workProgress });
+    } catch (error: any) {
+      const status = error instanceof TaskAccessError ? error.status : 500;
+      return res.status(status).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/tasks/:id/comments", authenticate, async (req, res) => {
+    try {
+      if (!req.user) return res.status(401).json({ message: "Authentication required" });
+      const taskId = parseInt(req.params.id, 10);
+      await assertCanViewTaskComments(req.user, taskId);
+      return res.status(200).json(await listTaskComments(taskId));
+    } catch (error: any) {
+      const status = error instanceof TaskAccessError ? error.status : 500;
+      return res.status(status).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/tasks/:id/comments", authenticate, async (req, res) => {
+    try {
+      if (!req.user) return res.status(401).json({ message: "Authentication required" });
+      const taskId = parseInt(req.params.id, 10);
+      const task = await assertCanAddTaskComment(req.user, taskId);
+      const parsed = addTaskCommentSchema.parse(req.body);
+      const row = await addTaskComment(
+        taskId,
+        parsed.body,
+        req.user,
+        parsed.attachments ?? []
+      );
+      await notifyTaskCommentAdded(task, row);
+      return res.status(201).json(row);
+    } catch (error: any) {
+      const status = error instanceof TaskAccessError ? error.status : 400;
+      return res.status(status).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/tasks/:id/reservations", authenticate, async (req, res) => {
+    try {
+      return res.status(200).json(await listTaskReservations(parseInt(req.params.id)));
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/tasks/:id/reservations", authenticate, requireRole(writeRoles), async (req, res) => {
+    try {
+      if (!req.user) return res.status(401).json({ message: "Authentication required" });
+      const taskId = parseInt(req.params.id);
+      const task = await storage.getTask(taskId);
+      if (!task) return res.status(404).json({ message: "Task not found" });
+      const parsed = reservePartSchema.parse({ ...req.body, taskId });
+      const row = await reservePartForWork(parsed.partId, parsed.quantity, req.user, {
+        taskId,
+        taskTitle: task.title,
+        equipmentId: parsed.equipmentId ?? task.equipmentId ?? undefined,
+        equipmentName: parsed.equipmentName,
+      });
+      return res.status(201).json(row);
+    } catch (error: any) {
+      return res.status(400).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/tasks/:id/convert-to-service-request", authenticate, requireRole(writeRoles), async (req, res) => {
+    try {
+      if (!req.user) return res.status(401).json({ message: "Authentication required" });
+      const fullUser = await storage.getUser(req.user.id);
+      if (!fullUser) return res.status(401).json({ message: "User not found" });
+      const perms = await getEffectivePermissionsForUser(fullUser);
+      if (!perms.taskCapabilities.convertToServiceRequest) {
+        return res.status(403).json({ message: "Недостаточно прав для перевода задачи в заявку" });
+      }
+      const result = await convertTaskToServiceRequest(parseInt(req.params.id), req.user, {
+        requestType: req.body.requestType,
+        problemDescription: req.body.problemDescription,
+      });
+      return res.status(201).json(result);
+    } catch (error: any) {
+      return res.status(400).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/tasks/:id/subtasks", authenticate, async (req, res) => {
+    try {
+      if (!req.user) return res.status(401).json({ message: "Authentication required" });
+      const taskId = parseInt(req.params.id, 10);
+      await assertCanViewTaskDetails(req.user, taskId);
+      return res.status(200).json(await listSubtasks(taskId));
+    } catch (error: any) {
+      const status = error instanceof TaskAccessError ? error.status : 500;
+      return res.status(status).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/tasks/:id/tree", authenticate, async (req, res) => {
+    try {
+      if (!req.user) return res.status(401).json({ message: "Authentication required" });
+      const taskId = parseInt(req.params.id, 10);
+      await assertCanViewTaskDetails(req.user, taskId);
+      const tree = await listTaskTree(taskId);
+      if (!tree) return res.status(404).json({ message: "Задача не найдена" });
+      const summary = summarizeTaskTree(tree.tasks, tree.root.id);
+      return res.status(200).json({ ...tree, summary });
+    } catch (error: any) {
+      const status = error instanceof TaskAccessError ? error.status : 500;
+      return res.status(status).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/tasks/:id/subtasks", authenticate, requireRole(writeRoles), async (req, res) => {
+    try {
+      if (!req.user) return res.status(401).json({ message: "Authentication required" });
+      const fullUser = await storage.getUser(req.user.id);
+      if (!fullUser) return res.status(401).json({ message: "User not found" });
+      const perms = await getEffectivePermissionsForUser(fullUser);
+      if (!perms.taskCapabilities.process) {
+        return res.status(403).json({ message: "Недостаточно прав для создания подзадач" });
+      }
+      const subtask = await createSubtask(
+        parseInt(req.params.id),
+        {
+          title: String(req.body.title ?? "Подзадача"),
+          description: req.body.description ?? null,
+          priority: req.body.priority ?? "medium",
+          status: req.body.status ?? "pending",
+          taskType: req.body.taskType ?? "task",
+          maintenanceType: req.body.maintenanceType ?? null,
+          dueDate: req.body.dueDate ? new Date(req.body.dueDate) : null,
+          assigneeId: req.body.assigneeId ? Number(req.body.assigneeId) : req.user.id,
+          assigneeName: req.body.assigneeName ?? req.user.name,
+          createdBy: req.user.name,
+          createdById: req.user.id,
+        },
+        req.user
+      );
+      return res.status(201).json(subtask);
+    } catch (error: any) {
+      return res.status(400).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/tasks/:id/coexecutors", authenticate, async (req, res) => {
+    try {
+      const rows = await getTaskCoexecutors(parseInt(req.params.id));
+      return res.status(200).json(rows);
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/tasks/:id/coexecutors", authenticate, requireRole(writeRoles), async (req, res) => {
+    try {
+      if (!req.user) return res.status(401).json({ message: "Authentication required" });
+      const fullUser = await storage.getUser(req.user.id);
+      if (!fullUser) return res.status(401).json({ message: "User not found" });
+      const perms = await getEffectivePermissionsForUser(fullUser);
+      if (!perms.taskCapabilities.process) {
+        return res.status(403).json({ message: "Недостаточно прав" });
+      }
+      const taskId = parseInt(req.params.id);
+      const body = addCoexecutorSchema.parse(req.body);
+      const row = await addTaskCoexecutor({ taskId, ...body });
+      return res.status(201).json(row);
+    } catch (error: any) {
+      return res.status(400).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/tasks/:id/coexecutors/:coId", authenticate, requireRole(writeRoles), async (req, res) => {
+    try {
+      if (!req.user) return res.status(401).json({ message: "Authentication required" });
+      const fullUser = await storage.getUser(req.user.id);
+      if (!fullUser) return res.status(401).json({ message: "User not found" });
+      const perms = await getEffectivePermissionsForUser(fullUser);
+      if (!perms.taskCapabilities.process) {
+        return res.status(403).json({ message: "Недостаточно прав" });
+      }
+      const ok = await removeTaskCoexecutor(Number(req.params.coId));
+      if (!ok) return res.status(404).json({ message: "Не найдено" });
+      return res.json({ ok: true });
+    } catch (error: any) {
+      return res.status(400).json({ message: error.message });
     }
   });
 
@@ -480,6 +1214,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!deleted) {
         return res.status(404).json({ message: "Task not found" });
       }
+
+      await cancelTaskReservations(taskId);
       
       // Create activity
       await storage.createActivity({
@@ -496,28 +1232,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Task statistics route
-  app.get("/api/tasks/stats", authenticate, async (req, res) => {
-    try {
-      const allTasks = await storage.getAllTasks();
-      
-      const stats = {
-        total: allTasks.length,
-        pending: allTasks.filter(t => t.status === 'pending').length,
-        inProgress: allTasks.filter(t => t.status === 'in_progress').length,
-        completed: allTasks.filter(t => t.status === 'completed').length,
-        overdue: allTasks.filter(t => {
-          if (!t.dueDate || t.status === 'completed') return false;
-          return new Date(t.dueDate) < new Date();
-        }).length,
-      };
-      
-      return res.status(200).json(stats);
-    } catch (error: any) {
-      return res.status(500).json({ message: error.message });
-    }
-  });
-  
   // METRICS ROUTES
   app.get("/api/metrics", authenticate, requireRole(["admin", "marketing_manager"]), async (_, res) => {
     try {
@@ -554,12 +1268,181 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
   
   // USER ROUTES
+  app.get("/api/users/list", authenticate, async (_req, res) => {
+    try {
+      const allUsers = await storage.getAllUsers();
+      res.json(
+        allUsers
+          .filter((u) => u.isActive)
+          .map(({ id, name, email, role, avatar, position }) => ({
+            id,
+            name,
+            email,
+            role,
+            avatar,
+            position,
+          }))
+      );
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/users/presence/stream", async (req, res) => {
+    const tokenRaw =
+      typeof req.query.token === "string"
+        ? req.query.token
+        : req.headers.authorization?.startsWith("Bearer ")
+          ? req.headers.authorization.slice("Bearer ".length).trim()
+          : null;
+
+    if (!tokenRaw) {
+      return res.status(401).json({ message: "Authentication required" });
+    }
+
+    try {
+      const decoded = jwt.verify(tokenRaw, jwtSecret) as { id?: number };
+      const streamUser = decoded?.id ? await storage.getUser(decoded.id) : undefined;
+      if (!streamUser || !streamUser.isActive) {
+        return res.status(401).json({ message: "Invalid or expired token" });
+      }
+
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache, no-transform");
+      res.setHeader("Connection", "keep-alive");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.flushHeaders?.();
+
+      res.write(": connected\n\n");
+
+      const heartbeat = setInterval(() => {
+        try {
+          res.write(": ping\n\n");
+        } catch {
+          clearInterval(heartbeat);
+        }
+      }, 25_000);
+
+      const unsubscribe = addPresenceSubscriber(res, streamUser.id);
+
+      req.on("close", () => {
+        clearInterval(heartbeat);
+        unsubscribe();
+      });
+    } catch {
+      return res.status(401).json({ message: "Invalid or expired token" });
+    }
+  });
+
+  app.get("/api/users/presence", authenticate, async (req, res) => {
+    try {
+      await expireStalePresenceUsers();
+      const allUsers = await storage.getAllUsers();
+      const presenceRows = [];
+
+      for (const user of allUsers.filter((u) => u.isActive)) {
+        const resolved = resolvePresence(user);
+        presenceRows.push(toPresenceApiRow(user, resolved));
+      }
+
+      if (req.user?.role === "viewer") {
+        const self = presenceRows.find((u) => u.id === req.user!.id);
+        return res.json(self ? [self] : []);
+      }
+
+      res.json(presenceRows);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.patch("/api/users/:id/presence", authenticate, requireRole(["admin"]), async (req, res) => {
+    try {
+      if (!req.user) return res.status(401).json({ message: "Authentication required" });
+
+      const userId = parseInt(req.params.id, 10);
+      if (Number.isNaN(userId)) {
+        return res.status(400).json({ message: "Некорректный ID пользователя" });
+      }
+
+      const { status, clearExpiry } = adminUpdatePresenceSchema.parse(req.body);
+      const updatedUser = await storage.updateUser(
+        userId,
+        buildPresenceUpdate(status, { clearExpiry })
+      );
+      if (!updatedUser) {
+        return res.status(404).json({ message: "Пользователь не найден" });
+      }
+
+      await storage.createActivity({
+        userId: req.user.id,
+        action: `Updated presence status to ${status}`,
+        timestamp: new Date(),
+        resourceType: "user",
+        resourceId: userId,
+      });
+
+      const resolved = resolvePresence(updatedUser);
+      notifyPresenceUpdated(userId);
+      return res.status(200).json({
+        status: resolved.status,
+        activityStatus: resolved.activityStatus,
+        onVacation: resolved.onVacation,
+        lastSeen: resolved.lastSeen,
+        expiresAt: resolved.expiresAt,
+      });
+    } catch (error: any) {
+      if (error.name === "ZodError") {
+        return res.status(400).json({ message: error.errors?.[0]?.message ?? "Неверные данные" });
+      }
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/users/:id/vacation-periods", authenticate, requireRole(["admin"]), async (req, res) => {
+    try {
+      const userId = parseInt(req.params.id, 10);
+      const user = await storage.getUser(userId);
+      if (!user) return res.status(404).json({ message: "Пользователь не найден" });
+      return res.json({ periods: user.vacationPeriods ?? [] });
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.put("/api/users/:id/vacation-periods", authenticate, requireRole(["admin"]), async (req, res) => {
+    try {
+      if (!req.user) return res.status(401).json({ message: "Authentication required" });
+
+      const userId = parseInt(req.params.id, 10);
+      const { periods } = updateVacationPeriodsSchema.parse(req.body);
+      const updatedUser = await storage.updateUser(userId, { vacationPeriods: periods });
+      if (!updatedUser) return res.status(404).json({ message: "Пользователь не найден" });
+
+      await storage.createActivity({
+        userId: req.user.id,
+        action: "Updated vacation periods",
+        timestamp: new Date(),
+        resourceType: "user",
+        resourceId: userId,
+      });
+
+      return res.json({ periods: updatedUser.vacationPeriods ?? [] });
+    } catch (error: any) {
+      if (error.name === "ZodError") {
+        return res.status(400).json({ message: error.errors?.[0]?.message ?? "Неверные данные" });
+      }
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
   app.get("/api/users", authenticate, async (req, res) => {
     try {
       if (!req.user || req.user.role !== "admin") {
         return res.status(403).json({ message: "Доступ запрещен" });
       }
-      
+
+      await expireStalePresenceUsers();
       const users = await storage.getAllUsers();
       
       // Remove passwords from response
@@ -582,6 +1465,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       const userData = insertUserSchema.parse(req.body);
+      const roleKey = (userData.role ?? "viewer").trim();
+
+      if (!(await roleProfileExists(roleKey))) {
+        return res.status(400).json({
+          message:
+            "Указанная роль не найдена. Создайте или выберите роль в «Настройки прав доступа».",
+        });
+      }
+
+      if (userData.avatar) {
+        const parsedAvatar = avatarUrlSchema.safeParse(userData.avatar);
+        if (!parsedAvatar.success) {
+          return res.status(400).json({
+            message: parsedAvatar.error.errors[0]?.message ?? "Некорректный URL аватара",
+          });
+        }
+        userData.avatar = userData.avatar.trim() || null;
+      }
       
       // Check if user with this email already exists
       const existingUser = await storage.getUserByEmail(userData.email);
@@ -622,7 +1523,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       const userId = parseInt(req.params.id);
-      const updateData = req.body;
+      const updateData = { ...req.body };
+
+      if (updateData.role !== undefined && updateData.role !== null) {
+        if (!(await roleProfileExists(String(updateData.role)))) {
+          return res.status(400).json({
+            message:
+              "Указанная роль не найдена. Создайте или выберите роль в «Настройки прав доступа».",
+          });
+        }
+      }
+
+      if (updateData.avatar !== undefined) {
+        const parsedAvatar = avatarUrlSchema.safeParse(updateData.avatar ?? "");
+        if (!parsedAvatar.success) {
+          return res.status(400).json({
+            message: parsedAvatar.error.errors[0]?.message ?? "Некорректный URL аватара",
+          });
+        }
+        updateData.avatar = updateData.avatar?.trim() || null;
+      }
       
       // Hash password if provided
       if (updateData.password) {
@@ -791,41 +1711,196 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // EQUIPMENT TYPE (CATEGORY) ROUTES
+  app.get("/api/equipment/types", authenticate, async (_req, res) => {
+    try {
+      res.json(await listEquipmentTypes());
+    } catch {
+      res.status(500).json({ message: "Ошибка загрузки категорий оборудования" });
+    }
+  });
+
+  app.post("/api/equipment/types", authenticate, requireRole(equipmentEditRoles), async (req, res) => {
+    try {
+      const name = String(req.body.name ?? "").trim();
+      if (!name) return res.status(400).json({ message: "Укажите название категории" });
+      res.status(201).json(await createEquipmentType(name));
+    } catch (e: any) {
+      res.status(400).json({ message: e.message ?? "Ошибка" });
+    }
+  });
+
   // EQUIPMENT ROUTES
   app.get("/api/equipment", authenticate, async (req, res) => {
     try {
-      const equipment = await storage.getAllEquipment();
-      return res.status(200).json(equipment);
+      let equipmentList = await storage.getAllEquipment();
+      const scope = await getSubdivisionScopeForRequest(req);
+      if (scope) {
+        equipmentList = filterBySubdivisionScope(equipmentList, scope);
+      }
+      const subdivisionId = req.query.subdivisionId
+        ? Number(req.query.subdivisionId)
+        : undefined;
+      if (subdivisionId && !Number.isNaN(subdivisionId)) {
+        equipmentList = equipmentList.filter((e) => e.subdivisionId === subdivisionId);
+      }
+      return res.status(200).json(equipmentList.map((item) => normalizeEquipmentRecord(item)));
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }
   });
 
-  app.post("/api/equipment", authenticate, requireRole(writeRoles), async (req, res) => {
+  app.post("/api/equipment", authenticate, requireRole(equipmentEditRoles), async (req, res) => {
     try {
-      const equipment = await storage.createEquipment(req.body);
-      return res.status(201).json(equipment);
+      const payload = parseEquipmentCreatePayload(req.body);
+      if (!payload.id?.trim()) {
+        const existing = await storage.getAllEquipment();
+        payload.id = generateNextEquipmentId(existing.map((item) => item.id));
+      }
+      if (!payload.name) {
+        return res.status(400).json({ message: "Название оборудования обязательно" });
+      }
+      if (!payload.type) {
+        return res.status(400).json({ message: "Тип оборудования обязателен" });
+      }
+
+      const subFields = await resolveSubdivisionFields(
+        payload.subdivisionId,
+        payload.subdivisionName ?? payload.department
+      );
+      if (!subFields.subdivisionId) {
+        return res.status(400).json({ message: "Укажите подразделение" });
+      }
+      const scope = await getSubdivisionScopeForRequest(req);
+      if (scope) {
+        try {
+          assertSubdivisionAccess(scope, subFields.subdivisionId);
+        } catch {
+          return subdivisionForbidden(res);
+        }
+      }
+      payload.subdivisionId = subFields.subdivisionId;
+      payload.subdivisionName = subFields.subdivisionName;
+      payload.department = subFields.subdivisionName ?? payload.department;
+
+      await findOrCreateEquipmentType(payload.type);
+      const equipmentItem = await storage.createEquipment(payload);
+      return res.status(201).json(normalizeEquipmentRecord(equipmentItem));
     } catch (error: any) {
+      if (error.message?.includes("duplicate key")) {
+        return res.status(409).json({ message: "Оборудование с таким ID уже существует. Обновите страницу и попробуйте снова." });
+      }
       return res.status(500).json({ message: error.message });
     }
   });
 
-  app.put("/api/equipment/:id", authenticate, requireRole(writeRoles), async (req, res) => {
+  app.put("/api/equipment/:id", authenticate, requireRole(equipmentEditRoles), async (req, res) => {
     try {
       const { id } = req.params;
-      const equipment = await storage.updateEquipment(id, req.body);
-      if (!equipment) {
+      const existing = await storage.getEquipment(id);
+      if (!existing) {
         return res.status(404).json({ message: "Оборудование не найдено" });
       }
-      return res.status(200).json(equipment);
+
+      const updateData = parseEquipmentUpdatePayload(req.body);
+      const actor = req.user ? { id: req.user.id, name: req.user.name } : undefined;
+
+      if (updateData.type?.trim()) {
+        await findOrCreateEquipmentType(updateData.type);
+      }
+
+      if (updateData.subdivisionId !== undefined || updateData.subdivisionName !== undefined) {
+        const subFields = await resolveSubdivisionFields(
+          updateData.subdivisionId,
+          updateData.subdivisionName ?? updateData.department
+        );
+        updateData.subdivisionId = subFields.subdivisionId;
+        updateData.subdivisionName = subFields.subdivisionName;
+        if (subFields.subdivisionName) updateData.department = subFields.subdivisionName;
+        const scope = await getSubdivisionScopeForRequest(req);
+        if (scope) {
+          try {
+            assertSubdivisionAccess(scope, subFields.subdivisionId);
+          } catch {
+            return subdivisionForbidden(res);
+          }
+        }
+      } else {
+        const scope = await getSubdivisionScopeForRequest(req);
+        if (scope) {
+          try {
+            assertSubdivisionAccess(scope, existing.subdivisionId);
+          } catch {
+            return subdivisionForbidden(res);
+          }
+        }
+      }
+
+      const equipmentItem = await storage.updateEquipment(id, updateData);
+      if (!equipmentItem) {
+        return res.status(404).json({ message: "Оборудование не найдено" });
+      }
+
+      if (updateData.status !== undefined) {
+        await logEquipmentStatusChange(id, existing.status, equipmentItem.status, actor);
+      }
+      if (updateData.location !== undefined) {
+        await logEquipmentLocationChange(id, existing.location, equipmentItem.location, actor);
+      }
+
+      return res.status(200).json(normalizeEquipmentRecord(equipmentItem));
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }
   });
+
+  app.get("/api/equipment/:id/links", authenticate, async (req, res) => {
+    try {
+      const links = await getEquipmentLinksForEquipment(req.params.id);
+      return res.status(200).json(links);
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/equipment/:id/activity", authenticate, async (req, res) => {
+    try {
+      const activity = await getEquipmentActivity(req.params.id);
+      return res.status(200).json(activity);
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/equipment/:id/link-history", authenticate, async (req, res) => {
+    try {
+      const history = await getEquipmentLinkHistory(req.params.id);
+      return res.status(200).json(history);
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.put(
+    "/api/equipment/:id/links",
+    authenticate,
+    requireRole(equipmentEditRoles),
+    async (req, res) => {
+      try {
+        const parsed = syncEquipmentLinksSchema.parse(req.body);
+        const actor = req.user ? { id: req.user.id, name: req.user.name } : undefined;
+        const links = await syncEquipmentLinks(req.params.id, parsed.links, actor);
+        return res.status(200).json(links);
+      } catch (error: any) {
+        return res.status(400).json({ message: error.message });
+      }
+    }
+  );
 
   app.delete("/api/equipment/:id", authenticate, requireRole(writeRoles), async (req, res) => {
     try {
       const { id } = req.params;
+      await deleteEquipmentLinksForEquipment(id);
       const deleted = await storage.deleteEquipment(id);
       if (!deleted) {
         return res.status(404).json({ message: "Оборудование не найдено" });
@@ -886,7 +1961,44 @@ app.post("/api/maintenance", authenticate, requireRole(writeRoles), async (req, 
       priority: String(req.body.priority ?? "medium"),
       notes: req.body.notes ? String(req.body.notes) : null,
       duration: req.body.duration ? String(req.body.duration) : null,
+      createdById: req.user?.id,
+      createdByName: req.user?.name,
     });
+
+    if (req.user) {
+      await storage.createMaintenanceStatusHistory({
+        maintenanceRecordId: record.id,
+        fromStatus: null,
+        toStatus: record.status,
+        changedById: req.user.id,
+        changedByName: req.user.name,
+        comment: "Создание записи ТО",
+      });
+    }
+
+    const partReservation = req.body.partReservation as
+      | { partId?: number; quantity?: number }
+      | undefined;
+    if (partReservation?.partId && partReservation?.quantity && req.user) {
+      await reservePartForWork(
+        Number(partReservation.partId),
+        Number(partReservation.quantity),
+        req.user,
+        {
+          maintenanceId: record.id,
+          equipmentId: record.equipmentId,
+          equipmentName: record.equipmentName,
+        }
+      );
+    }
+
+    if (req.user) {
+      try {
+        await createTaskFromMaintenance(record, req.user);
+      } catch (taskErr) {
+        console.error("Auto-task from maintenance failed:", taskErr);
+      }
+    }
 
     return res.status(201).json(record);
   } catch (error: any) {
@@ -899,6 +2011,11 @@ app.put("/api/maintenance/:id", authenticate, requireRole(writeRoles), async (re
   try {
     const id = parseInt(req.params.id);
 
+    const existing = await storage.getMaintenanceRecord(id);
+    if (!existing) {
+      return res.status(404).json({ message: "Запись о техобслуживании не найдена" });
+    }
+
     const updateData: any = {
       equipmentId: req.body.equipmentId !== undefined ? String(req.body.equipmentId) : undefined,
       equipmentName: req.body.equipmentName !== undefined ? String(req.body.equipmentName) : undefined,
@@ -908,6 +2025,9 @@ app.put("/api/maintenance/:id", authenticate, requireRole(writeRoles), async (re
       priority: req.body.priority !== undefined ? String(req.body.priority) : undefined,
       notes: req.body.notes !== undefined ? (req.body.notes ? String(req.body.notes) : null) : undefined,
       duration: req.body.duration !== undefined ? (req.body.duration ? String(req.body.duration) : null) : undefined,
+      lastModifiedById: req.user?.id,
+      lastModifiedByName: req.user?.name,
+      updatedAt: new Date(),
     };
 
     if (req.body.scheduledDate !== undefined) {
@@ -936,6 +2056,40 @@ app.put("/api/maintenance/:id", authenticate, requireRole(writeRoles), async (re
       return res.status(404).json({ message: "Запись о техобслуживании не найдена" });
     }
 
+      if (req.user && req.body.status !== undefined && req.body.status !== existing.status) {
+        await storage.createMaintenanceStatusHistory({
+          maintenanceRecordId: id,
+          fromStatus: existing.status,
+          toStatus: req.body.status,
+          changedById: req.user.id,
+          changedByName: req.user.name,
+        });
+
+        if (req.body.status === "completed" || req.body.status === "done") {
+          await storage.updateMaintenanceRecord(id, {
+            closedById: req.user.id,
+            closedByName: req.user.name,
+          });
+          await issueMaintenanceReservations(id, req.user);
+        }
+      }
+
+      const partReservation = req.body.partReservation as
+        | { partId?: number; quantity?: number }
+        | undefined;
+      if (partReservation?.partId && partReservation?.quantity && req.user) {
+        await reservePartForWork(
+          Number(partReservation.partId),
+          Number(partReservation.quantity),
+          req.user,
+          {
+            maintenanceId: id,
+            equipmentId: record.equipmentId,
+            equipmentName: record.equipmentName,
+          }
+        );
+      }
+
     return res.status(200).json(record);
   } catch (error: any) {
     console.error("MAINTENANCE UPDATE ERROR:", error);
@@ -959,7 +2113,11 @@ app.delete("/api/maintenance/:id", authenticate, requireRole(writeRoles), async 
   // REMARKS ROUTES
   app.get("/api/remarks", authenticate, async (req, res) => {
     try {
-      const remarks = await storage.getAllRemarks();
+      let remarks = await storage.getAllRemarks();
+      const scope = await getSubdivisionScopeForRequest(req);
+      if (scope) {
+        remarks = filterBySubdivisionScope(remarks, scope);
+      }
       return res.status(200).json(remarks);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
@@ -968,7 +2126,13 @@ app.delete("/api/maintenance/:id", authenticate, requireRole(writeRoles), async 
 
   app.post("/api/remarks", authenticate, requireRole(writeRoles), async (req, res) => {
     try {
+      if (!req.user) return res.status(401).json({ message: "Authentication required" });
       const remark = await storage.createRemark(req.body);
+      try {
+        await createTaskFromRemark(remark, req.user);
+      } catch (taskErr) {
+        console.error("Auto-task from remark failed:", taskErr);
+      }
       return res.status(201).json(remark);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
@@ -1085,12 +2249,32 @@ app.delete("/api/maintenance/:id", authenticate, requireRole(writeRoles), async 
 
   app.post("/api/daily-inspections", authenticate, requireRole(writeRoles), async (req, res) => {
     try {
+      if (!req.user) return res.status(401).json({ message: "Authentication required" });
+      const checkResults = req.body.checkResults as string[] | undefined;
+      const issuesCount =
+        req.body.issuesCount != null
+          ? Number(req.body.issuesCount)
+          : countIssuesFromCheckResults(checkResults);
+      const workingStatus =
+        req.body.workingStatus ?? deriveWorkingStatus(checkResults);
+
       const inspectionData = {
         ...req.body,
-        inspectedBy: req.user?.name || req.body.inspectedBy || 'Неизвестно',
+        inspectedBy: req.user.name,
         inspectionDate: new Date(req.body.inspectionDate),
+        issuesCount,
+        workingStatus,
       };
       const inspection = await storage.createDailyInspection(inspectionData);
+
+      if (issuesCount > 0 || (Array.isArray(inspection.comments) && inspection.comments.length > 0)) {
+        try {
+          await createRemarkFromDailyInspection(inspection, req.user);
+        } catch (taskErr) {
+          console.error("Auto-remark from inspection failed:", taskErr);
+        }
+      }
+
       return res.status(201).json(inspection);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
@@ -1126,6 +2310,87 @@ app.delete("/api/maintenance/:id", authenticate, requireRole(writeRoles), async 
       return res.status(500).json({ message: error.message });
     }
   });
+
+  app.get("/api/notifications", authenticate, async (req, res) => {
+    try {
+      const user = req.user as AuthenticatedUser;
+      const forceSync = req.query.sync === "1";
+      const skipSync = req.query.sync === "0";
+      if (!skipSync) {
+        const last = lastReminderSyncByUser.get(user.id) ?? 0;
+        if (forceSync || Date.now() - last >= REMINDER_SYNC_INTERVAL_MS) {
+          await syncTaskReminderNotifications(user.id, user.role);
+          lastReminderSyncByUser.set(user.id, Date.now());
+        }
+      }
+      const list = await storage.getActiveNotifications(user.id);
+      res.json(list.slice(0, 50));
+    } catch {
+      res.status(500).json({ message: "Ошибка загрузки уведомлений" });
+    }
+  });
+
+  app.patch("/api/notifications/:id/read", authenticate, async (req, res) => {
+    try {
+      const user = req.user as AuthenticatedUser;
+      const id = Number(req.params.id);
+      const note = await storage.getNotification(id);
+      if (!note || note.userId !== user.id) {
+        return res.status(404).json({ message: "Уведомление не найдено" });
+      }
+      const shouldArchive =
+        req.query.archive === "1" ||
+        req.query.archive === "true" ||
+        (req.body && typeof req.body === "object" && (req.body as { archive?: boolean }).archive === true);
+      const updated = shouldArchive
+        ? await storage.archiveNotification(id)
+        : await storage.markNotificationAsRead(id);
+      res.json(updated);
+    } catch {
+      res.status(500).json({ message: "Ошибка" });
+    }
+  });
+
+  app.patch("/api/notifications/:id/dismiss", authenticate, async (req, res) => {
+    try {
+      const user = req.user as AuthenticatedUser;
+      const id = Number(req.params.id);
+      const note = await storage.getNotification(id);
+      if (!note || note.userId !== user.id) {
+        return res.status(404).json({ message: "Уведомление не найдено" });
+      }
+      const updated = await storage.archiveNotification(id);
+      res.json(updated);
+    } catch {
+      res.status(500).json({ message: "Ошибка" });
+    }
+  });
+
+  app.post("/api/notifications/dismiss-all", authenticate, async (req, res) => {
+    try {
+      const user = req.user as AuthenticatedUser;
+      const count = await storage.archiveAllNotificationsForUser(user.id);
+      lastReminderSyncByUser.set(user.id, Date.now());
+      res.json({ dismissed: count });
+    } catch {
+      res.status(500).json({ message: "Ошибка" });
+    }
+  });
+
+  registerServiceRequestRoutes(app, authenticate, requireRole);
+  registerUploadRoutes(app, authenticate);
+  registerAssetManagementRoutes(app, authenticate, requireRole);
+  registerWarehouseRoutes(app, authenticate, requireRole);
+  registerPermissionsRoutes(app, authenticate, requireRole);
+  registerSubdivisionRoutes(app, authenticate, requireRole);
+
+  await ensureDefaultRoleProfiles();
+  await initSubdivisionSystem();
+
+  const presenceSweepMs = 5 * 60 * 1000;
+  setInterval(() => {
+    expireStalePresenceUsers().catch((err) => console.error("presence sweep failed:", err));
+  }, presenceSweepMs);
   
   return httpServer;
 }

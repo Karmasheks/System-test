@@ -1,5 +1,7 @@
 import React from "react";
 import { useAuth } from "@/hooks/use-auth";
+import { useAccessControl } from "@/hooks/use-access-control";
+import { roleLabel, type AppModule } from "@shared/permissions-constants";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Shield, Lock } from "lucide-react";
 
@@ -59,78 +61,49 @@ export function RoleBased({ allowedRoles, children }: RoleBasedProps) {
 // Хук для проверки прав доступа
 export function usePermissions() {
   const { user } = useAuth();
+  const { canViewModule, canEditModule, isFieldVisible, isAdmin } = useAccessControl();
 
-  const hasRole = (role: string) => {
-    return user?.role === role;
-  };
+  const hasRole = (role: string) => user?.role === role;
 
-  const hasAnyRole = (roles: string[]) => {
-    return user && roles.includes(user.role);
-  };
+  const hasAnyRole = (roles: string[]) => user != null && roles.includes(user.role);
 
-  const canView = () => {
-    return hasAnyRole(['admin', 'operator', 'engineer', 'viewer']);
-  };
+  const canViewModuleAccess = (module: AppModule) => canViewModule(module);
 
-  const canEdit = () => {
-    return hasAnyRole(['admin', 'operator', 'engineer']);
-  };
-
-  const canCreate = () => {
-    return hasAnyRole(['admin', 'operator', 'engineer']);
-  };
-
-  const canDelete = () => {
-    return hasAnyRole(['admin', 'operator']);
-  };
-
-  const canManageUsers = () => {
-    return hasRole('admin');
-  };
-
-  const canManageSystem = () => {
-    return hasRole('admin');
-  };
+  const canEditModuleAccess = (module: AppModule) => canEditModule(module);
 
   return {
     hasRole,
     hasAnyRole,
-    canView,
-    canEdit,
-    canCreate,
-    canDelete,
-    canManageUsers,
-    canManageSystem,
-    currentRole: user?.role || 'guest'
+    canView: () => !!user,
+    canEdit: () => isAdmin || canEditModule("tasks"),
+    canCreate: () => isAdmin || canEditModule("tasks"),
+    canDelete: () => isAdmin || hasAnyRole(["admin", "operator"]),
+    canManageUsers: () => isAdmin,
+    canManageSystem: () => isAdmin,
+    canViewModule: canViewModuleAccess,
+    canEditModule: canEditModuleAccess,
+    isFieldVisible,
+    currentRole: user?.role || "guest",
   };
 }
 
 export function getRoleDisplayName(role: string): string {
-  switch (role) {
-    case 'admin':
-      return 'Администратор';
-    case 'operator':
-      return 'Оператор';
-    case 'engineer':
-      return 'Инженер';
-    case 'viewer':
-      return 'Просмотр';
-    default:
-      return 'Неизвестная роль';
-  }
+  return roleLabel(role?.trim() || "viewer");
 }
 
 export function getRoleDescription(role: string): string {
   switch (role) {
-    case 'admin':
-      return 'Полный доступ ко всем функциям системы';
-    case 'operator':
-      return 'Может выполнять осмотры, создавать отчеты, управлять оборудованием';
-    case 'engineer':
-      return 'Может просматривать данные, выполнять ежедневные осмотры';
-    case 'viewer':
-      return 'Только просмотр данных без возможности изменений';
+    case "admin":
+      return "Полный доступ ко всем функциям системы";
+    case "operator":
+      return "Может выполнять осмотры, создавать отчеты, управлять оборудованием";
+    case "engineer":
+      return "Может просматривать данные, выполнять ежедневные осмотры";
+    case "technician":
+      return "Выполнение задач и осмотров, просмотр склада и оборудования";
+    case "viewer":
+      return "Только просмотр данных без возможности изменений";
     default:
-      return 'Описание роли недоступно';
+      return "Права задаются профилем роли в настройках администратора";
   }
 }

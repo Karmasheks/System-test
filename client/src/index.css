@@ -3,49 +3,51 @@
 @tailwind utilities;
 
 :root {
-      --background: 0 0% 100%;
---foreground: 20 14.3% 4.1%;
---muted: 60 4.8% 95.9%;
---muted-foreground: 25 5.3% 44.7%;
---popover: 0 0% 100%;
---popover-foreground: 20 14.3% 4.1%;
---card: 0 0% 100%;
---card-foreground: 20 14.3% 4.1%;
---border: 20 5.9% 90%;
---input: 20 5.9% 90%;
---primary: 207 90% 54%;
---primary-foreground: 211 100% 99%;
---secondary: 60 4.8% 95.9%;
---secondary-foreground: 24 9.8% 10%;
---accent: 60 4.8% 95.9%;
---accent-foreground: 24 9.8% 10%;
---destructive: 0 84.2% 60.2%;
---destructive-foreground: 60 9.1% 97.8%;
---ring: 20 14.3% 4.1%;
---radius: 0.5rem;
-  }
-  .dark {
-      --background: 240 10% 3.9%;
---foreground: 0 0% 98%;
---muted: 240 3.7% 15.9%;
---muted-foreground: 240 5% 64.9%;
---popover: 240 10% 3.9%;
---popover-foreground: 0 0% 98%;
---card: 240 10% 3.9%;
---card-foreground: 0 0% 98%;
---border: 240 3.7% 15.9%;
---input: 240 3.7% 15.9%;
---primary: 207 90% 54%;
---primary-foreground: 211 100% 99%;
---secondary: 240 3.7% 15.9%;
---secondary-foreground: 0 0% 98%;
---accent: 240 3.7% 15.9%;
---accent-foreground: 0 0% 98%;
---destructive: 0 62.8% 30.6%;
---destructive-foreground: 0 0% 98%;
---ring: 240 4.9% 83.9%;
---radius: 0.5rem;
-  }
+  --background: 0 0% 100%;
+  --foreground: 20 14.3% 4.1%;
+  --muted: 60 4.8% 95.9%;
+  --muted-foreground: 25 5.3% 44.7%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 20 14.3% 4.1%;
+  --card: 0 0% 100%;
+  --card-foreground: 20 14.3% 4.1%;
+  --border: 20 5.9% 90%;
+  --input: 20 5.9% 90%;
+  --primary: 207 90% 54%;
+  --primary-foreground: 211 100% 99%;
+  --secondary: 60 4.8% 95.9%;
+  --secondary-foreground: 24 9.8% 10%;
+  --accent: 60 4.8% 95.9%;
+  --accent-foreground: 24 9.8% 10%;
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 60 9.1% 97.8%;
+  --ring: 20 14.3% 4.1%;
+  --radius: 0.5rem;
+  --sidebar-width: 16rem;
+}
+
+.dark {
+  --background: 240 10% 3.9%;
+  --foreground: 0 0% 98%;
+  --muted: 240 3.7% 15.9%;
+  --muted-foreground: 240 5% 64.9%;
+  --popover: 240 10% 3.9%;
+  --popover-foreground: 0 0% 98%;
+  --card: 240 10% 3.9%;
+  --card-foreground: 0 0% 98%;
+  --border: 240 3.7% 15.9%;
+  --input: 240 3.7% 15.9%;
+  --primary: 207 90% 54%;
+  --primary-foreground: 211 100% 99%;
+  --secondary: 240 3.7% 15.9%;
+  --secondary-foreground: 0 0% 98%;
+  --accent: 240 3.7% 15.9%;
+  --accent-foreground: 0 0% 98%;
+  --destructive: 0 62.8% 30.6%;
+  --destructive-foreground: 0 0% 98%;
+  --ring: 240 4.9% 83.9%;
+  --radius: 0.5rem;
+}
 
 @layer base {
   * {
@@ -53,70 +55,124 @@
   }
 
   body {
-    @apply font-sans antialiased bg-gray-50 text-gray-900;
+    @apply font-sans antialiased bg-gray-50 text-gray-900 dark:bg-gray-950 dark:text-gray-100;
   }
 
-  /* Улучшение контрастности и читаемости */
-  .card-enhanced {
-    @apply bg-white border border-gray-200 shadow-sm hover:shadow-md transition-shadow;
-  }
-  
-  .text-enhanced {
-    @apply text-gray-900;
-  }
-  
-  .text-muted-enhanced {
-    @apply text-gray-800;
-  }
-  
-  .button-primary-enhanced {
-    @apply bg-blue-600 hover:bg-blue-700 text-white border-0;
-  }
-  
-  .button-secondary-enhanced {
-    @apply bg-white hover:bg-gray-50 text-gray-900 border border-gray-300;
+  /* Тёмные поверхности: шапка и сайдбар — светлый текст */
+  header.app-header,
+  .sidebar {
+    color: rgb(243 244 246);
   }
 
-  /* Переопределение базовых цветов текста для лучшей читаемости */
-  h1, h2, h3, h4, h5, h6 {
-    @apply text-gray-900 !important;
-  }
-  
-  p, span, div {
-    @apply text-gray-900;
-  }
-  
-  /* Улучшение контрастности для различных элементов */
-  .text-gray-600 {
-    @apply text-gray-800 !important;
-  }
-  
-  .text-gray-500 {
-    @apply text-gray-700 !important;
-  }
-  
-  .text-gray-400 {
-    @apply text-gray-600 !important;
+  header.app-header h1,
+  header.app-header h2,
+  header.app-header h3,
+  .sidebar h1,
+  .sidebar h2,
+  .sidebar h3 {
+    color: rgb(255 255 255);
   }
 
-  /* Специальные стили для боковой панели - сохранение белого текста */
   .sidebar .text-gray-300 {
-    color: rgb(209, 213, 219) !important;
+    color: rgb(209 213 219);
   }
-  
+
   .sidebar .text-gray-400 {
-    color: rgb(156, 163, 175) !important;
+    color: rgb(156 163 175);
   }
-  
-  .sidebar .text-white {
-    color: rgb(255, 255, 255) !important;
+
+  /* Карточки и popover — читаемый текст */
+  .dark .bg-card,
+  .dark .bg-white,
+  .dark [class*="bg-gray-800"],
+  .dark [class*="bg-gray-900"]:not(.sidebar):not(header.app-header) {
+    color: rgb(243 244 246);
   }
-  
-  .sidebar h1, .sidebar h2, .sidebar h3, .sidebar h4, .sidebar h5, .sidebar h6 {
-    color: rgb(255, 255, 255) !important;
+
+  .dark .text-muted-foreground {
+    color: rgb(156 163 175);
   }
-  
-  .sidebar p, .sidebar span, .sidebar div {
-    color: inherit !important;
+}
+
+/* Контраст бейджей в тёмной теме (legacy class pairs по всему приложению) */
+@layer components {
+  .dark .bg-green-100.text-green-800,
+  .dark .bg-green-100.text-green-700 {
+    @apply bg-green-950 text-green-200 border border-green-800;
   }
+
+  .dark .bg-blue-100.text-blue-800,
+  .dark .bg-blue-100.text-blue-700 {
+    @apply bg-blue-950 text-blue-200 border border-blue-800;
+  }
+
+  .dark .bg-yellow-100.text-yellow-800,
+  .dark .bg-yellow-100.text-yellow-700,
+  .dark .bg-yellow-50.text-yellow-700 {
+    @apply bg-yellow-950 text-yellow-200 border border-yellow-800;
+  }
+
+  .dark .bg-red-100.text-red-800,
+  .dark .bg-red-100.text-red-700 {
+    @apply bg-red-950 text-red-200 border border-red-800;
+  }
+
+  .dark .bg-orange-100.text-orange-800 {
+    @apply bg-orange-950 text-orange-200 border border-orange-800;
+  }
+
+  .dark .bg-purple-100.text-purple-800 {
+    @apply bg-purple-950 text-purple-200 border border-purple-800;
+  }
+
+  .dark .bg-cyan-100.text-cyan-800 {
+    @apply bg-cyan-950 text-cyan-200 border border-cyan-800;
+  }
+
+  .dark .bg-gray-100.text-gray-800 {
+    @apply bg-gray-800 text-gray-200 border border-gray-600;
+  }
+
+  .dark .bg-green-50.text-green-700 {
+    @apply bg-green-950 text-green-200 border border-green-800;
+  }
+
+  /* Иконки в цветных кружках на карточках */
+  .dark .bg-blue-100.text-blue-600,
+  .dark .bg-green-100.text-green-600,
+  .dark .bg-yellow-100.text-yellow-600,
+  .dark .bg-red-100.text-red-600 {
+    @apply bg-opacity-100;
+  }
+
+  .dark .bg-blue-100.text-blue-600 {
+    @apply bg-blue-950 text-blue-300;
+  }
+
+  .dark .bg-green-100.text-green-600 {
+    @apply bg-green-950 text-green-300;
+  }
+
+  .dark .bg-yellow-100.text-yellow-600 {
+    @apply bg-yellow-950 text-yellow-300;
+  }
+
+  .dark .bg-red-100.text-red-600 {
+    @apply bg-red-950 text-red-300;
+  }
+}
+
+@media (min-width: 1024px) {
+  .with-sidebar {
+    margin-left: var(--sidebar-width);
+  }
+
+  .with-sidebar-pl {
+    padding-left: var(--sidebar-width);
+  }
+}
+
+.with-sidebar,
+.with-sidebar-pl {
+  transition: margin-left 300ms ease, padding-left 300ms ease;
 }

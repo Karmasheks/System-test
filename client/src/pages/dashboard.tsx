@@ -1,15 +1,15 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Helmet } from "react-helmet";
 import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
+import { useEquipmentApi } from "@/hooks/use-equipment-api";
+import { emptyTaskStats, type Task, type TaskStats } from "@/types/api";
 import { useAuth } from "@/hooks/use-auth";
+import { useAccessControl } from "@/hooks/use-access-control";
+import { useToast } from "@/hooks/use-toast";
 import { useRemarksData } from "@/hooks/use-remarks-data";
 import { useMaintenanceData } from "@/hooks/use-maintenance-data";
 import { useDailyInspections } from "@/hooks/use-daily-inspections";
-import { Sidebar } from "@/components/layout/sidebar";
-import { Header } from "@/components/layout/header";
-import { useSidebarState } from "@/hooks/use-sidebar-state";
-
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,50 +26,179 @@ import {
   TrendingUp,
   Activity,
   BarChart3,
-  XCircle
+  XCircle,
+  Package
 } from "lucide-react";
-import { format } from "date-fns";
+import { format, startOfMonth, endOfMonth, isWithinInterval, addDays } from "date-fns";
 import { ru } from "date-fns/locale";
+import { maintenanceStatusLabel } from "@shared/maintenance-status-constants";
+import { useCalendarStats, useBudgetSummary } from "@/hooks/use-asset-management";
+import { useWarehouseDashboard, useWarehouseAlerts, useWarehouseMutations } from "@/hooks/use-warehouse";
+import { useServiceRequests } from "@/hooks/use-service-requests";
+import { warehouseAlertLabel } from "@shared/warehouse-constants";
+import { WAREHOUSE_RESOLUTION_LABELS, WAREHOUSE_RESOLUTION_TYPES } from "@shared/task-source-constants";
+import { buildRecentActivities } from "@/lib/recent-activities";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import type { WarehouseAlertWithPart } from "@/hooks/use-warehouse";
+import { useSubdivisionFilter } from "@/hooks/use-subdivision-filter";
+import { SubdivisionFilterSelect } from "@/components/subdivision-filter-select";
+import { SubdivisionsPanel } from "@/components/admin/subdivisions-panel";
+import {
+  equipmentIdsInScope,
+  filterItemsBySubdivision,
+} from "@/lib/subdivision-filter";
+
+function computeTaskStats(tasks: Task[]): TaskStats {
+  return {
+    total: tasks.length,
+    pending: tasks.filter((t) => t.status === "pending").length,
+    inProgress: tasks.filter((t) => t.status === "in_progress").length,
+    completed: tasks.filter((t) => t.status === "completed").length,
+    overdue: tasks.filter((t) => {
+      if (!t.dueDate || t.status === "completed") return false;
+      return new Date(t.dueDate) < new Date();
+    }).length,
+  };
+}
 
 export default function Dashboard() {
   const { user, isLoading, isAuthenticated } = useAuth();
-  // Загрузка оборудования из API
-  const { data: equipment = [] } = useQuery({
-    queryKey: ['/api/equipment'],
-  });
-  
-  // Фильтруем только активное оборудование (исключаем выведенное из эксплуатации)
-  const getActiveEquipment = () => equipment.filter((eq: any) => eq.status !== 'decommissioned');
-  const { getOpenRemarksCount, getCriticalRemarksCount, remarks } = useRemarksData();
-  const { maintenanceRecords, getMaintenanceByStatus, refreshData } = useMaintenanceData();
+  const { isDashboardBlockVisible, isAdmin } = useAccessControl();
+  const {
+    filterValue,
+    setFilterValue,
+    filterSubdivisionId,
+    availableSubdivisions,
+    showFilter,
+    filterLabel,
+  } = useSubdivisionFilter();
+  const { toast } = useToast();
+  const { equipment: equipmentList, getActiveEquipment } = useEquipmentApi();
+  const { remarks } = useRemarksData();
+  const { maintenanceRecords, refreshData } = useMaintenanceData();
   const { getTodayStats, refetch: refetchInspections } = useDailyInspections();
-  const { isCollapsed } = useSidebarState();
   const [, setLocation] = useLocation();
 
   // Загрузка статистики задач
-  const { data: taskStats = { total: 0, pending: 0, inProgress: 0, completed: 0, overdue: 0 }, refetch: refetchTaskStats } = useQuery({
+  const { data: taskStats = emptyTaskStats, refetch: refetchTaskStats } = useQuery<TaskStats>({
     queryKey: ["/api/tasks/stats"],
   });
 
-  // Загрузка всех задач
-  const { data: tasks = [] } = useQuery({
+  const { data: tasks = [] } = useQuery<Task[]>({
     queryKey: ['/api/tasks'],
   });
 
-  // Функция для получения задач в ближайшие 3 дня
-  const getUpcomingTasks = () => {
+  const calFrom = format(startOfMonth(new Date()), "yyyy-MM-dd");
+  const calTo = format(endOfMonth(new Date()), "yyyy-MM-dd");
+  const { data: calStats } = useCalendarStats(calFrom, calTo);
+  const { data: budgetSummary } = useBudgetSummary();
+  const { data: serviceRequests = [] } = useServiceRequests();
+  const { data: warehouseStats } = useWarehouseDashboard();
+  const { data: warehouseAlerts = [] } = useWarehouseAlerts();
+  const { resolveAlert } = useWarehouseMutations();
+  const [resolveAlertTarget, setResolveAlertTarget] = useState<WarehouseAlertWithPart | null>(null);
+  const [resolveForm, setResolveForm] = useState({ resolutionType: "restocked", comment: "" });
+
+  const { data: usersList = [] } = useQuery<{ id: number }[]>({
+    queryKey: ["/api/users"],
+    queryFn: async () => {
+      const token = localStorage.getItem("token");
+      const res = await fetch("/api/users", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: !!user,
+  });
+
+  const scopedEquipment = useMemo(
+    () => filterItemsBySubdivision(getActiveEquipment(), filterSubdivisionId),
+    [equipmentList, filterSubdivisionId, getActiveEquipment]
+  );
+
+  const scopedEquipmentIds = useMemo(
+    () => equipmentIdsInScope(getActiveEquipment(), filterSubdivisionId, null),
+    [equipmentList, filterSubdivisionId, getActiveEquipment]
+  );
+
+  const scopedTasks = useMemo(
+    () => filterItemsBySubdivision(tasks, filterSubdivisionId),
+    [tasks, filterSubdivisionId]
+  );
+
+  const scopedTaskStats = useMemo(() => {
+    if (filterSubdivisionId == null) return taskStats;
+    return computeTaskStats(scopedTasks);
+  }, [filterSubdivisionId, taskStats, scopedTasks]);
+
+  const scopedRemarks = useMemo(
+    () =>
+      remarks.filter(
+        (r) =>
+          scopedEquipmentIds.has(r.equipmentId) ||
+          (r as { subdivisionId?: number }).subdivisionId === filterSubdivisionId
+      ),
+    [remarks, scopedEquipmentIds, filterSubdivisionId]
+  );
+
+  const scopedMaintenance = useMemo(
+    () => maintenanceRecords.filter((r) => scopedEquipmentIds.has(r.equipmentId)),
+    [maintenanceRecords, scopedEquipmentIds]
+  );
+
+  const scopedServiceRequests = useMemo(
+    () => filterItemsBySubdivision(serviceRequests, filterSubdivisionId),
+    [serviceRequests, filterSubdivisionId]
+  );
+
+  const scopedWarehouseAlerts = useMemo(
+    () =>
+      warehouseAlerts.filter((a) =>
+        filterSubdivisionId == null
+          ? true
+          : a.part?.subdivisionId === filterSubdivisionId
+      ),
+    [warehouseAlerts, filterSubdivisionId]
+  );
+
+  const upcomingTasks = useMemo(() => {
     const now = new Date();
     const threeDaysFromNow = new Date();
     threeDaysFromNow.setDate(now.getDate() + 3);
+    return scopedTasks
+      .filter((task) => {
+        if (!task.dueDate) return false;
+        const dueDate = new Date(task.dueDate);
+        return dueDate >= now && dueDate <= threeDaysFromNow && task.status !== "completed";
+      })
+      .sort((a, b) => new Date(a.dueDate!).getTime() - new Date(b.dueDate!).getTime());
+  }, [scopedTasks]);
 
-    return tasks.filter((task: any) => {
-      if (!task.dueDate) return false;
-      const dueDate = new Date(task.dueDate);
-      return dueDate >= now && dueDate <= threeDaysFromNow && task.status !== 'completed';
-    }).sort((a: any, b: any) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime());
-  };
-
-  const upcomingTasks = getUpcomingTasks();
+  const upcomingMaintenance = useMemo(
+    () =>
+      scopedMaintenance
+        .filter((record) => {
+          const date = new Date(record.scheduledDate);
+          const now = new Date();
+          now.setHours(0, 0, 0, 0);
+          const horizon = addDays(now, 14);
+          return (
+            date >= now &&
+            date <= horizon &&
+            !["completed", "cancelled"].includes(record.status)
+          );
+        })
+        .sort(
+          (a, b) =>
+            new Date(a.scheduledDate).getTime() - new Date(b.scheduledDate).getTime()
+        )
+        .slice(0, 6),
+    [scopedMaintenance]
+  );
 
   // Слушаем события изменения данных ТО для синхронизации
   useEffect(() => {
@@ -90,6 +219,8 @@ export default function Dashboard() {
     window.addEventListener('taskCreated', handleTaskChange);
     window.addEventListener('taskDeleted', handleTaskChange);
     window.addEventListener('dailyInspectionsUpdated', handleInspectionChange);
+    window.addEventListener('remarksUpdated', handleMaintenanceChange);
+    window.addEventListener('equipmentUpdated', handleMaintenanceChange);
     
     return () => {
       window.removeEventListener('maintenanceDataChanged', handleMaintenanceChange);
@@ -97,6 +228,8 @@ export default function Dashboard() {
       window.removeEventListener('taskCreated', handleTaskChange);
       window.removeEventListener('taskDeleted', handleTaskChange);
       window.removeEventListener('dailyInspectionsUpdated', handleInspectionChange);
+      window.removeEventListener('remarksUpdated', handleMaintenanceChange);
+      window.removeEventListener('equipmentUpdated', handleMaintenanceChange);
     };
   }, [refreshData, refetchTaskStats, refetchInspections]);
 
@@ -118,43 +251,41 @@ export default function Dashboard() {
     return null;
   }
 
-  // Расчет реальных данных оборудования из централизованного хранилища (исключая выведенное из эксплуатации)
-  const activeEquipment = getActiveEquipment();
+  const activeEquipment = scopedEquipment;
+  const typeCounts = activeEquipment.reduce<Record<string, number>>((acc, eq) => {
+    const type = (eq.type || "Без типа").trim();
+    acc[type] = (acc[type] || 0) + 1;
+    return acc;
+  }, {});
+
   const equipmentData = {
     total: activeEquipment.length,
-    active: activeEquipment.filter(eq => eq.status === 'active').length,
-    maintenance: activeEquipment.filter(eq => eq.status === 'maintenance').length,
-    inactive: activeEquipment.filter(eq => eq.status === 'inactive').length,
-    categories: {
-      "Фрезерные станки": activeEquipment.filter(eq => eq.type === 'Фрезерный станок').length,
-      "Шлифовальные станки": activeEquipment.filter(eq => eq.type === 'Шлифовальный станок').length,
-      "Токарные станки": activeEquipment.filter(eq => eq.type === 'Токарный станок').length,
-      "Электроэрозия": 5,
-      "Измерительное": 2,
-      "Автоматизация": 1,
-      "Вспомогательное": 3,
-      "Складское": 1,
-      "Заточные станки": 1,
-      "Отрезные станки": 1
-    }
+    active: activeEquipment.filter((eq) => eq.status === "active").length,
+    maintenance: activeEquipment.filter((eq) => eq.status === "maintenance").length,
+    inactive: activeEquipment.filter((eq) => eq.status === "inactive").length,
+    categories: typeCounts,
   };
 
-  // Реальные данные ТО из централизованного хранилища
+  const monthStart = startOfMonth(new Date());
+  const monthEnd = endOfMonth(new Date());
+  const monthLabel = format(new Date(), "LLLL yyyy", { locale: ru });
+  const thisMonthMaintenance = scopedMaintenance.filter((record) =>
+    isWithinInterval(new Date(record.scheduledDate), { start: monthStart, end: monthEnd })
+  );
+
+  // Реальные данные ТО
   const maintenanceData = {
-    scheduled: getMaintenanceByStatus('scheduled').length,
-    completed: getMaintenanceByStatus('completed').length,
-    overdue: maintenanceRecords.filter(record => {
-      if (record.status !== 'scheduled') return false;
-      const scheduledDate = new Date(record.scheduledDate);
-      return scheduledDate < new Date();
+    scheduled: scopedMaintenance.filter((r) => r.status === "scheduled").length,
+    completed: scopedMaintenance.filter((r) => r.status === "completed").length,
+    overdue: scopedMaintenance.filter((record) => {
+      if (record.status !== "scheduled") return false;
+      return new Date(record.scheduledDate) < new Date();
     }).length,
-    inProgress: getMaintenanceByStatus('in_progress').length,
-    types: {
-      "1М - ТО": maintenanceRecords.filter(r => r.maintenanceType === '1М - ТО').length,
-      "3М - ТО": maintenanceRecords.filter(r => r.maintenanceType === '3М - ТО').length,
-      "6М - ТО": maintenanceRecords.filter(r => r.maintenanceType === '6М - ТО').length,
-      "1Г - ТО": maintenanceRecords.filter(r => r.maintenanceType === '1Г - ТО').length
-    }
+    inProgress: scopedMaintenance.filter((r) => r.status === "in_progress").length,
+    types: thisMonthMaintenance.reduce<Record<string, number>>((acc, r) => {
+      acc[r.maintenanceType] = (acc[r.maintenanceType] || 0) + 1;
+      return acc;
+    }, {}),
   };
 
   // Данные ежедневных осмотров из реальной базы данных daily_inspections
@@ -170,78 +301,120 @@ export default function Dashboard() {
     progress: equipmentData.total > 0 ? Math.round((todayInspectionStats.totalInspected / equipmentData.total) * 100) : 0
   };
 
-  // Данные пользователей
+  // Пользователи из API
   const usersData = {
-    total: 3, // admin, user, editor
-    active: 3,
-    roles: {
-      admin: 1,
-      editor: 1,
-      user: 1
-    },
-    onlineToday: 1 // текущий пользователь
+    total: usersList.length,
+    onlineToday: usersList.length > 0 ? 1 : 0,
   };
 
-  // Последние важные события
-  const recentActivities = [
-    {
-      id: 1,
-      type: 'maintenance',
-      message: 'Запланировано ТО для Nmill 1400 на 15 мая',
-      time: '2 часа назад',
-      icon: Calendar,
-      color: 'text-blue-600'
+  const openRemarksCount = scopedRemarks.filter((r) => r.status === "open").length;
+  const criticalRemarksCount = scopedRemarks.filter((r) => r.priority === "critical" && r.status === "open").length;
+
+  const recentActivities = buildRecentActivities({
+    maintenanceRecords: scopedMaintenance,
+    remarks: scopedRemarks,
+    tasks: scopedTasks,
+    serviceRequests: scopedServiceRequests,
+    inspectionSummary: {
+      inspected: dailyInspectionData.inspected,
+      total: dailyInspectionData.total,
     },
-    {
-      id: 2,
-      type: 'inspection',
-      message: `Проведено осмотров: ${dailyInspectionData.inspected}/${dailyInspectionData.total}`,
-      time: 'Сегодня',
-      icon: Eye,
-      color: 'text-green-600'
-    },
-    {
-      id: 3,
-      type: 'equipment',
-      message: 'LH87 переведен в режим ТО',
-      time: '1 день назад',
-      icon: Settings,
-      color: 'text-yellow-600'
-    },
-    {
-      id: 4,
-      type: 'alert',
-      message: 'Darex XT-3000 помечен как неработающий',
-      time: '2 дня назад',
-      icon: AlertTriangle,
-      color: 'text-red-600'
-    }
-  ];
+    limit: 8,
+  });
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      <div className="flex h-screen">
-        <Sidebar />
-        <div className={`flex-1 flex flex-col overflow-hidden ${isCollapsed ? 'ml-16' : 'ml-64'}`}>
-          <Header />
-          <div className="flex-1 overflow-x-hidden overflow-y-auto">
-            <div className="p-6">
-              <Helmet>
-                <title>Панель управления - Система управления оборудованием</title>
-                <meta name="description" content="Общий обзор состояния оборудования, технического обслуживания и ежедневных осмотров" />
-              </Helmet>
-              
-              {/* Заголовок и приветствие */}
-              <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">
-          Панель управления
-        </h1>
-        <p className="text-gray-600 dark:text-gray-400 mt-2">
-          Добро пожаловать, {user.name}! Сегодня {format(new Date(), 'd MMMM yyyy', { locale: ru })}
-        </p>
+    <>
+      <Helmet>
+        <title>Панель управления - Система управления оборудованием</title>
+        <meta name="description" content="Общий обзор состояния оборудования, технического обслуживания и ежедневных осмотров" />
+      </Helmet>
+      <div className="p-6">
+        <div className="mb-8 flex flex-wrap justify-between items-start gap-4">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">
+              Панель управления
+            </h1>
+            <p className="text-gray-600 dark:text-gray-400 mt-2">
+              Добро пожаловать, {user.name}! Сегодня {format(new Date(), "d MMMM yyyy", { locale: ru })}
+            </p>
+            {filterSubdivisionId != null && (
+              <p className="text-sm text-primary-600 dark:text-primary-400 mt-1">
+                Фильтр: {filterLabel}
+              </p>
+            )}
+          </div>
+          <div className="flex flex-wrap items-end gap-3">
+            {isAdmin && <SubdivisionsPanel />}
+            {showFilter && (
+              <SubdivisionFilterSelect
+                value={filterValue}
+                onChange={setFilterValue}
+                subdivisions={availableSubdivisions}
+                className="w-52"
+              />
+            )}
+          </div>
+        </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+        {isDashboardBlockVisible("dash_calendar_stats") && (
+          <>
+            <Card><CardContent className="pt-4"><p className="text-xs text-gray-500">Календарь: запланировано</p><p className="text-xl font-bold">{calStats?.planned ?? 0}</p></CardContent></Card>
+            <Card><CardContent className="pt-4"><p className="text-xs text-gray-500">Календарь: выполнено</p><p className="text-xl font-bold text-green-600">{calStats?.completed ?? 0}</p></CardContent></Card>
+            <Card><CardContent className="pt-4"><p className="text-xs text-gray-500">Календарь: ожидают</p><p className="text-xl font-bold text-orange-600">{calStats?.pending ?? 0}</p></CardContent></Card>
+          </>
+        )}
+        {isDashboardBlockVisible("dash_budget_total") && (
+          <Card><CardContent className="pt-4"><p className="text-xs text-gray-500">Бюджет (всего)</p><p className="text-xl font-bold">{(budgetSummary?.total ?? 0).toLocaleString("ru")} ₽</p></CardContent></Card>
+        )}
       </div>
 
+      {isDashboardBlockVisible("dash_warehouse_alerts") && (warehouseStats?.unresolvedAlerts ?? 0) > 0 && (
+        <Card className="mb-8 border-amber-300 dark:border-amber-700">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-amber-800 dark:text-amber-200">
+              <Package className="w-5 h-5" />
+              Склад: требует внимания ({warehouseStats?.unresolvedAlerts})
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {scopedWarehouseAlerts.slice(0, 8).map((alert) => (
+              <div
+                key={alert.id}
+                className={`flex flex-wrap items-center justify-between gap-2 p-3 rounded border ${
+                  alert.alertType === "zero_stock"
+                    ? "bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-800"
+                    : "bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-800"
+                }`}
+              >
+                <div>
+                  <p className="font-medium">{alert.part?.name}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {warehouseAlertLabel(alert.alertType)} · остаток: {alert.part?.quantity ?? 0} · мин: {alert.part?.minStock ?? 0}
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="outline" onClick={() => setLocation("/warehouse")}>
+                    Открыть склад
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      setResolveAlertTarget(alert);
+                      setResolveForm({ resolutionType: "restocked", comment: "" });
+                    }}
+                  >
+                    Решено
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
       {/* Основные метрики */}
+      {isDashboardBlockVisible("dash_main_metrics") && (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
                 {/* Общее оборудование */}
                 <Card>
@@ -265,10 +438,15 @@ export default function Dashboard() {
                     <div className="flex items-center">
                       <Wrench className="h-10 w-10 text-green-600" />
                       <div className="ml-4">
-                        <p className="text-sm font-medium text-gray-600 dark:text-gray-400">ТО в мае</p>
-                        <p className="text-3xl font-bold text-gray-900 dark:text-gray-100">{maintenanceData.scheduled}</p>
+                        <p className="text-sm font-medium text-gray-600 dark:text-gray-400 capitalize">
+                          ТО за {monthLabel}
+                        </p>
+                        <p className="text-3xl font-bold text-gray-900 dark:text-gray-100">
+                          {thisMonthMaintenance.length}
+                        </p>
                         <p className="text-sm text-blue-600">
-                          {maintenanceData.completed} выполнено, {maintenanceData.inProgress} в процессе
+                          {thisMonthMaintenance.filter((r) => r.status === "completed").length} выполнено,{" "}
+                          {thisMonthMaintenance.filter((r) => r.status === "in_progress").length} в процессе
                         </p>
                       </div>
                     </div>
@@ -309,9 +487,10 @@ export default function Dashboard() {
                   </CardContent>
                 </Card>
               </div>
+      )}
 
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
-                {/* Прогресс ежедневных осмотров */}
+                {isDashboardBlockVisible("dash_inspection_progress") && (
                 <Card className="lg:col-span-2">
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
@@ -363,7 +542,6 @@ export default function Dashboard() {
                           className="mt-4 p-3 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-800 cursor-pointer hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors"
                           onClick={() => {
                             setLocation("/tasks");
-                            // Устанавливаем активную вкладку замечаний
                             setTimeout(() => {
                               window.dispatchEvent(new CustomEvent('navigateToRemarks'));
                             }, 100);
@@ -380,8 +558,9 @@ export default function Dashboard() {
                     </div>
                   </CardContent>
                 </Card>
+                )}
 
-                {/* Статистика задач */}
+                {isDashboardBlockVisible("dash_tasks_stats") && (
                 <Card className="cursor-pointer hover:shadow-lg transition-shadow" onClick={() => setLocation("/tasks")}>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
@@ -393,42 +572,43 @@ export default function Dashboard() {
                     <div className="space-y-4">
                       <div className="grid grid-cols-2 gap-3">
                         <div className="text-center">
-                          <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{taskStats.total}</p>
+                          <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{scopedTaskStats.total}</p>
                           <p className="text-sm text-gray-600 dark:text-gray-400">Всего задач</p>
                         </div>
                         <div className="text-center">
-                          <p className="text-2xl font-bold text-green-600">{taskStats.completed}</p>
+                          <p className="text-2xl font-bold text-green-600">{scopedTaskStats.completed}</p>
                           <p className="text-sm text-gray-600 dark:text-gray-400">Выполнено</p>
                         </div>
                       </div>
                       
                       <div className="space-y-2">
                         <div className="flex justify-between text-sm">
-                          <span>В ожидании: {taskStats.pending}</span>
-                          <span>В работе: {taskStats.inProgress}</span>
+                          <span>В ожидании: {scopedTaskStats.pending}</span>
+                          <span>В работе: {scopedTaskStats.inProgress}</span>
                         </div>
-                        {taskStats.overdue > 0 && (
+                        {scopedTaskStats.overdue > 0 && (
                           <div className="flex items-center gap-1 text-red-600">
                             <AlertTriangle className="h-4 w-4" />
-                            <span className="text-sm">Просрочено: {taskStats.overdue}</span>
+                            <span className="text-sm">Просрочено: {scopedTaskStats.overdue}</span>
                           </div>
                         )}
                       </div>
                       
                       <div className="pt-2">
                         <Progress 
-                          value={taskStats.total > 0 ? (taskStats.completed / taskStats.total) * 100 : 0} 
+                          value={scopedTaskStats.total > 0 ? (scopedTaskStats.completed / scopedTaskStats.total) * 100 : 0} 
                           className="h-2"
                         />
                         <p className="text-xs text-gray-500 mt-1 text-center">
-                          {taskStats.total > 0 ? Math.round((taskStats.completed / taskStats.total) * 100) : 0}% завершено
+                          {scopedTaskStats.total > 0 ? Math.round((scopedTaskStats.completed / scopedTaskStats.total) * 100) : 0}% завершено
                         </p>
                       </div>
                     </div>
                   </CardContent>
                 </Card>
+                )}
 
-                {/* Ближайшие задачи */}
+                {isDashboardBlockVisible("dash_upcoming_tasks") && (
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
@@ -459,7 +639,7 @@ export default function Dashboard() {
                                   <p className="text-xs text-gray-500 mt-1 flex items-center gap-1">
                                     <Wrench className="h-3 w-3" />
                                     Оборудование: {(() => {
-                                      const eq = equipment.find((e: any) => e.id === task.equipmentId);
+                                      const eq = activeEquipment.find((e) => e.id === task.equipmentId);
                                       return eq ? eq.name : task.equipmentId;
                                     })()}
                                   </p>
@@ -501,30 +681,82 @@ export default function Dashboard() {
                     </div>
                   </CardContent>
                 </Card>
+                )}
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                {/* Статистика ТО */}
+                {isDashboardBlockVisible("dash_maintenance_types") && (
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
-                      <BarChart3 className="h-5 w-5" />
-                      ТО по типам (май 2025)
+                      <Wrench className="h-5 w-5" />
+                      Ближайшие ТО (14 дней)
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-3">
-                      {Object.entries(maintenanceData.types).map(([type, count]) => (
-                        <div key={type} className="flex justify-between items-center">
-                          <span className="text-sm font-medium">{type}</span>
-                          <Badge variant="outline">{count}</Badge>
-                        </div>
-                      ))}
+                      {upcomingMaintenance.length === 0 ? (
+                        <p className="text-sm text-muted-foreground text-center py-2">
+                          Нет запланированного ТО на ближайшие 2 недели
+                        </p>
+                      ) : (
+                        upcomingMaintenance.map((record) => (
+                          <div
+                            key={record.id}
+                            className="p-2 border rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer"
+                            onClick={() => setLocation("/schedule")}
+                          >
+                            <div className="flex justify-between gap-2 text-sm">
+                              <div className="min-w-0">
+                                <p className="font-medium truncate">{record.equipmentName}</p>
+                                <p className="text-xs text-muted-foreground">{record.maintenanceType}</p>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <p className="text-xs">
+                                  {format(new Date(record.scheduledDate), "dd.MM", { locale: ru })}
+                                </p>
+                                <Badge variant="outline" className="text-[10px] mt-1">
+                                  {maintenanceStatusLabel(record.status)}
+                                </Badge>
+                              </div>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                      <Button variant="outline" size="sm" className="w-full" onClick={() => setLocation("/schedule")}>
+                        План ТО и задач
+                      </Button>
                     </div>
                   </CardContent>
                 </Card>
+                )}
 
-                {/* Статистика оборудования по категориям */}
+                {isDashboardBlockVisible("dash_maintenance_types") && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 capitalize">
+                      <BarChart3 className="h-5 w-5" />
+                      ТО по типам ({monthLabel})
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      {Object.keys(maintenanceData.types).length === 0 ? (
+                        <p className="text-sm text-muted-foreground">Нет записей ТО за этот месяц</p>
+                      ) : (
+                        Object.entries(maintenanceData.types).map(([type, count]) => (
+                          <div key={type} className="flex justify-between items-center">
+                            <span className="text-sm font-medium">{type}</span>
+                            <Badge variant="outline">{count}</Badge>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+                )}
+
+                {isDashboardBlockVisible("dash_equipment_types") && (
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
@@ -534,20 +766,24 @@ export default function Dashboard() {
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-3 max-h-48 overflow-y-auto">
-                      {Object.entries(equipmentData.categories)
-                        .sort(([,a], [,b]) => b - a)
-                        .slice(0, 6)
-                        .map(([category, count]) => (
-                        <div key={category} className="flex justify-between items-center">
-                          <span className="text-sm font-medium">{category}</span>
-                          <Badge variant="outline">{count}</Badge>
-                        </div>
-                      ))}
+                      {Object.keys(equipmentData.categories).length === 0 ? (
+                        <p className="text-sm text-muted-foreground">Оборудование не добавлено</p>
+                      ) : (
+                        Object.entries(equipmentData.categories)
+                          .sort(([, a], [, b]) => b - a)
+                          .map(([category, count]) => (
+                            <div key={category} className="flex justify-between items-center">
+                              <span className="text-sm font-medium">{category}</span>
+                              <Badge variant="outline">{count}</Badge>
+                            </div>
+                          ))
+                      )}
                     </div>
                   </CardContent>
                 </Card>
+                )}
 
-                {/* Последние события */}
+                {isDashboardBlockVisible("dash_recent_activities") && (
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2">
@@ -557,24 +793,35 @@ export default function Dashboard() {
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-4">
-                      {recentActivities.map((activity) => (
-                        <div key={activity.id} className="flex items-start gap-3">
-                          <activity.icon className={`h-5 w-5 mt-0.5 ${activity.color}`} />
-                          <div className="flex-1">
-                            <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                              {activity.message}
-                            </p>
-                            <p className="text-xs text-gray-500">{activity.time}</p>
+                      {recentActivities.length === 0 ? (
+                        <p className="text-sm text-muted-foreground text-center py-4">
+                          Пока нет событий — создайте оборудование, задачи или ТО
+                        </p>
+                      ) : (
+                        recentActivities.map((activity) => (
+                          <div
+                            key={activity.id}
+                            className={`flex items-start gap-3 ${activity.link ? "cursor-pointer hover:bg-accent/50 rounded-md p-1 -m-1" : ""}`}
+                            onClick={() => activity.link && setLocation(activity.link)}
+                          >
+                            <activity.icon className={`h-5 w-5 mt-0.5 shrink-0 ${activity.color}`} />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                                {activity.message}
+                              </p>
+                              <p className="text-xs text-muted-foreground">{activity.time}</p>
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        ))
+                      )}
                     </div>
                   </CardContent>
                 </Card>
+                )}
               </div>
 
-              {/* Статусы и предупреждения */}
-              {(maintenanceData.overdue > 0 || dailyInspectionData.issues > 0 || dailyInspectionData.notWorking > 0) && (
+              {isDashboardBlockVisible("dash_attention") &&
+              (maintenanceData.overdue > 0 || dailyInspectionData.issues > 0 || dailyInspectionData.notWorking > 0) && (
                 <Card className="mt-8">
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2 text-red-600">
@@ -612,7 +859,7 @@ export default function Dashboard() {
                         </div>
                       )}
 
-                      {getOpenRemarksCount() > 0 && (
+                      {openRemarksCount > 0 && (
                         <div 
                           className="p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg border border-yellow-200 dark:border-yellow-800 cursor-pointer hover:bg-yellow-100 dark:hover:bg-yellow-900/30 transition-colors"
                           onClick={() => setLocation("/remarks")}
@@ -621,12 +868,12 @@ export default function Dashboard() {
                             <AlertTriangle className="h-5 w-5 text-yellow-600" />
                             <span className="font-medium text-yellow-800 dark:text-yellow-200">Открытые замечания</span>
                           </div>
-                          <p className="text-2xl font-bold text-yellow-600">{getOpenRemarksCount()}</p>
+                          <p className="text-2xl font-bold text-yellow-600">{openRemarksCount}</p>
                           <p className="text-sm text-yellow-600">
                             требуют решения
-                            {getCriticalRemarksCount() > 0 && (
+                            {criticalRemarksCount > 0 && (
                               <span className="text-red-600 font-semibold ml-2">
-                                ({getCriticalRemarksCount()} критичных)
+                                ({criticalRemarksCount} критичных)
                               </span>
                             )}
                           </p>
@@ -636,10 +883,74 @@ export default function Dashboard() {
                   </CardContent>
                 </Card>
               )}
-            </div>
-          </div>
-        </div>
       </div>
-    </div>
+
+      <Dialog open={!!resolveAlertTarget} onOpenChange={(open) => !open && setResolveAlertTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Решение проблемы склада</DialogTitle>
+          </DialogHeader>
+          {resolveAlertTarget && (
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                {resolveAlertTarget.part?.name} — {warehouseAlertLabel(resolveAlertTarget.alertType)}
+              </p>
+              <div>
+                <Label>Тип решения</Label>
+                <Select
+                  value={resolveForm.resolutionType}
+                  onValueChange={(v) => setResolveForm((f) => ({ ...f, resolutionType: v }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {WAREHOUSE_RESOLUTION_TYPES.map((t) => (
+                      <SelectItem key={t} value={t}>
+                        {WAREHOUSE_RESOLUTION_LABELS[t]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Комментарий</Label>
+                <Textarea
+                  rows={3}
+                  value={resolveForm.comment}
+                  onChange={(e) => setResolveForm((f) => ({ ...f, comment: e.target.value }))}
+                  placeholder="Опишите, что было сделано..."
+                />
+              </div>
+              <div className="text-xs text-muted-foreground">
+                Решит: {user?.name} · {format(new Date(), "dd.MM.yyyy HH:mm", { locale: ru })}
+              </div>
+              <Button
+                className="w-full"
+                disabled={resolveAlert.isPending}
+                onClick={() => {
+                  if (!resolveAlertTarget) return;
+                  resolveAlert.mutate(
+                    {
+                      alertId: resolveAlertTarget.id,
+                      resolutionType: resolveForm.resolutionType,
+                      comment: resolveForm.comment,
+                    },
+                    {
+                      onSuccess: () => {
+                        setResolveAlertTarget(null);
+                        toast({ title: "Проблема склада решена" });
+                      },
+                    }
+                  );
+                }}
+              >
+                Сохранить решение
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

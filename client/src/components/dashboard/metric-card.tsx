@@ -11,26 +11,26 @@ export function MetricCard({ title, value, change, icon }: MetricCardProps) {
   const isPositive = change >= 0;
   const iconClasses = {
     equipment: {
-      bg: "bg-blue-100",
-      text: "text-blue-600",
+      bg: "bg-blue-100 dark:bg-blue-950",
+      text: "text-blue-700 dark:text-blue-300",
       icon: <Wrench />,
       progress: 100,
     },
     completed: {
-      bg: "bg-green-100",
-      text: "text-green-600",
+      bg: "bg-green-100 dark:bg-green-950",
+      text: "text-green-700 dark:text-green-300",
       icon: <CheckCircle />,
       progress: 67,
     },
     overdue: {
-      bg: "bg-yellow-100",
-      text: "text-yellow-600",
+      bg: "bg-yellow-100 dark:bg-yellow-950",
+      text: "text-yellow-700 dark:text-yellow-300",
       icon: <AlertTriangle />,
       progress: 7,
     },
     repairs: {
-      bg: "bg-red-100",
-      text: "text-red-600",
+      bg: "bg-red-100 dark:bg-red-950",
+      text: "text-red-700 dark:text-red-300",
       icon: <Settings />,
       progress: 12,
     },
@@ -53,7 +53,7 @@ export function MetricCard({ title, value, change, icon }: MetricCardProps) {
           </div>
           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">по сравнению с прошлым месяцем</p>
         </div>
-        <div className={`${bg} rounded-full p-3 ${text} dark:bg-opacity-20`}>
+        <div className={`${bg} rounded-full p-3 ${text}`}>
           {iconComponent}
         </div>
       </div>

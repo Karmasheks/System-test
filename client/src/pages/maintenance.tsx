@@ -1,34 +1,36 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/hooks/use-auth";
-import { useEquipmentData } from "@/hooks/use-equipment-data";
 import { useRemarksData } from "@/hooks/use-remarks-data";
 import { useMaintenanceApi } from "@/hooks/use-maintenance-api";
-import { useQuery } from "@tanstack/react-query";
-import { useLocation } from "wouter";
+import { useEquipmentApi } from "@/hooks/use-equipment-api";
+import { useLocation, useSearch } from "wouter";
 import { Helmet } from "react-helmet";
-import { Sidebar } from "@/components/layout/sidebar";
-import { Header } from "@/components/layout/header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Calendar, Filter, Search, CheckCircle, Clock, AlertTriangle, Eye, Edit, Trash2, Plus } from "lucide-react";
+import { useAccessControl } from "@/hooks/use-access-control";
+import { Calendar, Filter, Search, CheckCircle, Clock, AlertTriangle, Edit, Trash2, Plus } from "lucide-react";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, parseISO } from "date-fns";
 import { ru } from "date-fns/locale";
+import { MAINTENANCE_STATUSES, MAINTENANCE_STATUS_LABELS, maintenanceStatusLabel } from "@shared/maintenance-status-constants";
+
+const maintenanceDialogClass =
+  "max-w-lg max-h-[90vh] flex flex-col gap-0 p-0 overflow-hidden";
+const maintenanceDialogBodyClass = "overflow-y-auto px-6 py-4 space-y-4 flex-1 min-h-0";
+const maintenanceDialogFooterClass = "px-6 py-4 border-t shrink-0";
 
 export default function Maintenance() {
   const { user, isLoading, isAuthenticated } = useAuth();
+  const { canEditModule } = useAccessControl();
+  const canEditMaintenance = canEditModule("maintenance");
   const [, setLocation] = useLocation();
-  // Загрузка данных оборудования из API
-  const { data: equipment = [] } = useQuery({
-    queryKey: ['/api/equipment'],
-  });
-  
-  // Фильтруем только активное оборудование (исключаем выведенное из эксплуатации)
-  const getActiveEquipment = () => equipment.filter((eq: any) => eq.status !== 'decommissioned');
+  const search = useSearch();
+  const openedRecordFromUrl = useRef<string | null>(null);
+  const { allEquipment: equipment, getActiveEquipment } = useEquipmentApi();
   
   const { addRemark } = useRemarksData();
   const { maintenanceRecords, addMaintenance, updateMaintenance, deleteMaintenance } = useMaintenanceApi();
@@ -36,7 +38,7 @@ export default function Maintenance() {
   // Данные автоматически синхронизируются через React Query
 
   // Состояния для фильтров
-  const [selectedMonth, setSelectedMonth] = useState(new Date(2025, 5, 1)); // Июнь 2025 - где есть записи ТО
+  const [selectedMonth, setSelectedMonth] = useState(new Date());
   const [statusFilter, setStatusFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
   const [equipmentFilter, setEquipmentFilter] = useState('all');
@@ -53,10 +55,32 @@ export default function Maintenance() {
     type: '1M-TO',
     date: format(new Date(), 'yyyy-MM-dd'),
     duration: '2 часа',
-    responsible: 'Купцов Денис',
+    responsible: user?.name ?? '',
     status: 'scheduled',
     priority: 'medium'
   });
+
+  const resetAddForm = () => {
+    setFormData({
+      equipmentName: '',
+      type: '1M-TO',
+      date: format(new Date(), 'yyyy-MM-dd'),
+      duration: '2 часа',
+      responsible: user?.name ?? '',
+      status: 'scheduled',
+      priority: 'medium',
+    });
+  };
+
+  useEffect(() => {
+    if (user?.name) {
+      setFormData((prev) =>
+        prev.responsible === '' || prev.responsible === 'Купцов Денис'
+          ? { ...prev, responsible: user.name }
+          : prev
+      );
+    }
+  }, [user?.name]);
 
   // Состояние для замечаний ТО
   const [maintenanceNotes, setMaintenanceNotes] = useState<{[key: number]: string}>({});
@@ -78,7 +102,7 @@ export default function Maintenance() {
     return [];
   };
 
-  // Функция удалена - записи ТО создаются через календарь "График ТО"
+  // Функция удалена - записи ТО создаются через «План ТО и задач»
 
   // Проверка авторизации
   useEffect(() => {
@@ -113,7 +137,7 @@ export default function Maintenance() {
           priority: 'medium',
           status: 'open',
           reportedBy: user?.name || 'Система',
-          assignedTo: 'Купцов Денис',
+          assignedTo: user?.name || 'Система',
           notes: []
         });
         
@@ -147,15 +171,7 @@ export default function Maintenance() {
 
     addMaintenance(newMaintenance);
     setIsAddDialogOpen(false);
-    setFormData({
-      equipmentName: '',
-      type: '1M-TO',
-      date: format(new Date(), 'yyyy-MM-dd'),
-      duration: '2 часа',
-      responsible: 'Купцов Денис',
-      status: 'scheduled',
-      priority: 'medium'
-    });
+    resetAddForm();
   };
 
   const handleEditMaintenance = () => {
@@ -233,22 +249,39 @@ export default function Maintenance() {
     setIsEditDialogOpen(true);
   };
 
+  useEffect(() => {
+    const raw = search.startsWith("?") ? search.slice(1) : search;
+    const recordId = new URLSearchParams(raw).get("record");
+    if (!recordId || maintenanceRecords.length === 0) return;
+    if (openedRecordFromUrl.current === recordId) return;
+
+    const record = maintenanceRecords.find((r) => String(r.id) === recordId);
+    if (!record) return;
+
+    openedRecordFromUrl.current = recordId;
+    openEditDialog(record);
+  }, [search, maintenanceRecords]);
+
   // Получение уникальных типов оборудования для фильтра
   const uniqueEquipment = [...new Set(equipment.map(eq => eq.name))];
   const uniqueTypes = ['1M-TO', '3M-TO', '6M-TO', '1G-TO'];
 
   // Получение статуса с цветом
-  const getStatusBadge = (status: string) => {
-    const statusMap = {
-      'scheduled': { label: 'Запланировано', color: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300' },
-      'in_progress': { label: 'Выполняется', color: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300' },
-      'completed': { label: 'Завершено', color: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300' },
-      'postponed': { label: 'Отложено', color: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300' }
-    };
-    
-    const statusInfo = statusMap[status as keyof typeof statusMap] || statusMap.scheduled;
-    return <Badge className={statusInfo.color}>{statusInfo.label}</Badge>;
+  const maintenanceStatusColors: Record<string, string> = {
+    scheduled: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300",
+    in_progress: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300",
+    completed: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300",
+    overdue: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300",
+    cancelled: "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-300",
+    unplanned: "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-300",
+    postponed: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300",
   };
+
+  const getStatusBadge = (status: string) => (
+    <Badge className={maintenanceStatusColors[status] ?? maintenanceStatusColors.scheduled}>
+      {maintenanceStatusLabel(status)}
+    </Badge>
+  );
 
   // Получение приоритета с цветом
   const getPriorityBadge = (priority: string) => {
@@ -264,18 +297,14 @@ export default function Maintenance() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <>
       <Helmet>
         <title>Техническое обслуживание - StarLine</title>
         <meta name="description" content="Система управления техническим обслуживанием оборудования предприятия" />
       </Helmet>
-      
-      <div className="flex h-screen">
-        <Sidebar />
-        <div className="flex-1 flex flex-col overflow-hidden lg:ml-64">
-          <Header />
-          <main className="flex-1 overflow-y-auto p-6">
-            <div className="space-y-6">
+
+      <main className="p-6">
+        <div className="space-y-6">
               {/* Заголовок и кнопка добавления */}
               <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
                 <div>
@@ -287,21 +316,30 @@ export default function Maintenance() {
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-3">
-                  <p className="text-sm text-gray-600 dark:text-gray-400 self-center">
-                    Записи ТО создаются на странице "График ТО"
-                  </p>
-                  <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-                    <DialogTrigger asChild>
-                      <Button className="bg-primary-600 hover:bg-primary-700 text-white">
-                        <Plus className="h-4 w-4 mr-2" />
-                        Добавить ТО
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent>
-                      <DialogHeader>
-                        <DialogTitle>Добавить техническое обслуживание</DialogTitle>
-                      </DialogHeader>
-                      <div className="space-y-4">
+                  {canEditMaintenance ? (
+                    <Button
+                      onClick={() => {
+                        resetAddForm();
+                        setIsAddDialogOpen(true);
+                      }}
+                    >
+                      <Plus className="h-4 w-4 mr-2" />
+                      Добавить ТО
+                    </Button>
+                  ) : (
+                    <p className="text-sm text-muted-foreground self-center">
+                      Нет прав на создание записей ТО
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+                <DialogContent className={maintenanceDialogClass}>
+                  <DialogHeader className="px-6 pt-6 pb-2 shrink-0">
+                    <DialogTitle>Добавить техническое обслуживание</DialogTitle>
+                  </DialogHeader>
+                  <div className={maintenanceDialogBodyClass}>
                         <div>
                           <Label htmlFor="equipmentName">Оборудование</Label>
                           <Select value={formData.equipmentName} onValueChange={(value) => setFormData(prev => ({ ...prev, equipmentName: value }))}>
@@ -359,10 +397,11 @@ export default function Maintenance() {
                               <SelectValue placeholder="Выберите статус" />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="scheduled">Запланировано</SelectItem>
-                              <SelectItem value="in_progress">Выполняется</SelectItem>
-                              <SelectItem value="completed">Завершено</SelectItem>
-                              <SelectItem value="postponed">Отложено</SelectItem>
+                              {MAINTENANCE_STATUSES.map((status) => (
+                                <SelectItem key={status} value={status}>
+                                  {MAINTENANCE_STATUS_LABELS[status]}
+                                </SelectItem>
+                              ))}
                             </SelectContent>
                           </Select>
                         </div>
@@ -380,19 +419,17 @@ export default function Maintenance() {
                             </SelectContent>
                           </Select>
                         </div>
-                        <div className="flex justify-end gap-2">
+                  </div>
+                  <DialogFooter className={maintenanceDialogFooterClass}>
                           <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
                             Отмена
                           </Button>
-                          <Button onClick={handleAddMaintenance}>
+                          <Button onClick={handleAddMaintenance} disabled={!formData.equipmentName}>
                             Добавить
                           </Button>
-                        </div>
-                      </div>
-                    </DialogContent>
-                  </Dialog>
-                </div>
-              </div>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
 
               {/* Фильтры */}
               <Card>
@@ -412,10 +449,11 @@ export default function Maintenance() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="all">Все статусы</SelectItem>
-                          <SelectItem value="scheduled">Запланировано</SelectItem>
-                          <SelectItem value="in_progress">Выполняется</SelectItem>
-                          <SelectItem value="completed">Завершено</SelectItem>
-                          <SelectItem value="postponed">Отложено</SelectItem>
+                          {MAINTENANCE_STATUSES.map((status) => (
+                            <SelectItem key={status} value={status}>
+                              {MAINTENANCE_STATUS_LABELS[status]}
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     </div>
@@ -505,7 +543,7 @@ export default function Maintenance() {
                               </div>
                             </div>
                             <div className="flex items-center gap-2">
-                              {record.status !== 'completed' && (
+                              {canEditMaintenance && record.status !== 'completed' && (
                                 <Button
                                   size="sm"
                                   className="bg-green-600 hover:bg-green-700 text-white"
@@ -515,6 +553,7 @@ export default function Maintenance() {
                                   Завершить
                                 </Button>
                               )}
+                              {canEditMaintenance && (
                               <Button
                                 variant="outline"
                                 size="sm"
@@ -523,6 +562,8 @@ export default function Maintenance() {
                                 <Edit className="h-4 w-4 mr-1" />
                                 Редактировать
                               </Button>
+                              )}
+                              {canEditMaintenance && (
                               <Button
                                 variant="destructive"
                                 size="sm"
@@ -531,6 +572,7 @@ export default function Maintenance() {
                                 <Trash2 className="h-4 w-4 mr-1" />
                                 Удалить
                               </Button>
+                              )}
                             </div>
                           </div>
                           
@@ -563,11 +605,11 @@ export default function Maintenance() {
 
               {/* Диалог редактирования */}
               <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-                <DialogContent>
-                  <DialogHeader>
+                <DialogContent className={maintenanceDialogClass}>
+                  <DialogHeader className="px-6 pt-6 pb-2 shrink-0">
                     <DialogTitle>Редактировать техническое обслуживание</DialogTitle>
                   </DialogHeader>
-                  <div className="space-y-4">
+                  <div className={maintenanceDialogBodyClass}>
                     <div>
                       <Label htmlFor="equipmentName">Оборудование</Label>
                       <Select value={formData.equipmentName} onValueChange={(value) => setFormData(prev => ({ ...prev, equipmentName: value }))}>
@@ -625,10 +667,11 @@ export default function Maintenance() {
                           <SelectValue placeholder="Выберите статус" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="scheduled">Запланировано</SelectItem>
-                          <SelectItem value="in_progress">Выполняется</SelectItem>
-                          <SelectItem value="completed">Завершено</SelectItem>
-                          <SelectItem value="postponed">Отложено</SelectItem>
+                          {MAINTENANCE_STATUSES.map((status) => (
+                            <SelectItem key={status} value={status}>
+                              {MAINTENANCE_STATUS_LABELS[status]}
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     </div>
@@ -646,21 +689,19 @@ export default function Maintenance() {
                         </SelectContent>
                       </Select>
                     </div>
-                    <div className="flex justify-end gap-2">
+                  </div>
+                  <DialogFooter className={maintenanceDialogFooterClass}>
                       <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
                         Отмена
                       </Button>
                       <Button onClick={handleEditMaintenance}>
                         Сохранить
                       </Button>
-                    </div>
-                  </div>
+                  </DialogFooter>
                 </DialogContent>
               </Dialog>
             </div>
-          </main>
-        </div>
-      </div>
-    </div>
+      </main>
+    </>
   );
 }

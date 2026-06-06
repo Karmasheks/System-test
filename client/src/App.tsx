@@ -16,6 +16,14 @@ import DailyInspection from "@/pages/daily-inspection-new";
 import Remarks from "@/pages/remarks";
 import Profile from "@/pages/profile";
 import Tasks from "@/pages/tasks";
+import ServiceRequests from "@/pages/service-requests";
+import ServiceRequestDetail from "@/pages/service-request-detail";
+import ChecklistTemplates from "@/pages/checklist-templates";
+import Contacts from "@/pages/contacts";
+import Suppliers from "@/pages/suppliers";
+import Budget from "@/pages/budget";
+import Warehouse from "@/pages/warehouse";
+import Documents from "@/pages/documents";
 import { MobileSidebarProvider } from "@/hooks/use-mobile-sidebar";
 import { AuthProvider } from "@/hooks/use-auth";
 import { UserStatusProvider } from "@/hooks/use-user-status";
@@ -24,7 +32,8 @@ import { RemarksProvider } from "@/hooks/use-remarks-data";
 import { MaintenanceProvider } from "@/hooks/use-maintenance-data";
 import { InspectionChecklistProvider } from "@/hooks/use-inspection-checklists";
 import { SidebarProvider } from "@/hooks/use-sidebar-state";
-import { ProtectedRoute } from "@/components/auth/protected-route";
+import { TaskDialogProvider } from "@/hooks/use-task-dialog";
+import { ProtectedLayout } from "@/components/layout/protected-layout";
 
 function Router() {
   return (
@@ -32,64 +41,96 @@ function Router() {
       <Route path="/login" component={Login} />
       <Route path="/register" component={Register} />
       <Route path="/dashboard">
-        <ProtectedRoute>
+        <ProtectedLayout>
           <Dashboard />
-        </ProtectedRoute>
+        </ProtectedLayout>
       </Route>
       <Route path="/schedule">
-        <ProtectedRoute>
+        <ProtectedLayout>
           <Schedule />
-        </ProtectedRoute>
+        </ProtectedLayout>
       </Route>
       <Route path="/equipment">
-        <ProtectedRoute>
+        <ProtectedLayout>
           <Equipment />
-        </ProtectedRoute>
+        </ProtectedLayout>
       </Route>
       <Route path="/daily-inspection">
-        <ProtectedRoute>
+        <ProtectedLayout>
           <DailyInspection />
-        </ProtectedRoute>
+        </ProtectedLayout>
       </Route>
       <Route path="/daily-inspection-new">
-        <ProtectedRoute>
+        <ProtectedLayout>
           <DailyInspection />
-        </ProtectedRoute>
+        </ProtectedLayout>
       </Route>
       <Route path="/users">
-        <ProtectedRoute>
+        <ProtectedLayout>
           <Users />
-        </ProtectedRoute>
+        </ProtectedLayout>
       </Route>
       <Route path="/maintenance">
-        <ProtectedRoute>
+        <ProtectedLayout>
           <Maintenance />
-        </ProtectedRoute>
+        </ProtectedLayout>
       </Route>
       <Route path="/tasks">
-        <ProtectedRoute>
+        <ProtectedLayout>
           <Tasks />
-        </ProtectedRoute>
+        </ProtectedLayout>
+      </Route>
+      <Route path="/service-requests">
+        <ProtectedLayout>
+          <ServiceRequests />
+        </ProtectedLayout>
+      </Route>
+      <Route path="/service-requests/templates">
+        <ProtectedLayout>
+          <ChecklistTemplates />
+        </ProtectedLayout>
+      </Route>
+      <Route path="/service-requests/:id">
+        <ProtectedLayout>
+          <ServiceRequestDetail />
+        </ProtectedLayout>
       </Route>
       <Route path="/remarks">
-        <ProtectedRoute>
+        <ProtectedLayout>
           <Remarks />
-        </ProtectedRoute>
+        </ProtectedLayout>
       </Route>
       <Route path="/reports">
-        <ProtectedRoute>
+        <ProtectedLayout>
           <Reports />
-        </ProtectedRoute>
+        </ProtectedLayout>
+      </Route>
+      <Route path="/contacts">
+        <ProtectedLayout><Contacts /></ProtectedLayout>
+      </Route>
+      <Route path="/suppliers">
+        <ProtectedLayout><Suppliers /></ProtectedLayout>
+      </Route>
+      <Route path="/budget">
+        <ProtectedLayout><Budget /></ProtectedLayout>
+      </Route>
+      <Route path="/warehouse">
+        <ProtectedLayout>
+          <Warehouse />
+        </ProtectedLayout>
+      </Route>
+      <Route path="/documents">
+        <ProtectedLayout><Documents /></ProtectedLayout>
       </Route>
       <Route path="/profile">
-        <ProtectedRoute>
+        <ProtectedLayout>
           <Profile />
-        </ProtectedRoute>
+        </ProtectedLayout>
       </Route>
       <Route path="/">
-        <ProtectedRoute>
+        <ProtectedLayout>
           <Dashboard />
-        </ProtectedRoute>
+        </ProtectedLayout>
       </Route>
       <Route component={NotFound} />
     </Switch>
@@ -108,8 +149,10 @@ function App() {
                   <InspectionChecklistProvider>
                     <UserStatusProvider>
                       <MobileSidebarProvider>
-                        <Toaster />
-                        <Router />
+                        <TaskDialogProvider>
+                          <Toaster />
+                          <Router />
+                        </TaskDialogProvider>
                       </MobileSidebarProvider>
                     </UserStatusProvider>
                   </InspectionChecklistProvider>

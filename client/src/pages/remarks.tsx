@@ -1,9 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Helmet } from "react-helmet";
 import { useAuth } from "@/hooks/use-auth";
-import { useLocation } from "wouter";
-import { Sidebar } from "@/components/layout/sidebar";
-import { Header } from "@/components/layout/header";
+import { useLocation, useSearch } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -28,12 +26,15 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useRemarksData } from "@/hooks/use-remarks-data";
+import { badgeGreen, badgeBlue, badgeYellow, badgeRed, badgePurple, badgeGray } from "@/lib/badge-colors";
 import { format } from "date-fns";
 import { ru } from "date-fns/locale";
 
 export default function Remarks() {
   const { user, isLoading, isAuthenticated } = useAuth();
   const [, setLocation] = useLocation();
+  const search = useSearch();
+  const openedRemarkFromUrl = useRef<string | null>(null);
   const { toast } = useToast();
   const { 
     remarks, 
@@ -56,6 +57,20 @@ export default function Remarks() {
       setLocation('/login');
     }
   }, [isLoading, isAuthenticated, setLocation]);
+
+  useEffect(() => {
+    const raw = search.startsWith("?") ? search.slice(1) : search;
+    const remarkId = new URLSearchParams(raw).get("remark");
+    if (!remarkId || remarks.length === 0) return;
+    if (openedRemarkFromUrl.current === remarkId) return;
+
+    const remark = remarks.find((r) => String(r.id) === remarkId);
+    if (!remark) return;
+
+    openedRemarkFromUrl.current = remarkId;
+    setSelectedRemark(remark);
+    setIsViewDialogOpen(true);
+  }, [search, remarks]);
 
   if (isLoading) {
     return (
@@ -91,11 +106,11 @@ export default function Remarks() {
       case 'open':
         return <Badge variant="destructive">Открыто</Badge>;
       case 'in_progress':
-        return <Badge variant="secondary">В работе</Badge>;
+        return <Badge className={badgeBlue}>В работе</Badge>;
       case 'resolved':
-        return <Badge variant="default" className="bg-green-100 text-green-800">Решено</Badge>;
+        return <Badge className={badgeGreen}>Решено</Badge>;
       case 'closed':
-        return <Badge variant="outline">Закрыто</Badge>;
+        return <Badge className={badgeGray}>Закрыто</Badge>;
       default:
         return <Badge variant="outline">{status}</Badge>;
     }
@@ -106,11 +121,11 @@ export default function Remarks() {
       case 'critical':
         return <Badge variant="destructive">Критично</Badge>;
       case 'high':
-        return <Badge variant="secondary" className="bg-red-100 text-red-800">Высокий</Badge>;
+        return <Badge className={badgeRed}>Высокий</Badge>;
       case 'medium':
-        return <Badge variant="secondary" className="bg-yellow-100 text-yellow-800">Средний</Badge>;
+        return <Badge className={badgeYellow}>Средний</Badge>;
       case 'low':
-        return <Badge variant="outline">Низкий</Badge>;
+        return <Badge className={badgeGray}>Низкий</Badge>;
       default:
         return <Badge variant="outline">{priority}</Badge>;
     }
@@ -119,11 +134,11 @@ export default function Remarks() {
   const getTypeBadge = (type: string) => {
     switch (type) {
       case 'inspection':
-        return <Badge variant="outline" className="bg-blue-100 text-blue-800">Осмотр</Badge>;
+        return <Badge className={badgeBlue}>Осмотр</Badge>;
       case 'maintenance':
-        return <Badge variant="outline" className="bg-purple-100 text-purple-800">ТО</Badge>;
+        return <Badge className={badgePurple}>ТО</Badge>;
       case 'manual':
-        return <Badge variant="outline" className="bg-gray-100 text-gray-800">Ручное</Badge>;
+        return <Badge className={badgeGray}>Ручное</Badge>;
       default:
         return <Badge variant="outline">{type}</Badge>;
     }
@@ -160,19 +175,13 @@ export default function Remarks() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <>
       <Helmet>
         <title>Замечания - Система управления оборудованием</title>
       </Helmet>
 
-      <div className="flex min-h-screen">
-        <Sidebar />
-        
-        <div className="flex-1 flex flex-col lg:ml-64">
-          <Header />
-          
-          <main className="flex-1 p-4 lg:p-6 w-full max-w-full overflow-hidden">
-            <div className="w-full max-w-full">
+      <main className="p-4 lg:p-6 w-full max-w-full">
+        <div className="w-full max-w-full">
               <div className="mb-6">
                 <h1 className="text-2xl lg:text-3xl font-bold text-gray-900 dark:text-white mb-2">
                   Управление замечаниями
@@ -407,9 +416,7 @@ export default function Remarks() {
                 </CardContent>
               </Card>
             </div>
-          </main>
-        </div>
-      </div>
+      </main>
 
       {/* Диалог просмотра замечания */}
       <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
@@ -493,6 +500,6 @@ export default function Remarks() {
           )}
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   );
 }

@@ -196,7 +196,7 @@ export function MaintenanceProvider({ children }: { children: ReactNode }) {
             );
 
             if (!existingRecord) {
-              const newRecord: Omit<MaintenanceRecord, 'id' | 'createdAt' | 'updatedAt'> = {
+              const newRecord: Omit<MaintenanceRecord, 'id'> = {
                 equipmentId: equipment.id,
                 equipmentName: item.equipmentName,
                 maintenanceType: item.type,
@@ -205,6 +205,8 @@ export function MaintenanceProvider({ children }: { children: ReactNode }) {
                 responsible: item.responsible,
                 status: 'scheduled',
                 priority: 'medium',
+                createdAt: new Date(),
+                updatedAt: new Date(),
               };
               await addMaintenanceRecord(newRecord);
               createdCount++;

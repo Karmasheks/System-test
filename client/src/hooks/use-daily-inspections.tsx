@@ -100,13 +100,30 @@ export function useDailyInspections() {
   const getTodayStats = () => {
     const todayInspections = getTodayInspections();
     const uniqueEquipmentIds = new Set(todayInspections.map(i => i.equipmentId));
+
+    const deriveIssues = (inspection: DailyInspection & { checkResults?: string[] }) => {
+      if (inspection.issues != null && inspection.issues > 0) return inspection.issues;
+      if ((inspection as any).issuesCount != null) return Number((inspection as any).issuesCount);
+      const results = (inspection as any).checkResults as string[] | undefined;
+      if (results?.length) return results.filter((r) => r === "issue" || r === "critical").length;
+      return 0;
+    };
+
+    const deriveWorking = (inspection: DailyInspection & { checkResults?: string[] }) => {
+      const ws = (inspection as any).workingStatus as string | undefined;
+      if (ws) return ws;
+      const results = (inspection as any).checkResults as string[] | undefined;
+      if (results?.some((r) => r === "critical")) return "not_working";
+      if (results?.some((r) => r === "issue")) return "maintenance";
+      return "working";
+    };
     
     return {
       totalInspected: uniqueEquipmentIds.size,
-      totalIssues: todayInspections.reduce((sum, i) => sum + i.issues, 0),
-      notWorking: todayInspections.filter(i => i.workingStatus === 'not_working').length,
-      onMaintenance: todayInspections.filter(i => i.workingStatus === 'maintenance').length,
-      working: todayInspections.filter(i => i.workingStatus === 'working').length,
+      totalIssues: todayInspections.reduce((sum, i) => sum + deriveIssues(i), 0),
+      notWorking: todayInspections.filter(i => deriveWorking(i) === 'not_working').length,
+      onMaintenance: todayInspections.filter(i => deriveWorking(i) === 'maintenance').length,
+      working: todayInspections.filter(i => deriveWorking(i) === 'working').length,
     };
   };
 

@@ -2,6 +2,8 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
+import { taskStatusLabel } from "@shared/task-status-constants";
+import { maintenanceStatusLabel } from "@shared/maintenance-status-constants";
 
 export interface ExportData {
   tasks: any[];
@@ -136,15 +138,16 @@ export const exportToExcel = (data: ExportData, title: string) => {
       'Название': remark.title || '',
       'Описание': remark.description || '',
       'Статус': getStatusText(remark.status),
+      'Приоритет': remark.priority || '',
+      'Тип': remark.type || '',
       'Оборудование ID': remark.equipmentId || '',
       'Оборудование': remark.equipmentName || '',
-      'Источник': remark.source || '',
-      'Создал': remark.createdBy || '',
+      'Создал': remark.reportedBy || '',
       'Дата создания': new Date(remark.createdAt).toLocaleDateString('ru-RU'),
-      'Изменил': remark.modifiedBy || '',
-      'Дата изменения': remark.modifiedAt ? new Date(remark.modifiedAt).toLocaleDateString('ru-RU') : '',
-      'Закрыл': remark.closedBy || '',
-      'Дата закрытия': remark.closedAt ? new Date(remark.closedAt).toLocaleDateString('ru-RU') : ''
+      'Изменил': remark.lastModifiedBy || '',
+      'Дата изменения': remark.updatedAt ? new Date(remark.updatedAt).toLocaleDateString('ru-RU') : '',
+      'Закрыл': remark.resolvedBy || '',
+      'Дата закрытия': remark.resolvedAt ? new Date(remark.resolvedAt).toLocaleDateString('ru-RU') : ''
     }));
     
     const remarkSheet = XLSX.utils.json_to_sheet(remarkData);
@@ -220,7 +223,7 @@ export const exportToCSV = (data: ExportData, title: string) => {
     csvContent += 'ID,Название,Статус,Оборудование,Источник,Создал,Дата создания\n';
     
     data.remarks.forEach(remark => {
-      csvContent += `${remark.id},"${remark.title || ''}","${getStatusText(remark.status)}","${remark.equipmentName || ''}","${remark.source || ''}","${remark.createdBy || ''}","${new Date(remark.createdAt).toLocaleDateString('ru-RU')}"\n`;
+      csvContent += `${remark.id},"${remark.title || ''}","${getStatusText(remark.status)}","${remark.equipmentName || ''}","${remark.type || ''}","${remark.reportedBy || ''}","${new Date(remark.createdAt).toLocaleDateString('ru-RU')}"\n`;
     });
     csvContent += '\n';
   }
@@ -244,25 +247,11 @@ export const exportToCSV = (data: ExportData, title: string) => {
 
 // Вспомогательные функции для перевода статусов
 function getStatusText(status: string): string {
-  const statusMap: { [key: string]: string } = {
-    'pending': 'Ожидает',
-    'in-progress': 'В работе',
-    'completed': 'Завершено',
-    'open': 'Открыто',
-    'resolved': 'Решено'
-  };
-  return statusMap[status] || status;
+  return taskStatusLabel(status);
 }
 
 function getStatusTextEn(status: string): string {
-  const statusMap: { [key: string]: string } = {
-    'pending': 'Pending',
-    'in-progress': 'In Progress',
-    'completed': 'Completed',
-    'open': 'Open',
-    'resolved': 'Resolved'
-  };
-  return statusMap[status] || status;
+  return status;
 }
 
 function getPriorityText(priority: string): string {
@@ -286,23 +275,9 @@ function getPriorityTextEn(priority: string): string {
 }
 
 function getMaintenanceStatusText(status: string): string {
-  const statusMap: { [key: string]: string } = {
-    'scheduled': 'Запланировано',
-    'in-progress': 'В работе',
-    'completed': 'Завершено',
-    'overdue': 'Просрочено',
-    'cancelled': 'Отменено'
-  };
-  return statusMap[status] || status;
+  return maintenanceStatusLabel(status);
 }
 
 function getMaintenanceStatusTextEn(status: string): string {
-  const statusMap: { [key: string]: string } = {
-    'scheduled': 'Scheduled',
-    'in-progress': 'In Progress',
-    'completed': 'Completed',
-    'overdue': 'Overdue',
-    'cancelled': 'Cancelled'
-  };
-  return statusMap[status] || status;
+  return status;
 }

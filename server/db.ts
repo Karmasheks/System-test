@@ -12,6 +12,25 @@ export const db = drizzle(client, { schema });
 export async function initializeDatabase() {
   try {
     console.log("Database initialized successfully (using Drizzle schema)");
+
+    const { backfillPlannedDates, backfillServiceRequestPartReservations } = await import(
+      "./service-request-storage"
+    );
+    const backfilled = await backfillPlannedDates();
+    if (backfilled > 0) {
+      console.log(`Backfilled plannedDate for ${backfilled} service request(s)`);
+    }
+
+    const reservedParts = await backfillServiceRequestPartReservations();
+    if (reservedParts > 0) {
+      console.log(`Backfilled warehouse reservations for ${reservedParts} service request part(s)`);
+    }
+
+    const { backfillClosedServiceRequestReservations } = await import("./part-reservation-service");
+    const issuedParts = await backfillClosedServiceRequestReservations();
+    if (issuedParts > 0) {
+      console.log(`Issued warehouse write-offs for ${issuedParts} closed service request reservation(s)`);
+    }
     
     // Seeding disabled - real data restored manually
     // await seedInitialData();
