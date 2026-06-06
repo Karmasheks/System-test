@@ -49,6 +49,8 @@ import { ru } from "date-fns/locale";
 import { X, ExternalLink, History, ArrowLeft, CircleDot } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { taskStatusColors } from "@/lib/badge-colors";
+import { SubdivisionPicker } from "@/components/subdivision-picker";
+import { useSubdivisions } from "@/hooks/use-subdivisions";
 
 const taskTypeCodes = TASK_TYPES.map((t) => t.code) as [
   (typeof TASK_TYPES)[number]["code"],
@@ -77,6 +79,7 @@ export type TaskFormData = z.infer<typeof taskFormSchema>;
 type TaskUpdatePayload = TaskFormData & {
   completingTask?: boolean;
   completionComment?: string;
+  subdivisionId?: number | null;
 };
 
 export interface TaskRecord {
@@ -111,6 +114,7 @@ export interface TaskRecord {
   maintenanceId?: number | null;
   parentTaskId?: number | null;
   rootTaskId?: number | null;
+  subdivisionId?: number | null;
 }
 
 interface TaskTreeResponse {
@@ -204,6 +208,8 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
   const [completionWorkComment, setCompletionWorkComment] = useState("");
   const [completionDurationHours, setCompletionDurationHours] = useState("");
   const [completionDurationMinutes, setCompletionDurationMinutes] = useState("");
+  const [subdivisionId, setSubdivisionId] = useState("");
+  const { data: subdivisions = [] } = useSubdivisions();
 
   const canModify = editingTask ? canProcessTasks() : canCreateTasks();
   const canAssignExecutor =
@@ -358,6 +364,15 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
   });
 
   const watchedStatus = form.watch("status");
+  const watchedEquipmentId = form.watch("equipmentId");
+
+  useEffect(() => {
+    if (!watchedEquipmentId || watchedEquipmentId === "none") return;
+    const eq = equipment.find((e) => e.id === watchedEquipmentId);
+    if (eq?.subdivisionId) {
+      setSubdivisionId(String(eq.subdivisionId));
+    }
+  }, [watchedEquipmentId, equipment]);
   const isCompletingTask = Boolean(
     editingTask && watchedStatus === "completed" && editingTask.status !== "completed"
   );
@@ -389,6 +404,7 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
         setCompletionDurationHours("");
         setCompletionDurationMinutes("");
       }
+      setSubdivisionId(task.subdivisionId ? String(task.subdivisionId) : "");
     },
     [form]
   );
@@ -423,6 +439,7 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
       setCompletionWorkComment("");
       setCompletionDurationHours("");
       setCompletionDurationMinutes("");
+      setSubdivisionId(user?.subdivisionId ? String(user.subdivisionId) : "");
       form.reset({
         ...defaultFormValues(),
         assigneeId: "",
@@ -430,7 +447,7 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
       });
       setOpen(true);
     },
-    [form]
+    [form, user]
   );
 
   const openEdit = useCallback(
@@ -477,6 +494,7 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
     setCompletionWorkComment("");
     setCompletionDurationHours("");
     setCompletionDurationMinutes("");
+    setSubdivisionId("");
     form.reset(defaultFormValues());
   }, [form]);
 
@@ -486,6 +504,7 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
         ...data,
         createdBy: user?.name || "Неизвестный пользователь",
         maintenanceType: resolveMaintenanceType(data),
+        subdivisionId: subdivisionId ? Number(subdivisionId) : undefined,
       });
       return res.json();
     },
@@ -807,6 +826,7 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
           : data.actualHours || null
         : null,
       equipmentId: data.equipmentId && data.equipmentId !== "none" ? data.equipmentId : undefined,
+      subdivisionId: subdivisionId ? Number(subdivisionId) : null,
       maintenanceType,
       description: data.description || undefined,
       ...(editingTask && canAssignExecutor
@@ -828,6 +848,7 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
     <TaskDialogContext.Provider value={{ openCreate, openEdit, close }}>
       {children}
       <Dialog open={open} onOpenChange={(v) => !v && close()}>
+        {open ? (
         <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col gap-0 p-0 overflow-hidden">
           <DialogHeader className="px-6 pt-6 pb-2 shrink-0 space-y-2">
             <DialogTitle>
@@ -1101,6 +1122,16 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
                   </FormItem>
                 )}
               />
+
+              <SubdivisionPicker
+                value={subdivisionId}
+                onChange={setSubdivisionId}
+                label="Подразделение"
+                disabled={!canModify}
+              />
+              <p className="text-xs text-muted-foreground -mt-2">
+                Привязка к подразделению: из выбранного значения, оборудования или профиля сотрудника.
+              </p>
 
               <FormField
                 control={form.control}
@@ -1651,6 +1682,7 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
           </Form>
           </div>
         </DialogContent>
+        ) : null}
       </Dialog>
     </TaskDialogContext.Provider>
   );

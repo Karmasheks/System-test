@@ -2,6 +2,12 @@ import { db } from "./db";
 import { subdivisions, users, equipment, warehouseParts, tasks, serviceRequests, remarks } from "@shared/schema";
 import { DEFAULT_SUBDIVISIONS } from "@shared/subdivision-constants";
 import { eq, sql } from "drizzle-orm";
+import {
+  ensureSubdivisionAdminRole,
+  removeSubdivisionAdminRole,
+  renameSubdivisionAdminRole,
+  syncAllSubdivisionAdminRoles,
+} from "./subdivision-admin-role-service";
 
 function isUniqueNameError(err: unknown): boolean {
   return (
@@ -80,11 +86,13 @@ export async function createSubdivision(name: string) {
       .where(eq(subdivisions.id, existing.id))
       .returning();
     if (!row) throw new Error("Не удалось восстановить подразделение");
+    await ensureSubdivisionAdminRole(row.id, row.name);
     return row;
   }
 
   try {
     const [row] = await db.insert(subdivisions).values({ name: trimmed }).returning();
+    await ensureSubdivisionAdminRole(row.id, row.name);
     return row;
   } catch (err) {
     if (isUniqueNameError(err)) {
@@ -190,10 +198,12 @@ export async function removeSubdivision(id: number): Promise<RemoveSubdivisionRe
       .where(eq(subdivisions.id, id))
       .returning();
     if (!row) throw new Error("Подразделение не найдено");
+    await removeSubdivisionAdminRole(id);
     return { mode: "deactivated", usage };
   }
 
   await db.delete(subdivisions).where(eq(subdivisions.id, id));
+  await removeSubdivisionAdminRole(id);
   return { mode: "deleted" };
 }
 
@@ -237,6 +247,7 @@ export async function renameSubdivision(id: number, name: string) {
       UPDATE warehouse_parts SET subdivision_name = ${trimmed}
       WHERE subdivision_id = ${id}
     `);
+    await renameSubdivisionAdminRole(id, trimmed);
     return row;
   } catch (err) {
     if (isUniqueNameError(err)) {
@@ -249,4 +260,5 @@ export async function renameSubdivision(id: number, name: string) {
 export async function initSubdivisionSystem() {
   await seedSubdivisions();
   await backfillSubdivisionLinks();
+  await syncAllSubdivisionAdminRoles();
 }

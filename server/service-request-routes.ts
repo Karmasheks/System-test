@@ -166,10 +166,25 @@ export function registerServiceRequestRoutes(
   app.get("/api/service-requests/planning", authenticate, async (req, res) => {
     try {
       const week = req.query.week as string | undefined;
-      const [requests, workload] = await Promise.all([
+      const subScope = await getSubdivisionScopeForRequest(req);
+      let [requests, workload] = await Promise.all([
         getPlanningByWeek(week),
         getEngineerWorkload(week ?? getIsoWeek(new Date())),
       ]);
+      if (subScope && !subScope.viewAll) {
+        requests = filterBySubdivisionScope(requests, subScope);
+        const wl: Record<string, { name: string; plannedHours: number; count: number }> = {};
+        for (const r of requests) {
+          if (!r.assigneeName) continue;
+          const key = String(r.assigneeId ?? r.assigneeName);
+          if (!wl[key]) {
+            wl[key] = { name: r.assigneeName, plannedHours: 0, count: 0 };
+          }
+          wl[key].plannedHours += r.plannedHours ?? 0;
+          wl[key].count += 1;
+        }
+        workload = Object.values(wl);
+      }
       res.json({ requests, workload, week: week ?? getIsoWeek(new Date()) });
     } catch {
       res.status(500).json({ message: "Ошибка планирования" });

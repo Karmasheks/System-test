@@ -11,7 +11,9 @@ import {
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -29,6 +31,7 @@ import {
   type RoleAccessProfile,
   type AccessLevel,
 } from "@shared/permissions-constants";
+import { isSubdivisionAdminRole } from "@shared/subdivision-admin-roles";
 import { Label } from "@/components/ui/label";
 import { Plus, Settings2, Trash2 } from "lucide-react";
 import {
@@ -222,7 +225,12 @@ export function RoleProfilesPanel() {
     }
   };
 
-  const canDelete = selectedProfile && !selectedProfile.isSystem && selectedRole !== "admin";
+  const isSubdivisionAdminProfile = isSubdivisionAdminRole(selectedRole);
+  const canDelete =
+    selectedProfile &&
+    !selectedProfile.isSystem &&
+    selectedRole !== "admin" &&
+    !isSubdivisionAdminProfile;
 
   return (
     <>
@@ -249,12 +257,29 @@ export function RoleProfilesPanel() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {sortedProfiles.map((profile) => (
-                    <SelectItem key={profile.role} value={profile.role}>
-                      {roleLabel(profile.role, profile.label)}
-                      {profile.isSystem ? " (системная)" : " (своя)"}
-                    </SelectItem>
-                  ))}
+                  <SelectGroup>
+                    <SelectLabel>Общие роли</SelectLabel>
+                    {sortedProfiles
+                      .filter((profile) => !isSubdivisionAdminRole(profile.role))
+                      .map((profile) => (
+                        <SelectItem key={profile.role} value={profile.role}>
+                          {roleLabel(profile.role, profile.label)}
+                          {profile.isSystem ? " (системная)" : " (своя)"}
+                        </SelectItem>
+                      ))}
+                  </SelectGroup>
+                  {sortedProfiles.some((p) => isSubdivisionAdminRole(p.role)) && (
+                    <SelectGroup>
+                      <SelectLabel>Администраторы подразделений</SelectLabel>
+                      {sortedProfiles
+                        .filter((profile) => isSubdivisionAdminRole(profile.role))
+                        .map((profile) => (
+                          <SelectItem key={profile.role} value={profile.role}>
+                            {roleLabel(profile.role, profile.label)}
+                          </SelectItem>
+                        ))}
+                    </SelectGroup>
+                  )}
                 </SelectContent>
               </Select>
             </div>
@@ -263,7 +288,7 @@ export function RoleProfilesPanel() {
               <Input
                 value={roleLabelInput}
                 onChange={(e) => setRoleLabelInput(e.target.value)}
-                disabled={selectedRole === "admin"}
+                disabled={selectedRole === "admin" || isSubdivisionAdminProfile}
                 placeholder="Название в интерфейсе"
               />
             </div>
@@ -294,7 +319,13 @@ export function RoleProfilesPanel() {
             <p className="text-sm text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 p-3 rounded-md">
               Администратор всегда имеет полный доступ. Профиль admin нельзя изменить.
             </p>
-          ) : (
+          ) : isSubdivisionAdminProfile ? (
+            <p className="text-sm text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 p-3 rounded-md">
+              Роль создаётся автоматически при добавлении подразделения. Название обновляется при переименовании подразделения.
+              Ниже можно настроить права для всех администраторов этого подразделения.
+            </p>
+          ) : null}
+          {selectedRole !== "admin" && (
             <PermissionEditor value={editorState} onChange={setEditorState} />
           )}
 

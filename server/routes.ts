@@ -95,6 +95,19 @@ import {
   listEquipmentTypes,
 } from "./equipment-types-service";
 import { registerSubdivisionRoutes } from "./subdivision-routes";
+import {
+  canActorManageUser,
+  filterUsersForActor,
+  sanitizeUserWritePayload,
+  usersAdminGuard,
+} from "./subdivision-admin-middleware";
+import { applySubdivisionAdminRoleFields } from "./subdivision-admin-role-service";
+import { isSubdivisionAdminRole } from "@shared/subdivision-admin-roles";
+import {
+  canManageSubdivisionId,
+  isSystemAdmin,
+  normalizeManagedSubdivisionIds,
+} from "@shared/subdivision-scope";
 import { initSubdivisionSystem, resolveSubdivisionFields } from "./subdivision-service";
 import { resolveTaskSubdivisionId } from "./subdivision-resolve";
 import {
@@ -870,6 +883,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
+      if (
+        req.body.subdivisionId !== undefined ||
+        req.body.equipmentId !== undefined
+      ) {
+        const resolvedSubdivisionId = await resolveTaskSubdivisionId({
+          explicitId:
+            req.body.subdivisionId != null && req.body.subdivisionId !== ""
+              ? Number(req.body.subdivisionId)
+              : null,
+          equipmentId:
+            req.body.equipmentId !== undefined
+              ? req.body.equipmentId || null
+              : task.equipmentId,
+          userSubdivisionId: fullUser.subdivisionId,
+        });
+        if (resolvedSubdivisionId) {
+          const subScope = await getSubdivisionScopeForRequest(req);
+          if (subScope) {
+            try {
+              assertSubdivisionAccess(subScope, resolvedSubdivisionId);
+            } catch {
+              return subdivisionForbidden(res);
+            }
+          }
+        }
+        taskUpdateData.subdivisionId = resolvedSubdivisionId;
+      }
+
       if (req.body.actualHours != null && req.body.actualHours !== "") {
         taskUpdateData.actualHours = normalizeActualHours(Number(req.body.actualHours));
       }
@@ -972,13 +1013,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/tasks/:id", authenticate, async (req, res) => {
     try {
-      const task = await storage.getTask(parseInt(req.params.id, 10));
-      if (!task) {
-        return res.status(404).json({ message: "Задача не найдена" });
-      }
+      if (!req.user) return res.status(401).json({ message: "Authentication required" });
+      const task = await assertCanViewTaskDetails(req.user, parseInt(req.params.id, 10));
       return res.status(200).json(task);
     } catch (error: any) {
-      return res.status(500).json({ message: error.message });
+      const status = error instanceof TaskAccessError ? error.status : 500;
+      return res.status(status).json({ message: error.message });
     }
   });
 
@@ -1438,19 +1478,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/users", authenticate, async (req, res) => {
     try {
-      if (!req.user || req.user.role !== "admin") {
-        return res.status(403).json({ message: "Доступ запрещен" });
-      }
+      const actor = await usersAdminGuard(req, res);
+      if (!actor) return;
 
       await expireStalePresenceUsers();
-      const users = await storage.getAllUsers();
-      
-      // Remove passwords from response
-      const usersWithoutPasswords = users.map(user => {
+      const users = filterUsersForActor(actor, await storage.getAllUsers());
+
+      const usersWithoutPasswords = users.map((user) => {
         const { password, ...userWithoutPassword } = user;
         return userWithoutPassword;
       });
-      
+
       return res.status(200).json(usersWithoutPasswords);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
@@ -1458,13 +1496,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Create new user
-  app.post("/api/users", authenticate, requireRole(["admin"]), async (req, res) => {
+  app.post("/api/users", authenticate, async (req, res) => {
     try {
-      if (!req.user) {
-        return res.status(401).json({ message: "Authentication required" });
-      }
-      
-      const userData = insertUserSchema.parse(req.body);
+      const actor = await usersAdminGuard(req, res);
+      if (!actor) return;
+
+      const sanitizedBody = sanitizeUserWritePayload(actor, { ...req.body });
+      applySubdivisionAdminRoleFields(sanitizedBody);
+      const userData = insertUserSchema.parse(sanitizedBody);
       const roleKey = (userData.role ?? "viewer").trim();
 
       if (!(await roleProfileExists(roleKey))) {
@@ -1493,14 +1532,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Hash password
       const hashedPassword = await bcrypt.hash(userData.password, 10);
       
+      if (!isSystemAdmin(actor.role)) {
+        userData.managedSubdivisionIds = [];
+        if (!userData.subdivisionId || !canManageSubdivisionId(actor, userData.subdivisionId)) {
+          return res.status(403).json({ message: "Укажите подразделение из вашей зоны управления" });
+        }
+      } else if (userData.role === "admin") {
+        userData.managedSubdivisionIds = [];
+      } else if (isSubdivisionAdminRole(roleKey)) {
+        applySubdivisionAdminRoleFields(userData as Record<string, unknown>);
+      } else {
+        userData.managedSubdivisionIds = normalizeManagedSubdivisionIds(userData.managedSubdivisionIds);
+      }
+
       const user = await storage.createUser({
         ...userData,
-        password: hashedPassword
+        password: hashedPassword,
       });
-      
-      // Create activity
+
       await storage.createActivity({
-        userId: req.user.id,
+        userId: actor.id,
         action: "Created user",
         timestamp: new Date(),
         resourceType: "user",
@@ -1516,14 +1567,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Update user
-  app.put("/api/users/:id", authenticate, requireRole(["admin"]), async (req, res) => {
+  app.put("/api/users/:id", authenticate, async (req, res) => {
     try {
-      if (!req.user) {
-        return res.status(401).json({ message: "Authentication required" });
-      }
-      
+      const actor = await usersAdminGuard(req, res);
+      if (!actor) return;
+
       const userId = parseInt(req.params.id);
-      const updateData = { ...req.body };
+      const targetUser = await storage.getUser(userId);
+      if (!targetUser) {
+        return res.status(404).json({ message: "Пользователь не найден" });
+      }
+      if (!canActorManageUser(actor, targetUser)) {
+        return res.status(403).json({ message: "Недостаточно прав для редактирования этого пользователя" });
+      }
+
+      let updateData: Record<string, unknown>;
+      try {
+        updateData = sanitizeUserWritePayload(actor, { ...req.body });
+        applySubdivisionAdminRoleFields(updateData);
+      } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : "Недостаточно прав";
+        return res.status(403).json({ message });
+      }
+
+      if (!isSystemAdmin(actor.role)) {
+        delete updateData.managedSubdivisionIds;
+      } else {
+        const effectiveRole =
+          updateData.role !== undefined && updateData.role !== null
+            ? String(updateData.role)
+            : targetUser.role;
+        if (effectiveRole === "admin") {
+          updateData.managedSubdivisionIds = [];
+        } else if (isSubdivisionAdminRole(effectiveRole)) {
+          applySubdivisionAdminRoleFields(updateData);
+        } else if (updateData.managedSubdivisionIds !== undefined) {
+          updateData.managedSubdivisionIds = normalizeManagedSubdivisionIds(
+            updateData.managedSubdivisionIds as number[]
+          );
+        }
+      }
 
       if (updateData.role !== undefined && updateData.role !== null) {
         if (!(await roleProfileExists(String(updateData.role)))) {
@@ -1535,29 +1618,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       if (updateData.avatar !== undefined) {
-        const parsedAvatar = avatarUrlSchema.safeParse(updateData.avatar ?? "");
+        const avatarValue = String(updateData.avatar ?? "");
+        const parsedAvatar = avatarUrlSchema.safeParse(avatarValue);
         if (!parsedAvatar.success) {
           return res.status(400).json({
             message: parsedAvatar.error.errors[0]?.message ?? "Некорректный URL аватара",
           });
         }
-        updateData.avatar = updateData.avatar?.trim() || null;
+        updateData.avatar = avatarValue.trim() || null;
       }
-      
-      // Hash password if provided
-      if (updateData.password) {
+
+      if (typeof updateData.password === "string" && updateData.password) {
         updateData.password = await bcrypt.hash(updateData.password, 10);
       }
       
       const updatedUser = await storage.updateUser(userId, updateData);
-      
+
       if (!updatedUser) {
         return res.status(404).json({ message: "Пользователь не найден" });
       }
-      
-      // Create activity
+
       await storage.createActivity({
-        userId: req.user.id,
+        userId: actor.id,
         action: "Updated user",
         timestamp: new Date(),
         resourceType: "user",
@@ -1573,28 +1655,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Delete user
-  app.delete("/api/users/:id", authenticate, requireRole(["admin"]), async (req, res) => {
+  app.delete("/api/users/:id", authenticate, async (req, res) => {
     try {
-      if (!req.user) {
-        return res.status(401).json({ message: "Authentication required" });
-      }
-      
+      const actor = await usersAdminGuard(req, res);
+      if (!actor) return;
+
       const userId = parseInt(req.params.id);
-      
-      // Prevent admin from deleting themselves
-      if (userId === req.user.id) {
+
+      if (userId === actor.id) {
         return res.status(400).json({ message: "Нельзя удалить собственную учетную запись" });
       }
-      
+
+      const targetUser = await storage.getUser(userId);
+      if (!targetUser) {
+        return res.status(404).json({ message: "Пользователь не найден" });
+      }
+      if (!canActorManageUser(actor, targetUser)) {
+        return res.status(403).json({ message: "Недостаточно прав для удаления этого пользователя" });
+      }
+
       const deleted = await storage.deleteUser(userId);
       
       if (!deleted) {
         return res.status(404).json({ message: "Пользователь не найден" });
       }
       
-      // Create activity
       await storage.createActivity({
-        userId: req.user.id,
+        userId: actor.id,
         action: "Deleted user",
         timestamp: new Date(),
         resourceType: "user",
@@ -1928,7 +2015,12 @@ function parseMaintenanceDate(value: unknown): Date | null {
 // MAINTENANCE RECORDS ROUTES
 app.get("/api/maintenance", authenticate, async (req, res) => {
   try {
-    const records = await storage.getAllMaintenanceRecords();
+    let records = await storage.getAllMaintenanceRecords();
+    const subScope = await getSubdivisionScopeForRequest(req);
+    if (subScope && !subScope.viewAll) {
+      const { filterMaintenanceByScope } = await import("./subdivision-equipment-filter");
+      records = await filterMaintenanceByScope(records, subScope);
+    }
     return res.status(200).json(records);
   } catch (error: any) {
     return res.status(500).json({ message: error.message });
@@ -2230,7 +2322,12 @@ app.delete("/api/maintenance/:id", authenticate, requireRole(writeRoles), async 
   // DAILY INSPECTIONS ROUTES
   app.get("/api/daily-inspections", authenticate, async (req, res) => {
     try {
-      const inspections = await storage.getAllDailyInspections();
+      let inspections = await storage.getAllDailyInspections();
+      const subScope = await getSubdivisionScopeForRequest(req);
+      if (subScope && !subScope.viewAll) {
+        const { filterInspectionsByScope } = await import("./subdivision-equipment-filter");
+        inspections = await filterInspectionsByScope(inspections, subScope);
+      }
       return res.status(200).json(inspections);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });

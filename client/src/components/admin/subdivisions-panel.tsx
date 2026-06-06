@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 
 import { Input } from "@/components/ui/input";
 
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 import { useToast } from "@/hooks/use-toast";
 
@@ -123,20 +123,19 @@ export function SubdivisionsPanel() {
 
   return (
 
-    <Dialog open={open} onOpenChange={setOpen}>
+    <>
 
-      <DialogTrigger asChild>
+      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
 
-        <Button variant="outline" size="sm">
+        <Building2 className="w-4 h-4 mr-2" />
 
-          <Building2 className="w-4 h-4 mr-2" />
+        Подразделения
 
-          Подразделения
+      </Button>
 
-        </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
 
-      </DialogTrigger>
-
+      {open ? (
       <DialogContent className="max-w-md">
 
         <DialogHeader>
@@ -304,8 +303,11 @@ export function SubdivisionsPanel() {
         </ul>
 
       </DialogContent>
+      ) : null}
 
     </Dialog>
+
+    </>
 
   );
 

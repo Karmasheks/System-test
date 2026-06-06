@@ -10,6 +10,8 @@ type Props = {
   className?: string;
   allowEmpty?: boolean;
   disabled?: boolean;
+  /** Если задано — показывать только эти подразделения */
+  allowedIds?: number[];
 };
 
 export function SubdivisionPicker({
@@ -20,8 +22,12 @@ export function SubdivisionPicker({
   className,
   allowEmpty = false,
   disabled = false,
+  allowedIds,
 }: Props) {
   const { data: subdivisions = [], isLoading } = useSubdivisions();
+  const visible = allowedIds?.length
+    ? subdivisions.filter((s) => allowedIds.includes(s.id))
+    : subdivisions;
 
   return (
     <div className={className}>
@@ -39,7 +45,7 @@ export function SubdivisionPicker({
         </SelectTrigger>
         <SelectContent>
           {allowEmpty && <SelectItem value="none">Не выбрано</SelectItem>}
-          {subdivisions.map((s) => (
+          {visible.map((s) => (
             <SelectItem key={s.id} value={String(s.id)}>
               {s.name}
             </SelectItem>

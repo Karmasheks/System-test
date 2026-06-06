@@ -120,7 +120,7 @@ export function Header() {
             </Link>
 
             <div className="hidden lg:block">
-              <DropdownMenu>
+              <DropdownMenu modal={false}>
                 <DropdownMenuTrigger asChild>
                   <Button
                     variant="ghost"
@@ -133,7 +133,7 @@ export function Header() {
                     />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent className="w-56" align="end" forceMount>
+                <DropdownMenuContent className="w-56" align="end">
                   <div className="flex items-center gap-3 p-2">
                     <UserAvatar
                       name={user?.name}

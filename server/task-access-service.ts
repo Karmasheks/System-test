@@ -5,6 +5,7 @@ import {
   canViewLevel,
   type TaskCapabilities,
 } from "@shared/permissions-constants";
+import { canAccessSubdivision } from "@shared/subdivision-scope";
 import { getTaskCoexecutors } from "./task-coexecutors-service";
 import type { Task } from "@shared/schema";
 
@@ -28,6 +29,18 @@ async function loadTask(taskId: number): Promise<Task> {
 
 function isManagerRole(role: string): boolean {
   return role === "admin" || role === "marketing_manager";
+}
+
+async function assertTaskSubdivisionAccess(user: AuthUser, task: Task): Promise<void> {
+  if (isManagerRole(user.role)) return;
+  const fullUser = await storage.getUser(user.id);
+  if (!fullUser) throw new TaskAccessError("Пользователь не найден", 401);
+  const perms = await getEffectivePermissionsForUser(fullUser);
+  const scope = perms.subdivisionScope;
+  if (!scope || scope.viewAll) return;
+  if (!canAccessSubdivision(scope, task.subdivisionId)) {
+    throw new TaskAccessError("Нет доступа к задаче этого подразделения", 403);
+  }
 }
 
 function canViewTaskByCapabilities(
@@ -56,6 +69,8 @@ export async function assertCanViewTaskComments(
   taskId: number
 ): Promise<Task> {
   const task = await loadTask(taskId);
+  await assertTaskSubdivisionAccess(user, task);
+
   if (isManagerRole(user.role)) return task;
 
   if (task.createdById === user.id) return task;

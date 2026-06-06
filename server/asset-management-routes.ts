@@ -1,5 +1,6 @@
 import type { Express, Request, Response } from "express";
 import type { AuthenticatedUser } from "./routes";
+import { getSubdivisionScopeForRequest } from "./subdivision-scope-middleware";
 import {
   insertContactSchema,
   insertSupplierSchema,
@@ -209,7 +210,8 @@ export function registerAssetManagementRoutes(
   app.get("/api/budget/summary", authenticate, async (req, res) => {
     try {
       const equipmentId = req.query.equipmentId as string | undefined;
-      res.json(await getBudgetSummary(equipmentId));
+      const scope = await getSubdivisionScopeForRequest(req);
+      res.json(await getBudgetSummary(equipmentId, scope));
     } catch {
       res.status(500).json({ message: "Ошибка" });
     }
@@ -399,11 +401,13 @@ export function registerAssetManagementRoutes(
   app.get("/api/calendar/events", authenticate, async (req, res) => {
     try {
       const { from, to, equipmentId } = req.query;
+      const scope = await getSubdivisionScopeForRequest(req);
       res.json(
         await getCalendarEvents(
           from as string | undefined,
           to as string | undefined,
-          equipmentId as string | undefined
+          equipmentId as string | undefined,
+          scope
         )
       );
     } catch {
@@ -414,11 +418,13 @@ export function registerAssetManagementRoutes(
   app.get("/api/calendar/stats", authenticate, async (req, res) => {
     try {
       const { from, to, equipmentId } = req.query;
+      const scope = await getSubdivisionScopeForRequest(req);
       res.json(
         await getCalendarStats(
           from as string | undefined,
           to as string | undefined,
-          equipmentId as string | undefined
+          equipmentId as string | undefined,
+          scope
         )
       );
     } catch {

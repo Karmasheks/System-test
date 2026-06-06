@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { User, Clock, Coffee, Plane, UserX, Wifi } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -175,9 +175,12 @@ export function UserStatusSelector({
   const expiryHint = formatExpiryHint(selectedActivity, expiresAt);
 
   return (
-    <Dialog open={isOpen} onOpenChange={setIsOpen}>
-      <DialogTrigger asChild>
-        <Button variant="ghost" className="w-full justify-start p-2 h-auto hover:bg-gray-800 text-gray-100">
+    <>
+      <Button
+        variant="ghost"
+        className="w-full justify-start p-2 h-auto hover:bg-gray-800 text-gray-100"
+        onClick={() => setIsOpen(true)}
+      >
           <div className="flex items-center space-x-2 w-full">
             <div className="relative shrink-0">
               <UserAvatar
@@ -210,8 +213,9 @@ export function UserStatusSelector({
               )}
             </div>
           </div>
-        </Button>
-      </DialogTrigger>
+      </Button>
+      <Dialog open={isOpen} onOpenChange={setIsOpen}>
+      {isOpen ? (
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
           <DialogTitle>Изменить статус</DialogTitle>
@@ -242,7 +246,9 @@ export function UserStatusSelector({
           )}
         </div>
       </DialogContent>
+      ) : null}
     </Dialog>
+    </>
   );
 }
 

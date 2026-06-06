@@ -1,4 +1,6 @@
+import { useEffect } from "react";
 import { Link, useLocation } from "wouter";
+import { useMediaQuery } from "@/hooks/use-media-query";
 import { useMobileSidebar } from "@/hooks/use-mobile-sidebar";
 import { useAuth } from "@/hooks/use-auth";
 import { useAccessControl } from "@/hooks/use-access-control";
@@ -27,10 +29,19 @@ import { Button } from "@/components/ui/button";
 export function MobileSidebar() {
   const { open, setOpen } = useMobileSidebar();
   const [location] = useLocation();
+  const isDesktop = useMediaQuery("(min-width: 1024px)");
   const { user } = useAuth();
   const { canViewEmployeePresence } = useAccessControl();
   const { users, getCurrentUserStatus, getCurrentUserActivityStatus, isCurrentUserOnVacation, getCurrentUserExpiresAt, setCurrentUserStatus } = useUserStatus();
   const showEmployeePresence = canViewEmployeePresence();
+
+  useEffect(() => {
+    setOpen(false);
+  }, [location, setOpen]);
+
+  useEffect(() => {
+    if (isDesktop) setOpen(false);
+  }, [isDesktop, setOpen]);
 
   const navigation = [
     {
@@ -117,12 +128,12 @@ export function MobileSidebar() {
     },
   ];
 
-  if (!open) return null;
+  if (!open || isDesktop) return null;
 
   return (
-    <div className="fixed inset-0 flex z-40 lg:hidden" role="dialog" aria-modal="true">
+    <div className="fixed inset-0 flex z-40 lg:hidden" role="presentation">
       <div
-        className="fixed inset-0 bg-gray-600 bg-opacity-75 dark:bg-gray-900 dark:bg-opacity-80"
+        className="mobile-sidebar-overlay fixed inset-0 bg-gray-600/75 dark:bg-gray-900/80"
         aria-hidden="true"
         onClick={() => setOpen(false)}
       />

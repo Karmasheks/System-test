@@ -8,7 +8,6 @@ import { useAuth } from "@/hooks/use-auth";
 import { useAccessControl } from "@/hooks/use-access-control";
 import { useToast } from "@/hooks/use-toast";
 import { useRemarksData } from "@/hooks/use-remarks-data";
-import { useMaintenanceData } from "@/hooks/use-maintenance-data";
 import { useDailyInspections } from "@/hooks/use-daily-inspections";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -31,8 +30,9 @@ import {
 } from "lucide-react";
 import { format, startOfMonth, endOfMonth, isWithinInterval, addDays } from "date-fns";
 import { ru } from "date-fns/locale";
-import { maintenanceStatusLabel } from "@shared/maintenance-status-constants";
 import { useCalendarStats, useBudgetSummary } from "@/hooks/use-asset-management";
+import { taskTypeLabel } from "@shared/task-constants";
+import { taskStatusLabel } from "@shared/task-status-constants";
 import { useWarehouseDashboard, useWarehouseAlerts, useWarehouseMutations } from "@/hooks/use-warehouse";
 import { useServiceRequests } from "@/hooks/use-service-requests";
 import { warehouseAlertLabel } from "@shared/warehouse-constants";
@@ -78,8 +78,7 @@ export default function Dashboard() {
   const { toast } = useToast();
   const { equipment: equipmentList, getActiveEquipment } = useEquipmentApi();
   const { remarks } = useRemarksData();
-  const { maintenanceRecords, refreshData } = useMaintenanceData();
-  const { getTodayStats, refetch: refetchInspections } = useDailyInspections();
+  const { getTodayInspections, refetch: refetchInspections } = useDailyInspections();
   const [, setLocation] = useLocation();
 
   // Загрузка статистики задач
@@ -102,7 +101,7 @@ export default function Dashboard() {
   const [resolveAlertTarget, setResolveAlertTarget] = useState<WarehouseAlertWithPart | null>(null);
   const [resolveForm, setResolveForm] = useState({ resolutionType: "restocked", comment: "" });
 
-  const { data: usersList = [] } = useQuery<{ id: number }[]>({
+  const { data: usersList = [] } = useQuery<{ id: number; subdivisionId?: number | null }[]>({
     queryKey: ["/api/users"],
     queryFn: async () => {
       const token = localStorage.getItem("token");
@@ -145,9 +144,12 @@ export default function Dashboard() {
     [remarks, scopedEquipmentIds, filterSubdivisionId]
   );
 
-  const scopedMaintenance = useMemo(
-    () => maintenanceRecords.filter((r) => scopedEquipmentIds.has(r.equipmentId)),
-    [maintenanceRecords, scopedEquipmentIds]
+  const maintenanceTasks = useMemo(
+    () =>
+      scopedTasks.filter(
+        (t) => t.taskType === "maintenance" && t.dueDate
+      ),
+    [scopedTasks]
   );
 
   const scopedServiceRequests = useMemo(
@@ -165,6 +167,53 @@ export default function Dashboard() {
     [warehouseAlerts, filterSubdivisionId]
   );
 
+  const scopedUsers = useMemo(() => {
+    if (filterSubdivisionId == null) return usersList;
+    return usersList.filter((u) => u.subdivisionId === filterSubdivisionId);
+  }, [usersList, filterSubdivisionId]);
+
+  const scopedCalStats = useMemo(() => {
+    if (filterSubdivisionId == null && calStats) return calStats;
+    const monthStart = startOfMonth(new Date());
+    const monthEnd = endOfMonth(new Date());
+    const inMonth = (d: string | Date | null | undefined) => {
+      if (!d) return false;
+      const dt = new Date(d);
+      return isWithinInterval(dt, { start: monthStart, end: monthEnd });
+    };
+    const taskEvents = scopedTasks.filter((t) => inMonth(t.dueDate));
+    const remarkEvents = scopedRemarks.filter((r) => inMonth(r.createdAt));
+    const srEvents = scopedServiceRequests.filter((r) =>
+      inMonth(r.plannedDate ?? r.createdAt)
+    );
+    const completed = [
+      ...taskEvents.filter((t) => t.status === "completed"),
+      ...srEvents.filter((r) => ["done", "closed"].includes(r.status)),
+    ].length;
+    const pending = [
+      ...taskEvents.filter((t) => t.status === "pending" || t.status === "in_progress"),
+      ...remarkEvents.filter((r) => r.status === "open" || r.status === "in_progress"),
+      ...srEvents.filter((r) => ["new", "assigned", "in_progress"].includes(r.status)),
+    ].length;
+    return {
+      planned: taskEvents.length + remarkEvents.length + srEvents.length,
+      completed,
+      pending,
+      total: taskEvents.length + remarkEvents.length + srEvents.length,
+    };
+  }, [
+    filterSubdivisionId,
+    calStats,
+    scopedTasks,
+    scopedRemarks,
+    scopedServiceRequests,
+  ]);
+
+  const warehouseAlertCount =
+    filterSubdivisionId != null
+      ? scopedWarehouseAlerts.length
+      : (warehouseStats?.unresolvedAlerts ?? scopedWarehouseAlerts.length);
+
   const upcomingTasks = useMemo(() => {
     const now = new Date();
     const threeDaysFromNow = new Date();
@@ -178,34 +227,75 @@ export default function Dashboard() {
       .sort((a, b) => new Date(a.dueDate!).getTime() - new Date(b.dueDate!).getTime());
   }, [scopedTasks]);
 
-  const upcomingMaintenance = useMemo(
-    () =>
-      scopedMaintenance
-        .filter((record) => {
-          const date = new Date(record.scheduledDate);
-          const now = new Date();
-          now.setHours(0, 0, 0, 0);
-          const horizon = addDays(now, 14);
-          return (
-            date >= now &&
-            date <= horizon &&
-            !["completed", "cancelled"].includes(record.status)
-          );
-        })
-        .sort(
-          (a, b) =>
-            new Date(a.scheduledDate).getTime() - new Date(b.scheduledDate).getTime()
-        )
-        .slice(0, 6),
-    [scopedMaintenance]
-  );
+  const equipmentNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const eq of equipmentList) {
+      map.set(eq.id, eq.name);
+    }
+    return map;
+  }, [equipmentList]);
 
-  // Слушаем события изменения данных ТО для синхронизации
-  useEffect(() => {
-    const handleMaintenanceChange = () => {
-      refreshData();
+  const overdueMaintenance = useMemo(() => {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    return maintenanceTasks
+      .filter((task) => {
+        if (task.status === "completed" || task.status === "cancelled") return false;
+        return new Date(task.dueDate!) < now;
+      })
+      .sort((a, b) => new Date(a.dueDate!).getTime() - new Date(b.dueDate!).getTime())
+      .slice(0, 3);
+  }, [maintenanceTasks]);
+
+  const upcomingMaintenance = useMemo(() => {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const horizon = addDays(now, 14);
+    return maintenanceTasks
+      .filter((task) => {
+        const date = new Date(task.dueDate!);
+        return date >= now && date <= horizon && task.status !== "completed";
+      })
+      .sort((a, b) => new Date(a.dueDate!).getTime() - new Date(b.dueDate!).getTime())
+      .slice(0, 6);
+  }, [maintenanceTasks]);
+
+  const todayInspectionsInScope = useMemo(() => {
+    const today = getTodayInspections();
+    return today.filter((i) => scopedEquipmentIds.has(i.equipmentId));
+  }, [getTodayInspections, scopedEquipmentIds]);
+
+  const dailyInspectionData = useMemo(() => {
+    const equipmentTotal = scopedEquipment.length;
+    const uniqueEquipmentIds = new Set(todayInspectionsInScope.map((i) => i.equipmentId));
+    const deriveIssues = (inspection: (typeof todayInspectionsInScope)[0]) => {
+      if (inspection.issues != null && inspection.issues > 0) return inspection.issues;
+      const results = (inspection as { checkResults?: string[] }).checkResults;
+      if (results?.length) return results.filter((r) => r === "issue" || r === "critical").length;
+      return 0;
     };
+    const deriveWorking = (inspection: (typeof todayInspectionsInScope)[0]) => {
+      const ws = (inspection as { workingStatus?: string }).workingStatus;
+      if (ws) return ws;
+      const results = (inspection as { checkResults?: string[] }).checkResults;
+      if (results?.some((r) => r === "critical")) return "not_working";
+      if (results?.some((r) => r === "issue")) return "maintenance";
+      return "working";
+    };
+    const totalInspected = uniqueEquipmentIds.size;
+    return {
+      total: equipmentTotal,
+      inspected: totalInspected,
+      notWorking: todayInspectionsInScope.filter((i) => deriveWorking(i) === "not_working").length,
+      onMaintenance: todayInspectionsInScope.filter((i) => deriveWorking(i) === "maintenance").length,
+      working: todayInspectionsInScope.filter((i) => deriveWorking(i) === "working").length,
+      issues: todayInspectionsInScope.reduce((sum, i) => sum + deriveIssues(i), 0),
+      progress:
+        equipmentTotal > 0 ? Math.round((totalInspected / equipmentTotal) * 100) : 0,
+    };
+  }, [todayInspectionsInScope, scopedEquipment.length]);
 
+  useEffect(() => {
     const handleTaskChange = () => {
       refetchTaskStats();
     };
@@ -214,24 +304,18 @@ export default function Dashboard() {
       refetchInspections();
     };
 
-    window.addEventListener('maintenanceDataChanged', handleMaintenanceChange);
-    window.addEventListener('taskUpdated', handleTaskChange);
-    window.addEventListener('taskCreated', handleTaskChange);
-    window.addEventListener('taskDeleted', handleTaskChange);
-    window.addEventListener('dailyInspectionsUpdated', handleInspectionChange);
-    window.addEventListener('remarksUpdated', handleMaintenanceChange);
-    window.addEventListener('equipmentUpdated', handleMaintenanceChange);
-    
+    window.addEventListener("taskUpdated", handleTaskChange);
+    window.addEventListener("taskCreated", handleTaskChange);
+    window.addEventListener("taskDeleted", handleTaskChange);
+    window.addEventListener("dailyInspectionsUpdated", handleInspectionChange);
+
     return () => {
-      window.removeEventListener('maintenanceDataChanged', handleMaintenanceChange);
-      window.removeEventListener('taskUpdated', handleTaskChange);
-      window.removeEventListener('taskCreated', handleTaskChange);
-      window.removeEventListener('taskDeleted', handleTaskChange);
-      window.removeEventListener('dailyInspectionsUpdated', handleInspectionChange);
-      window.removeEventListener('remarksUpdated', handleMaintenanceChange);
-      window.removeEventListener('equipmentUpdated', handleMaintenanceChange);
+      window.removeEventListener("taskUpdated", handleTaskChange);
+      window.removeEventListener("taskCreated", handleTaskChange);
+      window.removeEventListener("taskDeleted", handleTaskChange);
+      window.removeEventListener("dailyInspectionsUpdated", handleInspectionChange);
     };
-  }, [refreshData, refetchTaskStats, refetchInspections]);
+  }, [refetchTaskStats, refetchInspections]);
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated()) {
@@ -269,49 +353,25 @@ export default function Dashboard() {
   const monthStart = startOfMonth(new Date());
   const monthEnd = endOfMonth(new Date());
   const monthLabel = format(new Date(), "LLLL yyyy", { locale: ru });
-  const thisMonthMaintenance = scopedMaintenance.filter((record) =>
-    isWithinInterval(new Date(record.scheduledDate), { start: monthStart, end: monthEnd })
+  const thisMonthMaintenance = maintenanceTasks.filter((task) =>
+    isWithinInterval(new Date(task.dueDate!), { start: monthStart, end: monthEnd })
   );
 
-  // Реальные данные ТО
-  const maintenanceData = {
-    scheduled: scopedMaintenance.filter((r) => r.status === "scheduled").length,
-    completed: scopedMaintenance.filter((r) => r.status === "completed").length,
-    overdue: scopedMaintenance.filter((record) => {
-      if (record.status !== "scheduled") return false;
-      return new Date(record.scheduledDate) < new Date();
-    }).length,
-    inProgress: scopedMaintenance.filter((r) => r.status === "in_progress").length,
-    types: thisMonthMaintenance.reduce<Record<string, number>>((acc, r) => {
-      acc[r.maintenanceType] = (acc[r.maintenanceType] || 0) + 1;
-      return acc;
-    }, {}),
-  };
+  const maintenanceTypesThisMonth = thisMonthMaintenance.reduce<Record<string, number>>((acc, task) => {
+    const typeLabel = taskTypeLabel(task.taskType, task.maintenanceType);
+    acc[typeLabel] = (acc[typeLabel] || 0) + 1;
+    return acc;
+  }, {});
 
-  // Данные ежедневных осмотров из реальной базы данных daily_inspections
-  const todayInspectionStats = getTodayStats();
-  
-  const dailyInspectionData = {
-    total: equipmentData.total,
-    inspected: todayInspectionStats.totalInspected,
-    notWorking: todayInspectionStats.notWorking,
-    onMaintenance: todayInspectionStats.onMaintenance,
-    working: todayInspectionStats.working,
-    issues: todayInspectionStats.totalIssues,
-    progress: equipmentData.total > 0 ? Math.round((todayInspectionStats.totalInspected / equipmentData.total) * 100) : 0
-  };
-
-  // Пользователи из API
   const usersData = {
-    total: usersList.length,
-    onlineToday: usersList.length > 0 ? 1 : 0,
+    total: scopedUsers.length,
+    onlineToday: scopedUsers.length > 0 ? 1 : 0,
   };
 
   const openRemarksCount = scopedRemarks.filter((r) => r.status === "open").length;
   const criticalRemarksCount = scopedRemarks.filter((r) => r.priority === "critical" && r.status === "open").length;
 
   const recentActivities = buildRecentActivities({
-    maintenanceRecords: scopedMaintenance,
     remarks: scopedRemarks,
     tasks: scopedTasks,
     serviceRequests: scopedServiceRequests,
@@ -359,9 +419,9 @@ export default function Dashboard() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
         {isDashboardBlockVisible("dash_calendar_stats") && (
           <>
-            <Card><CardContent className="pt-4"><p className="text-xs text-gray-500">Календарь: запланировано</p><p className="text-xl font-bold">{calStats?.planned ?? 0}</p></CardContent></Card>
-            <Card><CardContent className="pt-4"><p className="text-xs text-gray-500">Календарь: выполнено</p><p className="text-xl font-bold text-green-600">{calStats?.completed ?? 0}</p></CardContent></Card>
-            <Card><CardContent className="pt-4"><p className="text-xs text-gray-500">Календарь: ожидают</p><p className="text-xl font-bold text-orange-600">{calStats?.pending ?? 0}</p></CardContent></Card>
+            <Card><CardContent className="pt-4"><p className="text-xs text-gray-500">Календарь: запланировано</p><p className="text-xl font-bold">{scopedCalStats?.planned ?? 0}</p></CardContent></Card>
+            <Card><CardContent className="pt-4"><p className="text-xs text-gray-500">Календарь: выполнено</p><p className="text-xl font-bold text-green-600">{scopedCalStats?.completed ?? 0}</p></CardContent></Card>
+            <Card><CardContent className="pt-4"><p className="text-xs text-gray-500">Календарь: ожидают</p><p className="text-xl font-bold text-orange-600">{scopedCalStats?.pending ?? 0}</p></CardContent></Card>
           </>
         )}
         {isDashboardBlockVisible("dash_budget_total") && (
@@ -369,12 +429,12 @@ export default function Dashboard() {
         )}
       </div>
 
-      {isDashboardBlockVisible("dash_warehouse_alerts") && (warehouseStats?.unresolvedAlerts ?? 0) > 0 && (
+      {isDashboardBlockVisible("dash_warehouse_alerts") && warehouseAlertCount > 0 && (
         <Card className="mb-8 border-amber-300 dark:border-amber-700">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-amber-800 dark:text-amber-200">
               <Package className="w-5 h-5" />
-              Склад: требует внимания ({warehouseStats?.unresolvedAlerts})
+              Склад: требует внимания ({warehouseAlertCount})
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
@@ -445,8 +505,8 @@ export default function Dashboard() {
                           {thisMonthMaintenance.length}
                         </p>
                         <p className="text-sm text-blue-600">
-                          {thisMonthMaintenance.filter((r) => r.status === "completed").length} выполнено,{" "}
-                          {thisMonthMaintenance.filter((r) => r.status === "in_progress").length} в процессе
+                          {thisMonthMaintenance.filter((t) => t.status === "completed").length} выполнено,{" "}
+                          {thisMonthMaintenance.filter((t) => t.status === "in_progress").length} в процессе
                         </p>
                       </div>
                     </div>
@@ -695,28 +755,70 @@ export default function Dashboard() {
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-3">
-                      {upcomingMaintenance.length === 0 ? (
+                      {overdueMaintenance.length > 0 && (
+                        <div className="space-y-2">
+                          <p className="text-xs font-medium text-red-600 flex items-center gap-1">
+                            <AlertTriangle className="h-3.5 w-3.5" />
+                            Просрочено в календаре ({overdueMaintenance.length})
+                          </p>
+                          {overdueMaintenance.map((task) => (
+                            <div
+                              key={`overdue-${task.id}`}
+                              className="p-2 border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 cursor-pointer"
+                              onClick={() => setLocation("/schedule")}
+                            >
+                              <div className="flex justify-between gap-2 text-sm">
+                                <div className="min-w-0">
+                                  <p className="font-medium truncate text-red-900 dark:text-red-100">{task.title}</p>
+                                  <p className="text-xs text-red-700 dark:text-red-300 truncate">
+                                    {task.equipmentId
+                                      ? equipmentNameById.get(task.equipmentId) ?? task.equipmentId
+                                      : "Без оборудования"}
+                                    {" · "}
+                                    {taskTypeLabel(task.taskType, task.maintenanceType)}
+                                  </p>
+                                </div>
+                                <div className="text-right shrink-0">
+                                  <p className="text-xs text-red-700 dark:text-red-300">
+                                    {format(new Date(task.dueDate!), "dd.MM", { locale: ru })}
+                                  </p>
+                                  <Badge variant="destructive" className="text-[10px] mt-1">
+                                    Просрочено
+                                  </Badge>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {upcomingMaintenance.length === 0 && overdueMaintenance.length === 0 ? (
                         <p className="text-sm text-muted-foreground text-center py-2">
                           Нет запланированного ТО на ближайшие 2 недели
                         </p>
                       ) : (
-                        upcomingMaintenance.map((record) => (
+                        upcomingMaintenance.map((task) => (
                           <div
-                            key={record.id}
+                            key={task.id}
                             className="p-2 border rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer"
                             onClick={() => setLocation("/schedule")}
                           >
                             <div className="flex justify-between gap-2 text-sm">
                               <div className="min-w-0">
-                                <p className="font-medium truncate">{record.equipmentName}</p>
-                                <p className="text-xs text-muted-foreground">{record.maintenanceType}</p>
+                                <p className="font-medium truncate">{task.title}</p>
+                                <p className="text-xs text-muted-foreground truncate">
+                                  {task.equipmentId
+                                    ? equipmentNameById.get(task.equipmentId) ?? task.equipmentId
+                                    : "Без оборудования"}
+                                  {" · "}
+                                  {taskTypeLabel(task.taskType, task.maintenanceType)}
+                                </p>
                               </div>
                               <div className="text-right shrink-0">
                                 <p className="text-xs">
-                                  {format(new Date(record.scheduledDate), "dd.MM", { locale: ru })}
+                                  {format(new Date(task.dueDate!), "dd.MM", { locale: ru })}
                                 </p>
                                 <Badge variant="outline" className="text-[10px] mt-1">
-                                  {maintenanceStatusLabel(record.status)}
+                                  {taskStatusLabel(task.status)}
                                 </Badge>
                               </div>
                             </div>
@@ -741,10 +843,10 @@ export default function Dashboard() {
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-3">
-                      {Object.keys(maintenanceData.types).length === 0 ? (
+                      {Object.keys(maintenanceTypesThisMonth).length === 0 ? (
                         <p className="text-sm text-muted-foreground">Нет записей ТО за этот месяц</p>
                       ) : (
-                        Object.entries(maintenanceData.types).map(([type, count]) => (
+                        Object.entries(maintenanceTypesThisMonth).map(([type, count]) => (
                           <div key={type} className="flex justify-between items-center">
                             <span className="text-sm font-medium">{type}</span>
                             <Badge variant="outline">{count}</Badge>
@@ -821,7 +923,7 @@ export default function Dashboard() {
               </div>
 
               {isDashboardBlockVisible("dash_attention") &&
-              (maintenanceData.overdue > 0 || dailyInspectionData.issues > 0 || dailyInspectionData.notWorking > 0) && (
+              (dailyInspectionData.issues > 0 || dailyInspectionData.notWorking > 0 || openRemarksCount > 0) && (
                 <Card className="mt-8">
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2 text-red-600">
@@ -831,20 +933,6 @@ export default function Dashboard() {
                   </CardHeader>
                   <CardContent>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      {maintenanceData.overdue > 0 && (
-                        <div 
-                          className="p-4 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-800 cursor-pointer hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors"
-                          onClick={() => setLocation("/maintenance")}
-                        >
-                          <div className="flex items-center gap-2 mb-2">
-                            <Clock className="h-5 w-5 text-red-600" />
-                            <span className="font-medium text-red-800 dark:text-red-200">Просроченные ТО</span>
-                          </div>
-                          <p className="text-2xl font-bold text-red-600">{maintenanceData.overdue}</p>
-                          <p className="text-sm text-red-600">требуют выполнения</p>
-                        </div>
-                      )}
-                      
                       {dailyInspectionData.notWorking > 0 && (
                         <div 
                           className="p-4 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-800 cursor-pointer hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors"
@@ -886,6 +974,7 @@ export default function Dashboard() {
       </div>
 
       <Dialog open={!!resolveAlertTarget} onOpenChange={(open) => !open && setResolveAlertTarget(null)}>
+        {resolveAlertTarget ? (
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Решение проблемы склада</DialogTitle>
@@ -950,6 +1039,7 @@ export default function Dashboard() {
             </div>
           )}
         </DialogContent>
+        ) : null}
       </Dialog>
     </>
   );

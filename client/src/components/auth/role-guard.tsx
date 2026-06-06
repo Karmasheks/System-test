@@ -61,7 +61,13 @@ export function RoleBased({ allowedRoles, children }: RoleBasedProps) {
 // Хук для проверки прав доступа
 export function usePermissions() {
   const { user } = useAuth();
-  const { canViewModule, canEditModule, isFieldVisible, isAdmin } = useAccessControl();
+  const {
+    canViewModule,
+    canEditModule,
+    isFieldVisible,
+    isAdmin,
+    canManageUsers: canManageUsersAccess,
+  } = useAccessControl();
 
   const hasRole = (role: string) => user?.role === role;
 
@@ -78,7 +84,7 @@ export function usePermissions() {
     canEdit: () => isAdmin || canEditModule("tasks"),
     canCreate: () => isAdmin || canEditModule("tasks"),
     canDelete: () => isAdmin || hasAnyRole(["admin", "operator"]),
-    canManageUsers: () => isAdmin,
+    canManageUsers: canManageUsersAccess,
     canManageSystem: () => isAdmin,
     canViewModule: canViewModuleAccess,
     canEditModule: canEditModuleAccess,
@@ -94,7 +100,7 @@ export function getRoleDisplayName(role: string): string {
 export function getRoleDescription(role: string): string {
   switch (role) {
     case "admin":
-      return "Полный доступ ко всем функциям системы";
+      return "Полный доступ ко всем функциям и подразделениям системы";
     case "operator":
       return "Может выполнять осмотры, создавать отчеты, управлять оборудованием";
     case "engineer":

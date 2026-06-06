@@ -17,6 +17,14 @@ import {
   type InsertBudgetEntry,
   type InsertDocument,
 } from "../shared/schema";
+import {
+  filterBySubdivisionScope,
+  type SubdivisionScope,
+} from "@shared/subdivision-scope";
+import {
+  filterBudgetEntriesByScope,
+  loadEquipmentSubdivisionMap,
+} from "./subdivision-equipment-filter";
 
 // --- Contacts ---
 export async function listContacts(filters?: { equipmentId?: string }) {
@@ -139,10 +147,17 @@ export async function linkBudgetToServiceRequest(requestId: number, budgetEntryI
   return row;
 }
 
-export async function getBudgetSummary(equipmentId?: string) {
-  const entries = await listBudgetEntries(
+export async function getBudgetSummary(
+  equipmentId?: string,
+  scope?: SubdivisionScope | null
+) {
+  let entries = await listBudgetEntries(
     equipmentId ? { equipmentId } : undefined
   );
+  if (scope && !scope.viewAll) {
+    const eqMap = await loadEquipmentSubdivisionMap();
+    entries = filterBudgetEntriesByScope(entries, eqMap, scope);
+  }
   const total = entries.reduce((s, e) => s + (e.amount ?? 0), 0);
   const byCategory = entries.reduce<Record<string, number>>((acc, e) => {
     acc[e.category] = (acc[e.category] ?? 0) + e.amount;
@@ -269,11 +284,19 @@ function parseDateRange(from?: string, to?: string) {
   return { fromDate, toDate };
 }
 
-export async function getCalendarEvents(from?: string, to?: string, equipmentId?: string) {
+export async function getCalendarEvents(
+  from?: string,
+  to?: string,
+  equipmentId?: string,
+  scope?: SubdivisionScope | null
+) {
   const { fromDate, toDate } = parseDateRange(from, to);
   const events: CalendarEvent[] = [];
 
-  const allTasks = await db.select().from(tasks);
+  let allTasks = await db.select().from(tasks);
+  if (scope && !scope.viewAll) {
+    allTasks = filterBySubdivisionScope(allTasks, scope);
+  }
   for (const t of allTasks) {
     if (equipmentId && t.equipmentId !== equipmentId) continue;
     if (!t.dueDate) continue;
@@ -294,7 +317,10 @@ export async function getCalendarEvents(from?: string, to?: string, equipmentId?
     });
   }
 
-  const allRemarks = await db.select().from(remarks);
+  let allRemarks = await db.select().from(remarks);
+  if (scope && !scope.viewAll) {
+    allRemarks = filterBySubdivisionScope(allRemarks, scope);
+  }
   for (const r of allRemarks) {
     if (equipmentId && r.equipmentId !== equipmentId) continue;
     const dt = new Date(r.createdAt);
@@ -315,7 +341,10 @@ export async function getCalendarEvents(from?: string, to?: string, equipmentId?
     });
   }
 
-  const requests = await db.select().from(serviceRequests);
+  let requests = await db.select().from(serviceRequests);
+  if (scope && !scope.viewAll) {
+    requests = filterBySubdivisionScope(requests, scope);
+  }
   for (const r of requests) {
     if (equipmentId && r.equipmentId !== equipmentId) continue;
     const done = ["done", "closed"].includes(r.status);
@@ -346,8 +375,13 @@ export async function getCalendarEvents(from?: string, to?: string, equipmentId?
   return events.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 }
 
-export async function getCalendarStats(from?: string, to?: string, equipmentId?: string) {
-  const events = await getCalendarEvents(from, to, equipmentId);
+export async function getCalendarStats(
+  from?: string,
+  to?: string,
+  equipmentId?: string,
+  scope?: SubdivisionScope | null
+) {
+  const events = await getCalendarEvents(from, to, equipmentId, scope);
   const pendingEvents = events.filter((e) => e.isPending);
   return {
     total: events.length,

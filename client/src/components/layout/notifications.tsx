@@ -424,7 +424,7 @@ export function NotificationsDropdown() {
   };
 
   return (
-    <DropdownMenu>
+    <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="icon" className="relative text-gray-200 hover:text-white hover:bg-gray-800">
           <Bell className="h-5 w-5" />

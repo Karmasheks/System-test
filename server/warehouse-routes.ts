@@ -212,9 +212,15 @@ export function registerWarehouseRoutes(
     }
   });
 
-  app.get("/api/warehouse/alerts", authenticate, async (_req, res) => {
+  app.get("/api/warehouse/alerts", authenticate, async (req, res) => {
     try {
-      res.json(await listUnresolvedStockAlerts());
+      let alerts = await listUnresolvedStockAlerts();
+      const subScope = await getSubdivisionScopeForRequest(req);
+      if (subScope && !subScope.viewAll) {
+        const { filterAlertsByPartSubdivision } = await import("./subdivision-equipment-filter");
+        alerts = filterAlertsByPartSubdivision(alerts, subScope);
+      }
+      res.json(alerts);
     } catch {
       res.status(500).json({ message: "Ошибка загрузки оповещений" });
     }
@@ -234,9 +240,40 @@ export function registerWarehouseRoutes(
     }
   });
 
-  app.get("/api/warehouse/dashboard", authenticate, async (_req, res) => {
+  app.get("/api/warehouse/dashboard", authenticate, async (req, res) => {
     try {
-      res.json(await getWarehouseDashboardStats());
+      const stats = await getWarehouseDashboardStats();
+      const subScope = await getSubdivisionScopeForRequest(req);
+      if (subScope && !subScope.viewAll) {
+        const { filterAlertsByPartSubdivision } = await import("./subdivision-equipment-filter");
+        const { filterBySubdivisionScope } = await import("@shared/subdivision-scope");
+        const scopedParts = filterBySubdivisionScope(stats.zeroStockParts, subScope).concat(
+          filterBySubdivisionScope(stats.lowStockParts, subScope)
+        );
+        const uniqueParts = Array.from(new Map(scopedParts.map((p) => [p.id, p])).values());
+        const zeroStock = uniqueParts.filter((p) => (p.quantity ?? 0) <= 0);
+        const lowStock = uniqueParts.filter(
+          (p) =>
+            (p.quantity ?? 0) > 0 &&
+            (p.minStock ?? 0) > 0 &&
+            (p.quantity ?? 0) <= (p.minStock ?? 0)
+        );
+        const alerts = filterAlertsByPartSubdivision(stats.alerts, subScope);
+        res.json({
+          totalParts: filterBySubdivisionScope(
+            await listWarehouseParts({}),
+            subScope
+          ).length,
+          zeroStockCount: zeroStock.length,
+          lowStockCount: lowStock.length,
+          unresolvedAlerts: alerts.length,
+          zeroStockParts: zeroStock.slice(0, 10),
+          lowStockParts: lowStock.slice(0, 10),
+          alerts: alerts.slice(0, 10),
+        });
+        return;
+      }
+      res.json(stats);
     } catch {
       res.status(500).json({ message: "Ошибка загрузки статистики склада" });
     }

@@ -38,16 +38,8 @@ export function LoginForm() {
     setIsLoading(true);
     try {
       await login(data.email, data.password);
-      // Принудительно обновляем состояние аутентификации
       refreshAuth();
-      toast({
-        title: "Вход выполнен",
-        description: "Вы успешно вошли в систему",
-      });
-      // Небольшая задержка для обновления состояния
-      setTimeout(() => {
-        setLocation("/dashboard");
-      }, 100);
+      setLocation("/dashboard");
     } catch (error: any) {
       console.error("Ошибка входа:", error);
       toast({

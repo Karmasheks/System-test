@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { PageHelmet } from "@/components/page-helmet";
 import { useEquipmentApi } from "@/hooks/use-equipment-api";
 import { useMaintenanceApi } from "@/hooks/use-maintenance-api";
@@ -32,6 +32,12 @@ import {
 } from "@/lib/calendar-event-colors";
 import { TASK_TYPES, taskTypeLabel, type TaskTypeCode } from "@shared/task-constants";
 import { MAINTENANCE_STATUSES, MAINTENANCE_STATUS_LABELS } from "@shared/maintenance-status-constants";
+import { useSubdivisionFilter } from "@/hooks/use-subdivision-filter";
+import { SubdivisionFilterSelect } from "@/components/subdivision-filter-select";
+import {
+  equipmentIdsInScope,
+  filterItemsBySubdivision,
+} from "@/lib/subdivision-filter";
 
 const SCHEDULE_PAGE_TITLE = "План ТО и задач";
 
@@ -54,6 +60,14 @@ const CALENDAR_FILTER_OPTIONS: { value: CalendarEventFilter; label: string }[] =
 
 export default function Schedule() {
   const { user } = useAuth();
+  const {
+    filterValue,
+    setFilterValue,
+    filterSubdivisionId,
+    availableSubdivisions,
+    showFilter,
+    filterLabel,
+  } = useSubdivisionFilter();
   const { allEquipment: equipment, getActiveEquipment } = useEquipmentApi();
   
   const { addMaintenance } = useMaintenanceApi();
@@ -80,7 +94,29 @@ export default function Schedule() {
   const monthEnd = endOfMonth(currentDate);
   const calFrom = format(monthStart, "yyyy-MM-dd");
   const calTo = format(monthEnd, "yyyy-MM-dd");
-  const { data: calEvents = [] } = useCalendarEvents(calFrom, calTo);
+  const { data: calEventsRaw = [] } = useCalendarEvents(calFrom, calTo);
+
+  const scopedEquipmentIds = useMemo(
+    () => equipmentIdsInScope(getActiveEquipment(), filterSubdivisionId, null),
+    [equipment, filterSubdivisionId, getActiveEquipment]
+  );
+
+  const scopedTasks = useMemo(
+    () => filterItemsBySubdivision(tasks, filterSubdivisionId),
+    [tasks, filterSubdivisionId]
+  );
+
+  const calEvents = useMemo(() => {
+    if (filterSubdivisionId == null) return calEventsRaw;
+    return (calEventsRaw as any[]).filter((e) => {
+      if (e.equipmentId) return scopedEquipmentIds.has(e.equipmentId);
+      if (e.sourceType === "task") {
+        const task = tasks.find((t) => t.id === e.sourceId);
+        return task?.subdivisionId === filterSubdivisionId;
+      }
+      return false;
+    });
+  }, [calEventsRaw, filterSubdivisionId, scopedEquipmentIds, tasks]);
   
   // Генерируем календарные дни с правильным выравниванием
   const firstDayOfWeek = monthStart.getDay(); // 0 = Воскресенье, 1 = Понедельник
@@ -119,7 +155,7 @@ export default function Schedule() {
   };
 
   const getTasksForDay = (day: Date) => {
-    const dayTasks = tasks.filter(
+    const dayTasks = scopedTasks.filter(
       (task) => task.dueDate && isSameDay(new Date(task.dueDate), day)
     );
     return filterTasksByType(dayTasks);
@@ -159,7 +195,7 @@ export default function Schedule() {
     if (eventFilter === "service_request" || eventFilter === "remark") return [];
     const monthStart = startOfMonth(month);
     const monthEnd = endOfMonth(month);
-    const monthTasks = tasks.filter((task) => {
+    const monthTasks = scopedTasks.filter((task) => {
       if (!task.dueDate) return false;
       const d = new Date(task.dueDate);
       return d >= monthStart && d <= monthEnd;
@@ -179,7 +215,11 @@ export default function Schedule() {
   };
 
   // Список оборудования для выбора (берем из базы данных)
-  const equipmentList = getActiveEquipment().map(eq => eq.name);
+  const equipmentList = getActiveEquipment()
+    .filter((eq) =>
+      filterSubdivisionId == null ? true : scopedEquipmentIds.has(eq.id)
+    )
+    .map((eq) => eq.name);
 
   const maintenanceResponsible = user?.name ?? "—";
 
@@ -225,7 +265,7 @@ export default function Schedule() {
     setSelectedDate(null);
   };
 
-  const upcomingTasks = tasks
+  const upcomingTasks = scopedTasks
     .filter((task) => task.dueDate && new Date(task.dueDate) >= new Date())
     .sort(
       (a, b) =>
@@ -242,11 +282,26 @@ export default function Schedule() {
       <PageHelmet title={`${SCHEDULE_PAGE_TITLE} — StarLine`} />
       <div className="p-8">
         <div className="max-w-7xl mx-auto">
-              <div className="mb-8">
-                <h1 className="text-3xl font-bold text-gray-900 dark:text-white">{SCHEDULE_PAGE_TITLE}</h1>
-                <p className="mt-2 text-gray-600 dark:text-gray-400">
-                  Планирование ТО, задач и заявок на календаре
-                </p>
+              <div className="mb-8 flex flex-wrap justify-between items-start gap-4">
+                <div>
+                  <h1 className="text-3xl font-bold text-gray-900 dark:text-white">{SCHEDULE_PAGE_TITLE}</h1>
+                  <p className="mt-2 text-gray-600 dark:text-gray-400">
+                    Планирование ТО, задач и заявок на календаре
+                  </p>
+                  {filterSubdivisionId != null && (
+                    <p className="text-sm text-primary-600 dark:text-primary-400 mt-1">
+                      Подразделение: {filterLabel}
+                    </p>
+                  )}
+                </div>
+                {showFilter && (
+                  <SubdivisionFilterSelect
+                    value={filterValue}
+                    onChange={setFilterValue}
+                    subdivisions={availableSubdivisions}
+                    className="w-52"
+                  />
+                )}
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -623,12 +678,12 @@ export default function Schedule() {
                         <div className="space-y-1 text-sm">
                           <div className="flex justify-between">
                             <span className="text-gray-600 dark:text-gray-400">Задач:</span>
-                            <span className="font-medium">{tasks.filter((t) => t.dueDate).length}</span>
+                            <span className="font-medium">{scopedTasks.filter((t) => t.dueDate).length}</span>
                           </div>
                           <div className="flex justify-between">
                             <span className="text-gray-600 dark:text-gray-400">ТО (задачи):</span>
                             <span className="font-medium">
-                              {tasks.filter((t) => t.taskType === "maintenance" && t.dueDate).length}
+                              {scopedTasks.filter((t) => t.taskType === "maintenance" && t.dueDate).length}
                             </span>
                           </div>
                           <div className="flex justify-between">

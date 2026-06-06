@@ -23,6 +23,10 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useAccessControl } from "@/hooks/use-access-control";
+import { useSubdivisions } from "@/hooks/use-subdivisions";
+import { filterItemsBySubdivision } from "@/lib/subdivision-filter";
+import { useSubdivisionFilter } from "@/hooks/use-subdivision-filter";
+import { SubdivisionFilterSelect } from "@/components/subdivision-filter-select";
 import { useToast } from "@/hooks/use-toast";
 import { useRemarksData } from "@/hooks/use-remarks-data";
 import { useTaskDialog, type TaskRecord } from "@/hooks/use-task-dialog";
@@ -50,12 +54,22 @@ type Task = TaskRecord & {
   serviceRequestId?: number | null;
   maintenanceId?: number | null;
   parentTaskId?: number | null;
+  subdivisionId?: number | null;
 };
 
 export default function TasksPage() {
   const { user } = useAuth();
   const [, setLocation] = useLocation();
   const { canCreateTasks, canProcessTasks, canViewCreatedTasks, canViewModule } = useAccessControl();
+  const {
+    filterValue,
+    setFilterValue,
+    filterSubdivisionId,
+    availableSubdivisions,
+    showFilter,
+    filterLabel,
+  } = useSubdivisionFilter();
+  const { data: subdivisions = [] } = useSubdivisions();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { remarks } = useRemarksData();
@@ -279,7 +293,15 @@ export default function TasksPage() {
     return tasks;
   }, [tasks, section]);
 
-  const filteredTasks = categoryTasks.filter((task: Task) => {
+  const subdivisionName = (id: number | null | undefined) =>
+    id ? subdivisions.find((s) => s.id === id)?.name ?? `#${id}` : null;
+
+  const scopedTasks = useMemo(
+    () => filterItemsBySubdivision(categoryTasks, filterSubdivisionId),
+    [categoryTasks, filterSubdivisionId]
+  );
+
+  const filteredTasks = scopedTasks.filter((task: Task) => {
     const statusMatch = tasksFilter === "all" || task.status === tasksFilter;
     const priorityMatch = filterPriority === "all" || task.priority === filterPriority;
     return statusMatch && priorityMatch;
@@ -460,6 +482,15 @@ export default function TasksPage() {
                     <SelectItem value="urgent">Срочный</SelectItem>
                   </SelectContent>
                 </Select>
+
+                {showFilter && (
+                  <SubdivisionFilterSelect
+                    value={filterValue}
+                    onChange={setFilterValue}
+                    subdivisions={availableSubdivisions}
+                    className="w-full sm:w-56"
+                  />
+                )}
               </div>
 
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -532,6 +563,13 @@ export default function TasksPage() {
                                       const eq = equipment.find((e: any) => e.id === task.equipmentId);
                                       return eq ? eq.name : task.equipmentId;
                                     })()}</span>
+                                  </div>
+                                )}
+
+                                {task.subdivisionId && (
+                                  <div className="flex items-center gap-2">
+                                    <ClipboardList className="w-4 h-4" />
+                                    <span>Подразделение: {subdivisionName(task.subdivisionId)}</span>
                                   </div>
                                 )}
                                 

@@ -167,6 +167,9 @@ export interface EffectivePermissions {
   subdivisionScope: import("./subdivision-scope").SubdivisionScope;
   primarySubdivisionId: number | null;
   extraSubdivisionIds: number[];
+  managedSubdivisionIds: number[];
+  isSubdivisionAdmin: boolean;
+  isSystemAdmin: boolean;
 }
 
 export interface ModuleDefinition {
@@ -192,7 +195,7 @@ export const DASHBOARD_BLOCK_DEFINITIONS: DashboardBlockDefinition[] = [
   { key: "dash_maintenance_types", label: "ТО по типам", description: "Статистика ТО по типам за месяц" },
   { key: "dash_equipment_types", label: "Оборудование по типам", description: "Распределение оборудования по категориям" },
   { key: "dash_recent_activities", label: "Последние события", description: "Лента недавних действий в системе" },
-  { key: "dash_attention", label: "Требует внимания", description: "Просроченные ТО, неработающее оборудование, замечания" },
+  { key: "dash_attention", label: "Требует внимания", description: "Неработающее оборудование, замечания, проблемы осмотра" },
 ];
 
 export const MODULE_DEFINITIONS: ModuleDefinition[] = [
@@ -237,7 +240,7 @@ const modules = (
 };
 
 const SYSTEM_ROLE_LABELS: Record<SystemRole, string> = {
-  admin: "Администратор",
+  admin: "Администратор системы",
   operator: "Оператор",
   engineer: "Инженер",
   technician: "Техник",

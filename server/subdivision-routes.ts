@@ -8,6 +8,14 @@ import {
   removeSubdivision,
   renameSubdivision,
 } from "./subdivision-service";
+import { requireSystemAdminUser } from "./subdivision-admin-middleware";
+import {
+  returnEquipmentFromRepair,
+  sendEquipmentForRepair,
+  transferEquipmentSubdivision,
+  transferUserSubdivision,
+  transferWarehousePartSubdivision,
+} from "./subdivision-transfer-service";
 
 type AuthMiddleware = (req: Request, res: Response, next: Function) => void;
 type RoleMiddleware = (roles: string[]) => (req: Request, res: Response, next: Function) => void;
@@ -92,6 +100,99 @@ export function registerSubdivisionRoutes(
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "Ошибка удаления";
       res.status(400).json({ message });
+    }
+  });
+
+  app.post("/api/subdivisions/transfers/equipment", authenticate, requireRole(["admin"]), async (req, res) => {
+    try {
+      const actor = await requireSystemAdminUser(req);
+      const equipmentId = String(req.body.equipmentId ?? "").trim();
+      const targetSubdivisionId = Number(req.body.targetSubdivisionId);
+      if (!equipmentId || Number.isNaN(targetSubdivisionId)) {
+        return res.status(400).json({ message: "Укажите оборудование и целевое подразделение" });
+      }
+      const result = await transferEquipmentSubdivision(equipmentId, targetSubdivisionId, {
+        id: actor.id,
+        name: actor.name,
+      });
+      res.json(result);
+    } catch (e: unknown) {
+      const err = e as Error & { statusCode?: number };
+      res.status(err.statusCode ?? 400).json({ message: err.message ?? "Ошибка переноса" });
+    }
+  });
+
+  app.post("/api/subdivisions/transfers/warehouse-part", authenticate, requireRole(["admin"]), async (req, res) => {
+    try {
+      const actor = await requireSystemAdminUser(req);
+      const partId = Number(req.body.partId);
+      const targetSubdivisionId = Number(req.body.targetSubdivisionId);
+      if (Number.isNaN(partId) || Number.isNaN(targetSubdivisionId)) {
+        return res.status(400).json({ message: "Укажите запчасть и целевое подразделение" });
+      }
+      const result = await transferWarehousePartSubdivision(partId, targetSubdivisionId, {
+        id: actor.id,
+        name: actor.name,
+      });
+      res.json(result);
+    } catch (e: unknown) {
+      const err = e as Error & { statusCode?: number };
+      res.status(err.statusCode ?? 400).json({ message: err.message ?? "Ошибка переноса" });
+    }
+  });
+
+  app.post("/api/subdivisions/transfers/user", authenticate, requireRole(["admin"]), async (req, res) => {
+    try {
+      await requireSystemAdminUser(req);
+      const userId = Number(req.body.userId);
+      const targetSubdivisionId = Number(req.body.targetSubdivisionId);
+      if (Number.isNaN(userId) || Number.isNaN(targetSubdivisionId)) {
+        return res.status(400).json({ message: "Укажите сотрудника и целевое подразделение" });
+      }
+      const result = await transferUserSubdivision(userId, targetSubdivisionId);
+      res.json(result);
+    } catch (e: unknown) {
+      const err = e as Error & { statusCode?: number };
+      res.status(err.statusCode ?? 400).json({ message: err.message ?? "Ошибка переноса" });
+    }
+  });
+
+  app.post("/api/subdivisions/transfers/equipment/repair", authenticate, requireRole(["admin"]), async (req, res) => {
+    try {
+      const actor = await requireSystemAdminUser(req);
+      const equipmentId = String(req.body.equipmentId ?? "").trim();
+      const repairSubdivisionId = Number(req.body.repairSubdivisionId);
+      if (!equipmentId || Number.isNaN(repairSubdivisionId)) {
+        return res.status(400).json({ message: "Укажите оборудование и подразделение для ремонта" });
+      }
+      const result = await sendEquipmentForRepair(
+        equipmentId,
+        repairSubdivisionId,
+        { id: actor.id, name: actor.name },
+        req.body.comment
+      );
+      res.json(result);
+    } catch (e: unknown) {
+      const err = e as Error & { statusCode?: number };
+      res.status(err.statusCode ?? 400).json({ message: err.message ?? "Ошибка отправки на ремонт" });
+    }
+  });
+
+  app.post("/api/subdivisions/transfers/equipment/repair/return", authenticate, requireRole(["admin"]), async (req, res) => {
+    try {
+      const actor = await requireSystemAdminUser(req);
+      const equipmentId = String(req.body.equipmentId ?? "").trim();
+      if (!equipmentId) {
+        return res.status(400).json({ message: "Укажите оборудование" });
+      }
+      const result = await returnEquipmentFromRepair(equipmentId, {
+        id: actor.id,
+        name: actor.name,
+      });
+      res.json(result);
+    } catch (e: unknown) {
+      const err = e as Error & { statusCode?: number };
+      res.status(err.statusCode ?? 400).json({ message: err.message ?? "Ошибка возврата с ремонта" });
     }
   });
 }

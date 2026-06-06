@@ -12,7 +12,11 @@ import {
   type EffectivePermissions,
   type SensitiveField,
 } from "@shared/permissions-constants";
-import { canAccessSubdivision, type SubdivisionScope } from "@shared/subdivision-scope";
+import {
+  canAccessSubdivision,
+  canManageSubdivisionId,
+  type SubdivisionScope,
+} from "@shared/subdivision-scope";
 import type { User } from "@shared/schema";
 
 export type AuthUser = User & {
@@ -93,10 +97,36 @@ export function useAccessControl() {
     return canAccessSubdivision(scope, subdivisionId);
   };
 
+  const isSystemAdmin = (): boolean =>
+    user?.role === "admin" || !!permissions?.isSystemAdmin;
+
+  const isSubdivisionAdmin = (): boolean => !!permissions?.isSubdivisionAdmin;
+
+  const canManageUsers = (): boolean => {
+    if (!user) return false;
+    if (isSystemAdmin()) return true;
+    return isSubdivisionAdmin() && canEditModule("users");
+  };
+
+  const canManageSubdivision = (subdivisionId: number | null | undefined): boolean => {
+    if (!user) return false;
+    return canManageSubdivisionId(
+      {
+        role: user.role,
+        managedSubdivisionIds: permissions?.managedSubdivisionIds ?? user.managedSubdivisionIds,
+      },
+      subdivisionId
+    );
+  };
+
   return {
     permissions,
     subdivisionScope,
     canAccessSubdivisionId,
+    isSystemAdmin,
+    isSubdivisionAdmin,
+    canManageUsers,
+    canManageSubdivision,
     canViewModule,
     canEditModule,
     canCreateTasks,

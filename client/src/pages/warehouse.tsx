@@ -18,9 +18,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { maskSensitiveValue, useAccessControl } from "@/hooks/use-access-control";
 import { useEquipmentApi } from "@/hooks/use-equipment-api";
-import { useSubdivisions } from "@/hooks/use-subdivisions";
 import { SubdivisionsPanel } from "@/components/admin/subdivisions-panel";
+import { SubdivisionTransferPanel } from "@/components/admin/subdivision-transfer-panel";
 import { SubdivisionPicker } from "@/components/subdivision-picker";
+import { useSubdivisionFilter } from "@/hooks/use-subdivision-filter";
+import { SubdivisionFilterSelect } from "@/components/subdivision-filter-select";
 import {
   useWarehouseCategories,
   useWarehouseParts,
@@ -181,19 +183,25 @@ export default function WarehousePage() {
   const { toast } = useToast();
   const [, setLocation] = useLocation();
   const { openEdit } = useTaskDialog();
-  const { isFieldVisible } = useAccessControl();
+  const { isFieldVisible, isSystemAdmin } = useAccessControl();
+  const systemAdmin = isSystemAdmin();
   const showCosts = isFieldVisible("warehouse_costs");
   const showSap = isFieldVisible("warehouse_sap");
   const { allEquipment } = useEquipmentApi();
   const { data: categories = [] } = useWarehouseCategories();
   const [categoryFilter, setCategoryFilter] = useState("all");
-  const [subdivisionFilter, setSubdivisionFilter] = useState("all");
-  const { data: subdivisions = [] } = useSubdivisions();
+  const {
+    filterValue,
+    setFilterValue,
+    filterSubdivisionId,
+    availableSubdivisions,
+    showFilter,
+  } = useSubdivisionFilter();
   const [search, setSearch] = useState("");
   const [lowStockOnly, setLowStockOnly] = useState(false);
   const { data: parts = [], isLoading } = useWarehouseParts({
     categoryId: categoryFilter !== "all" ? Number(categoryFilter) : undefined,
-    subdivisionId: subdivisionFilter !== "all" ? Number(subdivisionFilter) : undefined,
+    subdivisionId: filterSubdivisionId ?? undefined,
     search: search || undefined,
     lowStock: lowStockOnly,
   });
@@ -460,22 +468,14 @@ export default function WarehousePage() {
                   onChange={(e) => setSearch(e.target.value)}
                 />
               </div>
-              <div className="w-48">
-                <Label>Подразделение</Label>
-                <Select value={subdivisionFilter} onValueChange={setSubdivisionFilter}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Все подразделения</SelectItem>
-                    {subdivisions.map((s) => (
-                      <SelectItem key={s.id} value={String(s.id)}>
-                        {s.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              {showFilter && (
+                <SubdivisionFilterSelect
+                  value={filterValue}
+                  onChange={setFilterValue}
+                  subdivisions={availableSubdivisions}
+                  className="w-48"
+                />
+              )}
               <div className="w-48">
                 <Label>Категория</Label>
                 <Select value={categoryFilter} onValueChange={setCategoryFilter}>
@@ -529,6 +529,7 @@ export default function WarehousePage() {
                       <TableHead>Название</TableHead>
                       <TableHead>SAP</TableHead>
                       <TableHead>Категория</TableHead>
+                      <TableHead>Подразделение</TableHead>
                       <TableHead>Место</TableHead>
                       <TableHead>Остаток</TableHead>
                       <TableHead>Мин.</TableHead>
@@ -550,6 +551,7 @@ export default function WarehousePage() {
                         <TableCell className="font-medium">{part.name}</TableCell>
                         <TableCell>{maskSensitiveValue(showSap, part.sapNumber)}</TableCell>
                         <TableCell>{part.categoryName ?? "—"}</TableCell>
+                        <TableCell>{part.subdivisionName ?? "—"}</TableCell>
                         <TableCell>{part.storageLocation ?? part.equipmentName ?? "—"}</TableCell>
                         <TableCell>
                           <PartStockBadge
@@ -757,6 +759,7 @@ export default function WarehousePage() {
                 <div>SAP: {maskSensitiveValue(showSap, detailPart.sapNumber)}</div>
                 <div>Инв. №: {detailPart.inventoryNumber ?? "—"}</div>
                 <div>Категория: {detailPart.categoryName ?? "—"}</div>
+                <div>Подразделение: {detailPart.subdivisionName ?? "—"}</div>
                 <div>Место: {detailPart.storageLocation ?? "—"}</div>
                 <div>Оборудование: {detailPart.equipmentName ?? "—"}</div>
                 <div>Стоимость: {maskSensitiveValue(showCosts, detailPart.unitCost != null ? `${detailPart.unitCost} ₽` : null)}</div>
@@ -774,6 +777,16 @@ export default function WarehousePage() {
                   </div>
                 )}
               </div>
+
+              {systemAdmin && (
+                <SubdivisionTransferPanel
+                  entityType="warehouse_part"
+                  entityId={detailPart.id}
+                  entityLabel={detailPart.name}
+                  currentSubdivisionId={detailPart.subdivisionId}
+                  onSuccess={() => setDetailPart(null)}
+                />
+              )}
 
               <div className="flex gap-2 mb-4">
                 <Button size="sm" onClick={() => { setMoveForm({ ...moveForm, type: "in" }); setMoveOpen(true); }}>

@@ -1,4 +1,4 @@
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 
 interface MobileSidebarContextType {
   open: boolean;
@@ -14,6 +14,10 @@ const MobileSidebarContext = createContext<MobileSidebarContextType>({
 
 export function MobileSidebarProvider({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    setOpen(false);
+  }, []);
 
   const toggle = () => setOpen((prev) => !prev);
 

@@ -12,6 +12,8 @@ type Props = {
   onViewAllChange: (value: boolean) => void;
   disabled?: boolean;
   isAdminRole?: boolean;
+  /** Только системный администратор может включать «видит все подразделения» */
+  allowViewAll?: boolean;
 };
 
 export function SubdivisionAccessEditor({
@@ -23,6 +25,7 @@ export function SubdivisionAccessEditor({
   onViewAllChange,
   disabled,
   isAdminRole,
+  allowViewAll = true,
 }: Props) {
   const { data: subdivisions = [] } = useSubdivisions();
   const primaryNum = primarySubdivisionId ? Number(primarySubdivisionId) : null;
@@ -38,7 +41,7 @@ export function SubdivisionAccessEditor({
   if (isAdminRole) {
     return (
       <p className="text-sm text-muted-foreground rounded-md border p-3">
-        Администратор видит все подразделения без ограничений.
+        Администратор системы видит все подразделения без ограничений.
       </p>
     );
   }
@@ -60,20 +63,24 @@ export function SubdivisionAccessEditor({
         disabled={disabled || viewAllSubdivisions}
       />
 
-      <div className="flex items-start gap-3">
-        <Checkbox
-          id="view-all-subdivisions"
-          checked={viewAllSubdivisions}
-          onCheckedChange={(c) => onViewAllChange(c === true)}
-          disabled={disabled}
-        />
-        <div>
-          <Label htmlFor="view-all-subdivisions" className="cursor-pointer font-medium">
-            Видит все подразделения
-          </Label>
-          <p className="text-xs text-muted-foreground">Как у администратора — без фильтра по цехам</p>
+      {allowViewAll && (
+        <div className="flex items-start gap-3">
+          <Checkbox
+            id="view-all-subdivisions"
+            checked={viewAllSubdivisions}
+            onCheckedChange={(c) => onViewAllChange(c === true)}
+            disabled={disabled}
+          />
+          <div>
+            <Label htmlFor="view-all-subdivisions" className="cursor-pointer font-medium">
+              Видит все подразделения
+            </Label>
+            <p className="text-xs text-muted-foreground">
+              Как у администратора системы — без фильтра по подразделениям
+            </p>
+          </div>
         </div>
-      </div>
+      )}
 
       {!viewAllSubdivisions && (
         <div className="space-y-2">

@@ -17,7 +17,10 @@ export type EquipmentEventType =
   | "link_removed"
   | "link_updated"
   | "status_changed"
-  | "location_changed";
+  | "location_changed"
+  | "subdivision_transferred"
+  | "repair_sent"
+  | "repair_returned";
 
 interface AppendEquipmentEventInput {
   equipmentId: string;

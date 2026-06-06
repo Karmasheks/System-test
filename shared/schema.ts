@@ -20,6 +20,8 @@ export const users = pgTable("users", {
   department: text("department"),
   subdivisionId: integer("subdivision_id"),
   extraSubdivisionIds: jsonb("extra_subdivision_ids").$type<number[]>().default([]),
+  /** Подразделения, которыми пользователь администрирует (назначает системный admin) */
+  managedSubdivisionIds: jsonb("managed_subdivision_ids").$type<number[]>().default([]),
   viewAllSubdivisions: boolean("view_all_subdivisions").notNull().default(false),
   position: text("position"),
   phone: text("phone"),
@@ -175,6 +177,12 @@ export const equipment = pgTable("equipment", {
   department: text("department").notNull(),
   subdivisionId: integer("subdivision_id"),
   subdivisionName: text("subdivision_name"),
+  /** Постоянное подразделение-владелец (для возврата с ремонта) */
+  homeSubdivisionId: integer("home_subdivision_id"),
+  homeSubdivisionName: text("home_subdivision_name"),
+  /** Подразделение, куда отправлено на ремонт */
+  repairSubdivisionId: integer("repair_subdivision_id"),
+  repairSubdivisionName: text("repair_subdivision_name"),
   model: text("model"),
   serialNumber: text("serial_number"),
   inventoryNumber: text("inventory_number"),

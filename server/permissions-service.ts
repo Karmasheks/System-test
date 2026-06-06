@@ -21,8 +21,11 @@ import {
 import { eq, sql } from "drizzle-orm";
 import {
   normalizeExtraSubdivisionIds,
+  normalizeManagedSubdivisionIds,
+  resolveManagedSubdivisionIds,
   resolveSubdivisionScope,
 } from "@shared/subdivision-scope";
+import { isSubdivisionAdminRole } from "@shared/subdivision-admin-roles";
 
 const MODULE_KEYS = MODULE_DEFINITIONS.map((m) => m.key);
 
@@ -143,6 +146,9 @@ export async function createRoleAccessProfile(data: {
   label: string;
 }): Promise<RoleAccessProfile> {
   const role = data.role.trim();
+  if (isSubdivisionAdminRole(role)) {
+    throw new Error("Роли администраторов подразделений создаются автоматически");
+  }
   if (!isValidRoleKey(role)) {
     throw new Error("Некорректный ключ роли");
   }
@@ -167,6 +173,9 @@ export async function createRoleAccessProfile(data: {
 
 export async function deleteRoleAccessProfile(role: string): Promise<void> {
   const normalized = normalizeRole(role);
+  if (isSubdivisionAdminRole(normalized)) {
+    throw new Error("Роль администратора подразделения удаляется вместе с подразделением");
+  }
   if (normalized === "admin" || isSystemRole(normalized)) {
     throw new Error("Системную роль нельзя удалить");
   }
@@ -244,6 +253,7 @@ export function resolveEffectivePermissions(
     | "permissionOverrides"
     | "subdivisionId"
     | "extraSubdivisionIds"
+    | "managedSubdivisionIds"
     | "viewAllSubdivisions"
   >,
   roleProfile: RoleAccessProfile
@@ -296,12 +306,18 @@ export function resolveEffectivePermissions(
     };
   }
 
+  const managedSubdivisionIds = resolveManagedSubdivisionIds(user);
   const subdivisionScope = resolveSubdivisionScope({
     role: user.role,
     subdivisionId: user.subdivisionId,
     extraSubdivisionIds: normalizeExtraSubdivisionIds(user.extraSubdivisionIds),
+    managedSubdivisionIds,
     permissionOverrides: user.permissionOverrides as UserPermissionOverrides | null,
   });
+
+  if (role !== "admin" && managedSubdivisionIds.length > 0) {
+    modules = { ...modules, users: modules.users === "none" ? "edit" : modules.users };
+  }
 
   return {
     role,
@@ -313,6 +329,10 @@ export function resolveEffectivePermissions(
     subdivisionScope,
     primarySubdivisionId: user.subdivisionId ?? null,
     extraSubdivisionIds: normalizeExtraSubdivisionIds(user.extraSubdivisionIds),
+    managedSubdivisionIds,
+    isSubdivisionAdmin:
+      role !== "admin" && (managedSubdivisionIds.length > 0 || isSubdivisionAdminRole(role)),
+    isSystemAdmin: role === "admin",
   };
 }
 
@@ -324,6 +344,7 @@ export async function getEffectivePermissionsForUser(
     | "permissionOverrides"
     | "subdivisionId"
     | "extraSubdivisionIds"
+    | "managedSubdivisionIds"
     | "viewAllSubdivisions"
   >
 ): Promise<EffectivePermissions> {

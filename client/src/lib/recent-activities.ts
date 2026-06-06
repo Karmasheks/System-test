@@ -6,7 +6,6 @@ import {
   CheckSquare,
   ClipboardList,
   Eye,
-  Wrench,
 } from "lucide-react";
 import { STATUS_LABELS, type ServiceRequestStatus } from "@shared/service-request-constants";
 
@@ -25,15 +24,6 @@ function toTime(ts: number): string {
 }
 
 export function buildRecentActivities(params: {
-  maintenanceRecords: Array<{
-    id: number;
-    equipmentName: string;
-    maintenanceType: string;
-    status: string;
-    updatedAt?: Date | string;
-    scheduledDate: Date | string;
-    createdAt?: Date | string;
-  }>;
   remarks: Array<{
     id: string;
     equipmentName: string;
@@ -62,27 +52,6 @@ export function buildRecentActivities(params: {
   limit?: number;
 }): RecentActivity[] {
   const items: RecentActivity[] = [];
-
-  for (const r of params.maintenanceRecords) {
-    const ts = new Date(r.updatedAt || r.scheduledDate || r.createdAt || Date.now()).getTime();
-    const label =
-      r.status === "completed"
-        ? "Выполнено ТО"
-        : r.status === "in_progress"
-          ? "ТО в процессе"
-          : r.status === "postponed"
-            ? "ТО отложено"
-            : "Запланировано ТО";
-    items.push({
-      id: `maint-${r.id}`,
-      message: `${label}: ${r.equipmentName} (${r.maintenanceType})`,
-      time: toTime(ts),
-      icon: Wrench,
-      color: "text-blue-600 dark:text-blue-400",
-      link: "/maintenance",
-      timestamp: ts,
-    });
-  }
 
   for (const remark of params.remarks) {
     const ts = new Date(remark.updatedAt || remark.createdAt).getTime();

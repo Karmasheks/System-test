@@ -31,9 +31,16 @@ import { normalizeEquipmentRecord, generateNextEquipmentId, formatEquipmentRespo
 import type { Equipment } from "@shared/schema";
 import { syncEquipmentLinksApi } from "@/hooks/use-equipment-links";
 import { useTaskDialog, type TaskRecord } from "@/hooks/use-task-dialog";
+import { useAccessControl } from "@/hooks/use-access-control";
+import { SubdivisionTransferPanel } from "@/components/admin/subdivision-transfer-panel";
+import { useSubdivisionFilter } from "@/hooks/use-subdivision-filter";
+import { SubdivisionFilterSelect } from "@/components/subdivision-filter-select";
+import { filterItemsBySubdivision } from "@/lib/subdivision-filter";
 
 export default function Equipment() {
   const { user, isLoading, isAuthenticated } = useAuth();
+  const { isSystemAdmin } = useAccessControl();
+  const systemAdmin = isSystemAdmin();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -46,9 +53,24 @@ export default function Equipment() {
   const { data: equipmentTypesList = [] } = useEquipmentTypes();
   const { createType } = useEquipmentTypeMutations();
   const [typeFilter, setTypeFilter] = useState("all");
-  const [subdivisionFilter, setSubdivisionFilter] = useState("all");
+  const {
+    filterValue,
+    setFilterValue,
+    filterSubdivisionId,
+    availableSubdivisions,
+    showFilter,
+    filterLabel,
+  } = useSubdivisionFilter();
   const [newEquipmentType, setNewEquipmentType] = useState("");
   const { data: subdivisions = [] } = useSubdivisions();
+
+  const equipmentSubdivisionLabel = (item: Equipment) => {
+    if (item.subdivisionName?.trim()) return item.subdivisionName;
+    if (item.subdivisionId) {
+      return subdivisions.find((s) => s.id === item.subdivisionId)?.name ?? `#${item.subdivisionId}`;
+    }
+    return item.department?.trim() || "—";
+  };
 
   const typeNames = useMemo(() => {
     const fromDb = equipmentTypesList.map((t) => t.name);
@@ -57,15 +79,12 @@ export default function Equipment() {
   }, [equipmentTypesList, equipment]);
 
   const filteredEquipment = useMemo(() => {
-    let list = equipment;
-    if (subdivisionFilter !== "all") {
-      list = list.filter((e) => String(e.subdivisionId ?? "") === subdivisionFilter);
-    }
+    let list = filterItemsBySubdivision(equipment, filterSubdivisionId);
     if (typeFilter !== "all") {
       list = list.filter((e) => e.type === typeFilter);
     }
     return list;
-  }, [equipment, typeFilter, subdivisionFilter]);
+  }, [equipment, typeFilter, filterSubdivisionId]);
 
   const createEquipmentMutation = useMutation({
     mutationFn: async (newEquipment: any) => {
@@ -523,22 +542,14 @@ export default function Equipment() {
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="flex flex-wrap gap-3 items-end">
-                    <div className="w-56">
-                      <Label>Подразделение</Label>
-                      <Select value={subdivisionFilter} onValueChange={setSubdivisionFilter}>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">Все подразделения</SelectItem>
-                          {subdivisions.map((s) => (
-                            <SelectItem key={s.id} value={String(s.id)}>
-                              {s.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
+                    {showFilter && (
+                      <SubdivisionFilterSelect
+                        value={filterValue}
+                        onChange={setFilterValue}
+                        subdivisions={availableSubdivisions}
+                        className="w-56"
+                      />
+                    )}
                     <div className="w-56">
                       <Label>Категория (тип)</Label>
                       <Select value={typeFilter} onValueChange={setTypeFilter}>
@@ -594,6 +605,7 @@ export default function Equipment() {
                           <th className="text-left p-4 font-medium text-gray-900 dark:text-gray-100">Название</th>
                           <th className="text-left p-4 font-medium text-gray-900 dark:text-gray-100 w-16">Фото</th>
                           <th className="text-left p-4 font-medium text-gray-900 dark:text-gray-100">Тип</th>
+                          <th className="text-left p-4 font-medium text-gray-900 dark:text-gray-100">Подразделение</th>
                           <th className="text-left p-4 font-medium text-gray-900 dark:text-gray-100">Статус</th>
                           <th className="text-left p-4 font-medium text-gray-900 dark:text-gray-100">Периодичность ТО</th>
                           <th className="text-left p-4 font-medium text-gray-900 dark:text-gray-100">Ответственный</th>
@@ -621,6 +633,9 @@ export default function Equipment() {
                               )}
                             </td>
                             <td className="p-4 text-gray-600 dark:text-gray-400">{equipmentItem.type}</td>
+                            <td className="p-4 text-gray-600 dark:text-gray-400 text-sm">
+                              {equipmentSubdivisionLabel(equipmentItem)}
+                            </td>
                             <td className="p-4">{getStatusBadge(equipmentItem.status)}</td>
                             <td className="p-4">
                               <div className="flex gap-1 flex-wrap">
@@ -728,10 +743,21 @@ export default function Equipment() {
               )}
 
               <div className="grid grid-cols-2 gap-4">
-                {selectedEquipment.department && (
+                <div>
+                  <Label className="font-medium">Подразделение:</Label>
+                  <p className="text-gray-600 dark:text-gray-400">
+                    {equipmentSubdivisionLabel(selectedEquipment)}
+                  </p>
+                </div>
+                {selectedEquipment.repairSubdivisionName && (
                   <div>
-                    <Label className="font-medium">Подразделение:</Label>
-                    <p className="text-gray-600 dark:text-gray-400">{selectedEquipment.department}</p>
+                    <Label className="font-medium">На ремонте в:</Label>
+                    <p className="text-gray-600 dark:text-gray-400">
+                      {selectedEquipment.repairSubdivisionName}
+                      {selectedEquipment.homeSubdivisionName
+                        ? ` (из «${selectedEquipment.homeSubdivisionName}»)`
+                        : ""}
+                    </p>
                   </div>
                 )}
                 {selectedEquipment.location && (
@@ -823,6 +849,20 @@ export default function Equipment() {
                 onOpenEquipment={openEquipmentById}
                 onOpenTask={openTaskById}
               />
+
+              {systemAdmin && (
+                <SubdivisionTransferPanel
+                  entityType="equipment"
+                  entityId={selectedEquipment.id}
+                  entityLabel={selectedEquipment.name}
+                  currentSubdivisionId={selectedEquipment.subdivisionId}
+                  repairSubdivisionId={selectedEquipment.repairSubdivisionId}
+                  homeSubdivisionName={selectedEquipment.homeSubdivisionName}
+                  onSuccess={() => {
+                    queryClient.invalidateQueries({ queryKey: ["/api/equipment"] });
+                  }}
+                />
+              )}
             </div>
           )}
           <DialogFooter>
