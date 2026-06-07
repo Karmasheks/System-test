@@ -23,13 +23,14 @@ export function normalizeManagedSubdivisionIds(raw: unknown): number[] {
   return normalizeExtraSubdivisionIds(raw);
 }
 
-/** Учитывает роли вида subdivision_admin_{id} */
+/** Учитывает роли вида subdivision_admin_{id} и явный список managedSubdivisionIds */
 export function resolveManagedSubdivisionIds(
   user: Pick<SubdivisionScopeUser, "role" | "managedSubdivisionIds">
 ): number[] {
+  const ids = new Set(normalizeManagedSubdivisionIds(user.managedSubdivisionIds));
   const fromRole = parseSubdivisionAdminRoleKey(user.role);
-  if (fromRole != null) return [fromRole];
-  return normalizeManagedSubdivisionIds(user.managedSubdivisionIds);
+  if (fromRole != null) ids.add(fromRole);
+  return Array.from(ids).sort((a, b) => a - b);
 }
 
 export function isSystemAdmin(role: string): boolean {

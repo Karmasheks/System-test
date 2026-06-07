@@ -12,12 +12,15 @@ import { Badge } from "@/components/ui/badge";
 import {
   DASHBOARD_BLOCK_DEFINITIONS,
   MODULE_DEFINITIONS,
+  PERMISSION_PRESET_DEFINITIONS,
   SENSITIVE_FIELD_DEFINITIONS,
   TASK_CAPABILITY_DEFINITIONS,
   accessLevelLabel,
+  buildPermissionPreset,
   type AccessLevel,
   type AppModule,
   type DashboardBlock,
+  type PermissionPresetKey,
   type SensitiveField,
   type TaskCapabilities,
 } from "@shared/permissions-constants";
@@ -34,6 +37,7 @@ interface PermissionEditorProps {
   onChange: (value: PermissionEditorState) => void;
   disabled?: boolean;
   showDashboardBlocks?: boolean;
+  showPresets?: boolean;
 }
 
 function ModuleLevelRow({
@@ -74,7 +78,17 @@ export function PermissionEditor({
   onChange,
   disabled,
   showDashboardBlocks = true,
+  showPresets = true,
 }: PermissionEditorProps) {
+  const applyPreset = (key: PermissionPresetKey) => {
+    const preset = buildPermissionPreset(key);
+    onChange({
+      modules: { ...preset.modules },
+      hiddenFields: [...preset.hiddenFields],
+      hiddenDashboardBlocks: [...preset.hiddenDashboardBlocks],
+      taskCapabilities: { ...preset.taskCapabilities },
+    });
+  };
   const setModuleLevel = (module: AppModule, level: AccessLevel) => {
     onChange({
       ...value,
@@ -117,6 +131,30 @@ export function PermissionEditor({
   const adminModules = MODULE_DEFINITIONS.filter((m) => m.section === "admin");
 
   return (
+    <div className="space-y-4">
+      {showPresets && !disabled && (
+        <div className="rounded-md border p-3 space-y-2 bg-muted/30">
+          <p className="text-sm font-medium">Быстрые шаблоны прав</p>
+          <p className="text-xs text-muted-foreground">
+            Подставьте готовый набор прав и при необходимости уточните вручную. Удобно для делегирования
+            администрирования без смены роли на «Администратор системы».
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {PERMISSION_PRESET_DEFINITIONS.map((preset) => (
+              <Badge
+                key={preset.key}
+                variant="outline"
+                className="cursor-pointer hover:bg-muted px-2.5 py-1 h-auto text-left whitespace-normal"
+                onClick={() => applyPreset(preset.key)}
+                title={preset.description}
+              >
+                {preset.label}
+              </Badge>
+            ))}
+          </div>
+        </div>
+      )}
+
     <Tabs defaultValue="modules" className="w-full">
       <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 h-auto gap-1">
         <TabsTrigger value="modules" className="text-xs sm:text-sm">
@@ -289,5 +327,6 @@ export function PermissionEditor({
         </div>
       </TabsContent>
     </Tabs>
+    </div>
   );
 }

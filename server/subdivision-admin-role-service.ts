@@ -69,10 +69,16 @@ export function applySubdivisionAdminRoleFields(data: Record<string, unknown>): 
   const subdivisionId = parseSubdivisionAdminRoleKey(role);
   if (subdivisionId == null) return;
 
-  data.managedSubdivisionIds = [subdivisionId];
-  data.subdivisionId = subdivisionId;
+  const existing = Array.isArray(data.managedSubdivisionIds)
+    ? (data.managedSubdivisionIds as unknown[]).filter(
+        (id): id is number => typeof id === "number" && id > 0
+      )
+    : [];
+  data.managedSubdivisionIds = Array.from(new Set([subdivisionId, ...existing]));
+  if (data.subdivisionId == null || data.subdivisionId === "") {
+    data.subdivisionId = subdivisionId;
+  }
   data.viewAllSubdivisions = false;
-  data.extraSubdivisionIds = [];
 }
 
 export { isSubdivisionAdminRole, parseSubdivisionAdminRoleKey };

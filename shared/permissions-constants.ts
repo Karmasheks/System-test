@@ -449,3 +449,111 @@ export function isDashboardBlockVisible(
 export function canViewEmployeePresence(role: string | null | undefined): boolean {
   return normalizeRole(role) !== "viewer";
 }
+
+export type PermissionPresetKey =
+  | "subdivision_admin"
+  | "department_supervisor"
+  | "extended_operator";
+
+export interface PermissionPresetDefinition {
+  key: PermissionPresetKey;
+  label: string;
+  description: string;
+}
+
+export const PERMISSION_PRESET_DEFINITIONS: PermissionPresetDefinition[] = [
+  {
+    key: "subdivision_admin",
+    label: "Администратор подразделения",
+    description:
+      "Полный доступ к оборудованию, складу, задачам и пользователям в своих подразделениях",
+  },
+  {
+    key: "department_supervisor",
+    label: "Руководитель смены",
+    description: "Расширенный доступ к задачам, складу и отчётам без управления пользователями",
+  },
+  {
+    key: "extended_operator",
+    label: "Расширенный оператор",
+    description: "Как оператор, но с доступом к затратам и документам",
+  },
+];
+
+export function buildPermissionPreset(
+  preset: PermissionPresetKey
+): Pick<RoleAccessProfile, "modules" | "hiddenFields" | "hiddenDashboardBlocks" | "taskCapabilities"> {
+  switch (preset) {
+    case "subdivision_admin":
+      return withTaskCapabilities({
+        role: "preset",
+        label: "",
+        isSystem: false,
+        modules: modules({
+          dashboard: "edit",
+          schedule: "edit",
+          equipment: "edit",
+          daily_inspection: "edit",
+          maintenance: "edit",
+          tasks: "edit",
+          service_requests: "edit",
+          contacts: "view",
+          suppliers: "view",
+          warehouse: "edit",
+          budget: "view",
+          documents: "view",
+          users: "edit",
+          reports: "view",
+        }),
+        hiddenFields: ["reports_financial"],
+        hiddenDashboardBlocks: [],
+      });
+    case "department_supervisor":
+      return withTaskCapabilities({
+        role: "preset",
+        label: "",
+        isSystem: false,
+        modules: modules({
+          dashboard: "view",
+          schedule: "edit",
+          equipment: "view",
+          daily_inspection: "edit",
+          maintenance: "view",
+          tasks: "edit",
+          service_requests: "edit",
+          contacts: "view",
+          suppliers: "view",
+          warehouse: "edit",
+          budget: "view",
+          documents: "view",
+          users: "view",
+          reports: "view",
+        }),
+        hiddenFields: ["reports_financial", "user_emails"],
+        hiddenDashboardBlocks: [],
+      });
+    case "extended_operator":
+      return withTaskCapabilities({
+        role: "preset",
+        label: "",
+        isSystem: false,
+        modules: modules({
+          dashboard: "view",
+          schedule: "edit",
+          equipment: "view",
+          daily_inspection: "edit",
+          maintenance: "edit",
+          tasks: "edit",
+          service_requests: "edit",
+          contacts: "view",
+          suppliers: "view",
+          warehouse: "edit",
+          budget: "view",
+          documents: "edit",
+          reports: "view",
+        }),
+        hiddenFields: ["reports_financial"],
+        hiddenDashboardBlocks: ["dash_budget_total"],
+      });
+  }
+}

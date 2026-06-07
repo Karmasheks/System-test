@@ -567,6 +567,8 @@ export const contacts = pgTable("contacts", {
   supplierId: integer("supplier_id"),
   equipmentId: text("equipment_id"),
   equipmentName: text("equipment_name"),
+  equipmentIds: jsonb("equipment_ids").$type<string[]>().default([]),
+  subdivisionIds: jsonb("subdivision_ids").$type<number[]>().default([]),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -581,6 +583,8 @@ export const suppliers = pgTable("suppliers", {
   notes: text("notes"),
   equipmentId: text("equipment_id"),
   equipmentName: text("equipment_name"),
+  equipmentIds: jsonb("equipment_ids").$type<string[]>().default([]),
+  subdivisionIds: jsonb("subdivision_ids").$type<number[]>().default([]),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -598,6 +602,10 @@ export const budgetEntries = pgTable("budget_entries", {
   warehousePartId: integer("warehouse_part_id"),
   storageLocation: text("storage_location"),
   supplierId: integer("supplier_id"),
+  subdivisionId: integer("subdivision_id"),
+  subdivisionName: text("subdivision_name"),
+  externalLink: text("external_link"),
+  approvalLink: text("approval_link"),
   expenseDate: date("expense_date").notNull(),
   notes: text("notes"),
   createdById: integer("created_by_id"),
@@ -754,8 +762,18 @@ export const insertRemarkSchema = createInsertSchema(remarks).omit({ id: true })
 export const insertInspectionChecklistSchema = createInsertSchema(inspectionChecklists).omit({ id: true });
 export const insertDailyInspectionSchema = createInsertSchema(dailyInspections).omit({ id: true });
 export const insertNotificationSchema = createInsertSchema(notifications).omit({ id: true });
-export const insertContactSchema = createInsertSchema(contacts).omit({ id: true, createdAt: true });
-export const insertSupplierSchema = createInsertSchema(suppliers).omit({ id: true, createdAt: true });
+export const insertContactSchema = createInsertSchema(contacts)
+  .omit({ id: true, createdAt: true })
+  .extend({
+    equipmentIds: z.array(z.string()).optional(),
+    subdivisionIds: z.array(z.number()).optional(),
+  });
+export const insertSupplierSchema = createInsertSchema(suppliers)
+  .omit({ id: true, createdAt: true })
+  .extend({
+    equipmentIds: z.array(z.string()).optional(),
+    subdivisionIds: z.array(z.number()).optional(),
+  });
 export const insertBudgetEntrySchema = createInsertSchema(budgetEntries).omit({ id: true, createdAt: true });
 
 export const createBudgetEntryRequestSchema = insertBudgetEntrySchema.extend({

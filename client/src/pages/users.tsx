@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Helmet } from "react-helmet";
 import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
-import { PlusCircle, FileEdit, Trash2, Eye, UserPlus, RefreshCw } from "lucide-react";
+import { FileEdit, Trash2, UserPlus, RefreshCw } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -32,9 +32,12 @@ import { PermissionEditor, type PermissionEditorState } from "@/components/admin
 import { RoleProfilesPanel } from "@/components/admin/role-profiles-panel";
 import { SubdivisionsPanel } from "@/components/admin/subdivisions-panel";
 import { SubdivisionAccessEditor } from "@/components/admin/subdivision-access-editor";
+import { ManagedSubdivisionsEditor } from "@/components/admin/managed-subdivisions-editor";
 import { SubdivisionTransferPanel } from "@/components/admin/subdivision-transfer-panel";
 import { SubdivisionPicker } from "@/components/subdivision-picker";
+import { SubdivisionFilterSelect } from "@/components/subdivision-filter-select";
 import { useSubdivisions } from "@/hooks/use-subdivisions";
+import { useSubdivisionFilter } from "@/hooks/use-subdivision-filter";
 import {
   normalizeExtraSubdivisionIds,
   normalizeManagedSubdivisionIds,
@@ -105,6 +108,13 @@ export default function Users() {
   });
 
   const { data: subdivisions = [] } = useSubdivisions();
+  const {
+    filterValue: subdivisionFilterValue,
+    setFilterValue: setSubdivisionFilterValue,
+    filterSubdivisionId,
+    availableSubdivisions,
+    showFilter: showSubdivisionFilter,
+  } = useSubdivisionFilter();
 
   const subdivisionName = (id: number | null | undefined) =>
     id ? subdivisions.find((s) => s.id === id)?.name ?? `#${id}` : "Не указано";
@@ -136,6 +146,24 @@ export default function Users() {
     return { primary, managed, full };
   };
 
+  const userMatchesSubdivisionFilter = (
+    item: {
+      role?: string;
+      subdivisionId?: number | null;
+      extraSubdivisionIds?: number[] | null;
+      managedSubdivisionIds?: number[] | null;
+    },
+    subId: number | null
+  ) => {
+    if (subId == null) return true;
+    if (item.subdivisionId === subId) return true;
+    if (normalizeExtraSubdivisionIds(item.extraSubdivisionIds).includes(subId)) return true;
+    return resolveManagedSubdivisionIds({
+      role: item.role ?? "",
+      managedSubdivisionIds: item.managedSubdivisionIds,
+    }).includes(subId);
+  };
+
   const { data: roleProfiles = [] } = useQuery<RoleAccessProfile[]>({
     queryKey: ["/api/permissions/roles"],
     enabled: !!user && canManageUsers(),
@@ -144,9 +172,18 @@ export default function Users() {
   const { data: usersList = [], isLoading: usersLoading, error: usersError, refetch } = useQuery({
     queryKey: ['/api/users'],
     enabled: !!user && canManageUsers(),
-    staleTime: 0,
-    refetchInterval: 30_000,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
   });
+
+  const filteredUsersList = useMemo(() => {
+    if (!Array.isArray(usersList)) return [];
+    if (filterSubdivisionId == null) return usersList;
+    return usersList.filter((item) =>
+      userMatchesSubdivisionFilter(item, filterSubdivisionId)
+    );
+  }, [usersList, filterSubdivisionId]);
 
   const getUserPresenceView = (record: any) => resolvePresence(record);
 
@@ -286,12 +323,10 @@ export default function Users() {
               managedSubdivisionIds:
                 formData.role === "admin"
                   ? []
-                  : isSubdivisionAdminRole(formData.role)
-                    ? resolveManagedSubdivisionIds({
-                        role: formData.role,
-                        managedSubdivisionIds: formData.managedSubdivisionIds,
-                      })
-                    : formData.managedSubdivisionIds,
+                  : resolveManagedSubdivisionIds({
+                      role: formData.role,
+                      managedSubdivisionIds: formData.managedSubdivisionIds,
+                    }),
             }
           : {}),
         position: formData.position,
@@ -348,12 +383,10 @@ export default function Users() {
                 managedSubdivisionIds:
                   formData.role === "admin"
                     ? []
-                    : isSubdivisionAdminRole(formData.role)
-                      ? resolveManagedSubdivisionIds({
-                          role: formData.role,
-                          managedSubdivisionIds: formData.managedSubdivisionIds,
-                        })
-                      : formData.managedSubdivisionIds,
+                    : resolveManagedSubdivisionIds({
+                        role: formData.role,
+                        managedSubdivisionIds: formData.managedSubdivisionIds,
+                      }),
               }
             : {}),
           position: formData.position,
@@ -464,12 +497,13 @@ export default function Users() {
         ? { managedSubdivisionIds: [], viewAllSubdivisions: true }
         : subdivisionAdminId != null
           ? {
-              managedSubdivisionIds: [subdivisionAdminId],
-              subdivisionId: String(subdivisionAdminId),
+              managedSubdivisionIds: Array.from(
+                new Set([...prev.managedSubdivisionIds, subdivisionAdminId])
+              ),
+              subdivisionId: prev.subdivisionId || String(subdivisionAdminId),
               viewAllSubdivisions: false,
-              extraSubdivisionIds: [],
             }
-          : { managedSubdivisionIds: [] }),
+          : {}),
     }));
     if (!formData.useCustomPermissions) {
       const profile =
@@ -625,6 +659,22 @@ export default function Users() {
                 </div>
               </div>
 
+              {showSubdivisionFilter && (
+                <div className="mb-4 flex flex-wrap items-end gap-4 rounded-lg border bg-white dark:bg-gray-800 p-3 shadow-sm">
+                  <SubdivisionFilterSelect
+                    value={subdivisionFilterValue}
+                    onChange={setSubdivisionFilterValue}
+                    subdivisions={availableSubdivisions}
+                    className="w-full sm:w-64"
+                  />
+                  {filterSubdivisionId != null && (
+                    <p className="text-xs text-muted-foreground pb-2">
+                      Показано {filteredUsersList.length} из {Array.isArray(usersList) ? usersList.length : 0}
+                    </p>
+                  )}
+                </div>
+              )}
+
               <div className="bg-white rounded-lg shadow overflow-hidden dark:bg-gray-800">
                 {usersLoading ? (
                   <div className="flex items-center justify-center p-8">
@@ -634,6 +684,14 @@ export default function Users() {
                 ) : usersError ? (
                   <div className="flex items-center justify-center p-8">
                     <span className="text-red-600 dark:text-red-400">Ошибка загрузки пользователей</span>
+                  </div>
+                ) : filteredUsersList.length === 0 ? (
+                  <div className="flex items-center justify-center p-8">
+                    <span className="text-muted-foreground">
+                      {filterSubdivisionId != null
+                        ? "Нет пользователей в выбранном подразделении"
+                        : "Пользователи не найдены"}
+                    </span>
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
@@ -669,10 +727,22 @@ export default function Users() {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200 dark:bg-gray-800 dark:divide-gray-700">
-                      {Array.isArray(usersList) && usersList.map((item: any) => {
+                      {filteredUsersList.map((item: any) => {
                         const subdivision = getSubdivisionCell(item);
                         return (
-                        <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-gray-700 group">
+                        <tr
+                          key={item.id}
+                          role="button"
+                          tabIndex={0}
+                          className="hover:bg-gray-50 dark:hover:bg-gray-700 group cursor-pointer"
+                          onClick={() => handleViewUser(item)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              handleViewUser(item);
+                            }
+                          }}
+                        >
                           <td className="px-2 py-2">
                             <div className="flex items-center gap-2 min-w-0">
                               <UserAvatar
@@ -738,17 +808,11 @@ export default function Users() {
                               )}
                             </div>
                           </td>
-                          <td className="sticky right-0 z-10 px-1 py-2 bg-white dark:bg-gray-800 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.15)] group-hover:bg-gray-50 dark:group-hover:bg-gray-700">
+                          <td
+                            className="sticky right-0 z-10 px-1 py-2 bg-white dark:bg-gray-800 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.15)] group-hover:bg-gray-50 dark:group-hover:bg-gray-700"
+                            onClick={(e) => e.stopPropagation()}
+                          >
                             <div className="flex justify-center gap-0">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => handleViewUser(item)}
-                                className="h-7 w-7 text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300"
-                                title="Просмотр"
-                              >
-                                <Eye className="h-3.5 w-3.5" />
-                              </Button>
                               <Button
                                 variant="ghost"
                                 size="icon"
@@ -868,6 +932,17 @@ export default function Users() {
                 className="col-span-3"
               />
             </div>
+            {systemAdmin && formData.role !== "admin" && (
+              <div className="col-span-full">
+                <ManagedSubdivisionsEditor
+                  value={formData.managedSubdivisionIds}
+                  onChange={(managedSubdivisionIds) =>
+                    setFormData((p) => ({ ...p, managedSubdivisionIds }))
+                  }
+                  role={formData.role}
+                />
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setAddDialogOpen(false)}>Отмена</Button>
@@ -1022,12 +1097,6 @@ export default function Users() {
               </div>
             </TabsContent>
             <TabsContent value="access" className="space-y-4 pt-4">
-              {isSubdivisionAdminRoleSelected ? (
-                <p className="text-sm text-muted-foreground rounded-md border px-3 py-2 bg-amber-50 dark:bg-amber-950/20">
-                  Зона управления и права задаются ролью «{getRoleDisplayLabel(formData.role)}».
-                  Подразделение: {subdivisionName(selectedSubdivisionAdminId)}.
-                </p>
-              ) : (
               <SubdivisionAccessEditor
                 primarySubdivisionId={formData.subdivisionId}
                 onPrimaryChange={(id) => setFormData((p) => ({ ...p, subdivisionId: id }))}
@@ -1037,45 +1106,60 @@ export default function Users() {
                 onViewAllChange={(v) => setFormData((p) => ({ ...p, viewAllSubdivisions: v }))}
                 isAdminRole={formData.role === "admin"}
                 allowViewAll={systemAdmin}
+                disabled={isSubdivisionAdminRoleSelected && !!selectedSubdivisionAdminId}
               />
-              )}
-              {!isSubdivisionAdminRoleSelected && (
-              <div className="flex items-start gap-3 rounded-md border p-3">
-                <Checkbox
-                  id="custom-permissions"
-                  checked={formData.useCustomPermissions}
-                  onCheckedChange={(checked) => {
-                    const enabled = checked === true;
-                    setFormData((prev) => ({ ...prev, useCustomPermissions: enabled }));
-                    if (!enabled && selectedUser) {
-                      setPermissionState(buildPermissionStateForUser({
-                        ...selectedUser,
-                        role: formData.role,
-                        useCustomPermissions: false,
-                        permissionOverrides: null,
-                      }));
-                    }
-                  }}
+
+              {systemAdmin && formData.role !== "admin" && (
+                <ManagedSubdivisionsEditor
+                  value={formData.managedSubdivisionIds}
+                  onChange={(managedSubdivisionIds) =>
+                    setFormData((p) => ({ ...p, managedSubdivisionIds }))
+                  }
+                  role={formData.role}
                 />
-                <div>
-                  <Label htmlFor="custom-permissions" className="cursor-pointer font-medium">
-                    Индивидуальные права (отличные от роли)
-                  </Label>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Если выключено — применяется профиль роли «{getRoleDisplayLabel(formData.role)}». Для новых сотрудников используйте роль «Наблюдатель» и включите индивидуальные права, чтобы разрешить создание задач и просмотр созданных ими.
-                  </p>
-                </div>
-              </div>
               )}
-              <PermissionEditor
-                value={permissionState}
-                onChange={setPermissionState}
-                disabled={
-                  !formData.useCustomPermissions ||
-                  formData.role === "admin" ||
-                  isSubdivisionAdminRoleSelected
-                }
-              />
+
+              {formData.role === "admin" ? (
+                <p className="text-sm text-muted-foreground rounded-md border p-3">
+                  Администратор системы имеет полный доступ. Индивидуальные права не применяются.
+                </p>
+              ) : (
+                <>
+                  <div className="flex items-start gap-3 rounded-md border p-3">
+                    <Checkbox
+                      id="custom-permissions"
+                      checked={formData.useCustomPermissions}
+                      onCheckedChange={(checked) => {
+                        const enabled = checked === true;
+                        setFormData((prev) => ({ ...prev, useCustomPermissions: enabled }));
+                        if (!enabled && selectedUser) {
+                          setPermissionState(buildPermissionStateForUser({
+                            ...selectedUser,
+                            role: formData.role,
+                            useCustomPermissions: false,
+                            permissionOverrides: null,
+                          }));
+                        }
+                      }}
+                    />
+                    <div>
+                      <Label htmlFor="custom-permissions" className="cursor-pointer font-medium">
+                        Индивидуальные права (отличные от роли)
+                      </Label>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Включите, чтобы выдать права администратора или другой набор без смены роли.
+                        Используйте шаблон «Администратор подразделения» и отметьте управляемые подразделения выше.
+                        Базовый профиль роли: «{getRoleDisplayLabel(formData.role)}».
+                      </p>
+                    </div>
+                  </div>
+                  <PermissionEditor
+                    value={permissionState}
+                    onChange={setPermissionState}
+                    disabled={!formData.useCustomPermissions}
+                  />
+                </>
+              )}
             </TabsContent>
           </Tabs>
           <DialogFooter>
@@ -1110,11 +1194,11 @@ export default function Users() {
       {/* Диалог просмотра */}
       <Dialog open={viewDialogOpen} onOpenChange={setViewDialogOpen}>
         {viewDialogOpen && selectedUser ? (
-        <DialogContent className="sm:max-w-[425px]">
-          <DialogHeader>
+        <DialogContent className="sm:max-w-md max-h-[90vh] flex flex-col gap-0 p-0 overflow-hidden">
+          <DialogHeader className="px-6 pt-6 pb-2 shrink-0">
             <DialogTitle>Информация о пользователе</DialogTitle>
           </DialogHeader>
-          <div className="py-4 space-y-4">
+          <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4 min-h-0">
             <div className="flex items-center space-x-4">
               <UserAvatar
                 name={selectedUser?.name}
@@ -1140,7 +1224,7 @@ export default function Users() {
             <div className="space-y-2">
               <div>
                 <Label className="text-sm font-medium">Email:</Label>
-                <p className="text-sm">{selectedUser?.email}</p>
+                <p className="text-sm">{maskSensitiveValue(showUserEmails, selectedUser?.email)}</p>
               </div>
               <div>
                 <Label className="text-sm font-medium">Роль:</Label>
@@ -1213,8 +1297,17 @@ export default function Users() {
               )}
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="gap-2 sm:gap-0 px-6 pb-6 pt-3 shrink-0 border-t">
             <Button variant="outline" onClick={() => setViewDialogOpen(false)}>Закрыть</Button>
+            <Button
+              onClick={() => {
+                setViewDialogOpen(false);
+                handleEditDialogOpen(selectedUser);
+              }}
+            >
+              <FileEdit className="h-4 w-4 mr-2" />
+              Редактировать
+            </Button>
           </DialogFooter>
         </DialogContent>
         ) : null}

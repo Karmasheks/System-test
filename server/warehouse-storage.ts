@@ -61,6 +61,10 @@ export async function createWarehousePartFromBudget(
     notes?: string | null;
     initialQuantity?: number;
     externalLink?: string | null;
+    subdivisionId?: number | null;
+    subdivisionName?: string | null;
+    equipmentId?: string | null;
+    equipmentName?: string | null;
   },
   user: { id: number; name: string }
 ) {
@@ -92,6 +96,10 @@ export async function createWarehousePartFromBudget(
       notes: input.notes ?? null,
       initialQuantity: input.initialQuantity ?? 1,
       minStock: 0,
+      subdivisionId: input.subdivisionId ?? null,
+      subdivisionName: input.subdivisionName ?? null,
+      equipmentId: input.equipmentId ?? null,
+      equipmentName: input.equipmentName ?? null,
     },
     user
   );

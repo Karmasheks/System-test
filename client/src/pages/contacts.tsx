@@ -4,14 +4,28 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { maskSensitiveValue, useAccessControl } from "@/hooks/use-access-control";
 import { useContacts, useContactMutations, useSuppliers } from "@/hooks/use-asset-management";
 import { useEquipmentApi } from "@/hooks/use-equipment-api";
+import { useSubdivisions } from "@/hooks/use-subdivisions";
+import { SubdivisionMultiPicker } from "@/components/subdivision-multi-picker";
+import { EquipmentMultiPicker } from "@/components/equipment-multi-picker";
+import {
+  buildEquipmentLinkPayload,
+  equipmentLabels,
+  normalizeEquipmentIds,
+  normalizeSubdivisionIds,
+  subdivisionLabels,
+} from "@/lib/contact-supplier-utils";
 import { Plus, Trash2, UserCircle } from "lucide-react";
 import type { Contact } from "@shared/schema";
+
+const formDialogClass =
+  "max-w-lg w-[min(100vw-2rem,32rem)] max-h-[90vh] overflow-y-auto overflow-x-hidden p-4 sm:p-6";
 
 export default function ContactsPage() {
   const { toast } = useToast();
@@ -20,6 +34,7 @@ export default function ContactsPage() {
   const showEmails = isFieldVisible("contact_emails");
   const { data: contacts = [], isLoading } = useContacts();
   const { data: suppliers = [] } = useSuppliers();
+  const { data: subdivisions = [] } = useSubdivisions();
   const { allEquipment } = useEquipmentApi();
   const { create, update, remove } = useContactMutations();
   const [open, setOpen] = useState(false);
@@ -32,11 +47,22 @@ export default function ContactsPage() {
     email: "",
     notes: "",
     supplierId: "",
-    equipmentId: "",
+    equipmentIds: [] as string[],
+    subdivisionIds: [] as number[],
   });
 
   const reset = () => {
-    setForm({ name: "", company: "", position: "", phone: "", email: "", notes: "", supplierId: "", equipmentId: "" });
+    setForm({
+      name: "",
+      company: "",
+      position: "",
+      phone: "",
+      email: "",
+      notes: "",
+      supplierId: "",
+      equipmentIds: [],
+      subdivisionIds: [],
+    });
     setEdit(null);
   };
 
@@ -50,9 +76,23 @@ export default function ContactsPage() {
       email: c.email ?? "",
       notes: c.notes ?? "",
       supplierId: c.supplierId ? String(c.supplierId) : "",
-      equipmentId: c.equipmentId ?? "",
+      equipmentIds: normalizeEquipmentIds(c),
+      subdivisionIds: normalizeSubdivisionIds(c),
     });
     setOpen(true);
+  };
+
+  const handleEquipmentChange = (equipmentIds: string[]) => {
+    const subdivisionSet = new Set(form.subdivisionIds);
+    for (const id of equipmentIds) {
+      const eq = allEquipment.find((e) => e.id === id);
+      if (eq?.subdivisionId) subdivisionSet.add(eq.subdivisionId);
+    }
+    setForm((prev) => ({
+      ...prev,
+      equipmentIds,
+      subdivisionIds: Array.from(subdivisionSet).sort((a, b) => a - b),
+    }));
   };
 
   const save = async () => {
@@ -60,17 +100,17 @@ export default function ContactsPage() {
       toast({ title: "Укажите имя", variant: "destructive" });
       return;
     }
-    const eq = allEquipment.find((e) => e.id === form.equipmentId);
+    const equipmentLink = buildEquipmentLinkPayload(form.equipmentIds, allEquipment);
     const payload = {
       name: form.name.trim(),
       company: form.company || null,
       position: form.position || null,
       phone: form.phone || null,
       email: form.email || null,
-      notes: form.notes || null,
+      notes: form.notes.trim() || null,
       supplierId: form.supplierId ? Number(form.supplierId) : null,
-      equipmentId: form.equipmentId || null,
-      equipmentName: eq?.name ?? null,
+      subdivisionIds: form.subdivisionIds,
+      ...equipmentLink,
     };
     try {
       if (edit) await update.mutateAsync({ id: edit.id, ...payload });
@@ -86,79 +126,142 @@ export default function ContactsPage() {
   return (
     <>
       <Helmet><title>Контакты — StarLine</title></Helmet>
-      <main className="p-6 max-w-5xl mx-auto">
-          <div className="flex justify-between items-center mb-6">
-            <div className="flex items-center gap-3">
-              <UserCircle className="h-8 w-8 text-blue-600" />
-              <h1 className="text-2xl font-bold">Контакты</h1>
-            </div>
-            <Button onClick={() => { reset(); setOpen(true); }}>
-              <Plus className="h-4 w-4 mr-2" />Добавить
-            </Button>
+      <main className="p-6 max-w-6xl mx-auto">
+        <div className="flex justify-between items-center mb-6">
+          <div className="flex items-center gap-3">
+            <UserCircle className="h-8 w-8 text-blue-600" />
+            <h1 className="text-2xl font-bold">Контакты</h1>
           </div>
-          <Card>
-            <CardHeader><CardTitle>Список ({contacts.length})</CardTitle></CardHeader>
-            <CardContent>
-              {isLoading ? (
-                <p className="text-gray-500">Загрузка…</p>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Имя</TableHead>
-                      <TableHead>Компания</TableHead>
-                      <TableHead>Оборудование</TableHead>
-                      <TableHead>Телефон</TableHead>
-                      <TableHead>Email</TableHead>
-                      <TableHead />
+          <Button onClick={() => { reset(); setOpen(true); }}>
+            <Plus className="h-4 w-4 mr-2" />Добавить
+          </Button>
+        </div>
+        <Card>
+          <CardHeader><CardTitle>Список ({contacts.length})</CardTitle></CardHeader>
+          <CardContent className="overflow-x-auto">
+            {isLoading ? (
+              <p className="text-gray-500">Загрузка…</p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Имя</TableHead>
+                    <TableHead>Компания</TableHead>
+                    <TableHead>Подразделения</TableHead>
+                    <TableHead>Оборудование</TableHead>
+                    <TableHead>Комментарий</TableHead>
+                    <TableHead>Телефон</TableHead>
+                    <TableHead>Email</TableHead>
+                    <TableHead />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {contacts.map((c) => (
+                    <TableRow key={c.id}>
+                      <TableCell className="font-medium">{c.name}</TableCell>
+                      <TableCell>{c.company ?? "—"}</TableCell>
+                      <TableCell className="text-sm max-w-[140px]">
+                        {subdivisionLabels(normalizeSubdivisionIds(c), subdivisions)}
+                      </TableCell>
+                      <TableCell className="text-sm max-w-[160px]">
+                        {equipmentLabels(normalizeEquipmentIds(c), allEquipment)}
+                      </TableCell>
+                      <TableCell className="text-sm max-w-[140px] truncate" title={c.notes ?? undefined}>
+                        {c.notes?.trim() || "—"}
+                      </TableCell>
+                      <TableCell>{maskSensitiveValue(showPhones, c.phone)}</TableCell>
+                      <TableCell>{maskSensitiveValue(showEmails, c.email)}</TableCell>
+                      <TableCell className="text-right space-x-2 whitespace-nowrap">
+                        <Button size="sm" variant="outline" onClick={() => openEdit(c)}>Изм.</Button>
+                        <Button size="sm" variant="ghost" onClick={() => remove.mutate(c.id)}>
+                          <Trash2 className="h-4 w-4 text-red-500" />
+                        </Button>
+                      </TableCell>
                     </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {contacts.map((c) => (
-                      <TableRow key={c.id}>
-                        <TableCell className="font-medium">{c.name}</TableCell>
-                        <TableCell>{c.company ?? "—"}</TableCell>
-                        <TableCell className="text-sm">{c.equipmentName ?? "—"}</TableCell>
-                        <TableCell>{maskSensitiveValue(showPhones, c.phone)}</TableCell>
-                        <TableCell>{maskSensitiveValue(showEmails, c.email)}</TableCell>
-                        <TableCell className="text-right space-x-2">
-                          <Button size="sm" variant="outline" onClick={() => openEdit(c)}>Изм.</Button>
-                          <Button size="sm" variant="ghost" onClick={() => remove.mutate(c.id)}>
-                            <Trash2 className="h-4 w-4 text-red-500" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
-        </main>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+      </main>
+
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>{edit ? "Редактировать" : "Новый контакт"}</DialogTitle></DialogHeader>
-          <div className="grid gap-3">
-            <div><Label>Имя *</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
-            <div><Label>Компания</Label><Input value={form.company} onChange={(e) => setForm({ ...form, company: e.target.value })} /></div>
-            <div><Label>Должность</Label><Input value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })} /></div>
-            <div><Label>Телефон</Label><Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></div>
-            <div><Label>Email</Label><Input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></div>
+        <DialogContent className={formDialogClass}>
+          <DialogHeader>
+            <DialogTitle>{edit ? "Редактировать контакт" : "Новый контакт"}</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-3 pb-2">
+            <div>
+              <Label>Имя *</Label>
+              <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+            </div>
+            <div>
+              <Label>Компания</Label>
+              <Input value={form.company} onChange={(e) => setForm({ ...form, company: e.target.value })} />
+            </div>
+            <div>
+              <Label>Должность</Label>
+              <Input value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })} />
+            </div>
+            <div>
+              <Label>Телефон</Label>
+              <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+            </div>
+            <div>
+              <Label>Email</Label>
+              <Input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+            </div>
             <div>
               <Label>Поставщик</Label>
-              <select className="w-full border rounded-md px-3 py-2 dark:bg-gray-800" value={form.supplierId} onChange={(e) => setForm({ ...form, supplierId: e.target.value })}>
+              <select
+                className="w-full border rounded-md px-3 py-2 dark:bg-gray-800 h-10 text-sm"
+                value={form.supplierId}
+                onChange={(e) => setForm({ ...form, supplierId: e.target.value })}
+              >
                 <option value="">—</option>
-                {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                {suppliers.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
               </select>
             </div>
+
+            <SubdivisionMultiPicker
+              value={form.subdivisionIds}
+              onChange={(subdivisionIds) => {
+                const subSet = new Set(subdivisionIds);
+                const equipmentIds =
+                  subdivisionIds.length === 0
+                    ? form.equipmentIds
+                    : form.equipmentIds.filter((id) => {
+                        const eq = allEquipment.find((e) => e.id === id);
+                        return eq?.subdivisionId != null && subSet.has(eq.subdivisionId);
+                      });
+                setForm({ ...form, subdivisionIds, equipmentIds });
+              }}
+              description="Контакт может относиться к нескольким подразделениям"
+            />
+
+            <EquipmentMultiPicker
+              equipment={allEquipment}
+              value={form.equipmentIds}
+              subdivisionIds={form.subdivisionIds}
+              onChange={handleEquipmentChange}
+              description="Выберите оборудование, с которым связан контакт"
+            />
+
             <div>
-              <Label>Оборудование (актив)</Label>
-              <select className="w-full border rounded-md px-3 py-2 dark:bg-gray-800" value={form.equipmentId} onChange={(e) => setForm({ ...form, equipmentId: e.target.value })}>
-                <option value="">—</option>
-                {allEquipment.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
-              </select>
+              <Label>Комментарий</Label>
+              <Textarea
+                value={form.notes}
+                onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                placeholder="Заметки по контакту…"
+                rows={3}
+                className="resize-y min-h-[72px]"
+              />
             </div>
-            <Button onClick={save}>Сохранить</Button>
+
+            <Button onClick={save} className="mt-1">Сохранить</Button>
           </div>
         </DialogContent>
       </Dialog>

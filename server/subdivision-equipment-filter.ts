@@ -51,8 +51,18 @@ export function filterAlertsByPartSubdivision<
   );
 }
 
+export function filterBudgetEntriesBySubdivisionId<
+  T extends { equipmentId?: string | null; subdivisionId?: number | null },
+>(entries: T[], subdivisionId: number, equipmentMap: Map<string, number | null>): T[] {
+  return entries.filter((e) => {
+    if (e.subdivisionId === subdivisionId) return true;
+    if (!e.equipmentId) return false;
+    return equipmentMap.get(e.equipmentId) === subdivisionId;
+  });
+}
+
 export function filterBudgetEntriesByScope<
-  T extends { equipmentId?: string | null },
+  T extends { equipmentId?: string | null; subdivisionId?: number | null },
 >(
   entries: T[],
   equipmentMap: Map<string, number | null>,
@@ -60,6 +70,9 @@ export function filterBudgetEntriesByScope<
 ): T[] {
   if (!scope || scope.viewAll) return entries;
   return entries.filter((e) => {
+    if (e.subdivisionId != null) {
+      return canAccessSubdivision(scope, e.subdivisionId);
+    }
     if (!e.equipmentId) return false;
     return canAccessSubdivision(scope, equipmentMap.get(e.equipmentId));
   });

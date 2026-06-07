@@ -31,7 +31,11 @@ import {
   type RoleAccessProfile,
   type AccessLevel,
 } from "@shared/permissions-constants";
-import { isSubdivisionAdminRole } from "@shared/subdivision-admin-roles";
+import {
+  isSubdivisionAdminRole,
+  parseSubdivisionAdminRoleKey,
+} from "@shared/subdivision-admin-roles";
+import { useSubdivisions } from "@/hooks/use-subdivisions";
 import { Label } from "@/components/ui/label";
 import { Plus, Settings2, Trash2 } from "lucide-react";
 import {
@@ -72,6 +76,7 @@ function sortProfiles(profiles: RoleAccessProfile[]): RoleAccessProfile[] {
 export function RoleProfilesPanel() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { data: subdivisions = [] } = useSubdivisions();
   const [open, setOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -226,6 +231,11 @@ export function RoleProfilesPanel() {
   };
 
   const isSubdivisionAdminProfile = isSubdivisionAdminRole(selectedRole);
+  const linkedSubdivisionId = parseSubdivisionAdminRoleKey(selectedRole);
+  const linkedSubdivisionName =
+    linkedSubdivisionId != null
+      ? subdivisions.find((s) => s.id === linkedSubdivisionId)?.name ?? `#${linkedSubdivisionId}`
+      : null;
   const canDelete =
     selectedProfile &&
     !selectedProfile.isSystem &&
@@ -316,15 +326,29 @@ export function RoleProfilesPanel() {
           )}
 
           {selectedRole === "admin" ? (
-            <p className="text-sm text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 p-3 rounded-md">
-              Администратор всегда имеет полный доступ. Профиль admin нельзя изменить.
-            </p>
+            <div className="text-sm text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 p-3 rounded-md space-y-1">
+              <p className="font-medium">Администратор системы</p>
+              <p>
+                Полный доступ ко всем разделам и подразделениям. Профиль нельзя изменить — это роль
+                владельца системы. Для делегирования прав используйте шаблон «Администратор подразделения»
+                и назначьте сотруднику управляемые подразделения в карточке пользователя.
+              </p>
+            </div>
           ) : isSubdivisionAdminProfile ? (
-            <p className="text-sm text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 p-3 rounded-md">
-              Роль создаётся автоматически при добавлении подразделения. Название обновляется при переименовании подразделения.
-              Ниже можно настроить права для всех администраторов этого подразделения.
+            <div className="text-sm text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 p-3 rounded-md space-y-1">
+              <p className="font-medium">Администратор подразделения: {linkedSubdivisionName}</p>
+              <p>
+                Роль создаётся автоматически при добавлении подразделения. Права ниже применяются ко
+                всем сотрудникам с этой ролью. Чтобы администрировать несколько подразделений, назначьте
+                дополнительные в карточке пользователя (вкладка «Права доступа»).
+              </p>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground rounded-md border p-3 bg-muted/20">
+              Настройте права роли или примените шаблон. Для точечных исключений включите
+              «Индивидуальные права» в карточке сотрудника.
             </p>
-          ) : null}
+          )}
           {selectedRole !== "admin" && (
             <PermissionEditor value={editorState} onChange={setEditorState} />
           )}

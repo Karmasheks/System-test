@@ -38,16 +38,24 @@ export async function requireSystemAdminOrSubdivisionAdmin(req: Request): Promis
   throw err;
 }
 
-export function canActorManageUser(actor: User, target: Pick<User, "role" | "subdivisionId">): boolean {
+export function canActorManageUser(
+  actor: User,
+  target: Pick<User, "role" | "subdivisionId" | "managedSubdivisionIds">
+): boolean {
   if (isSystemAdmin(actor.role)) return true;
   if (target.role === "admin") return false;
-  return canManageSubdivisionId(actor, target.subdivisionId);
+  const managed = new Set(resolveManagedSubdivisionIds(actor));
+  if (target.subdivisionId != null && managed.has(target.subdivisionId)) return true;
+  return resolveManagedSubdivisionIds(target).some((id) => managed.has(id));
 }
 
 export function filterUsersForActor(actor: User, list: User[]): User[] {
   if (isSystemAdmin(actor.role)) return list;
   const managed = new Set(resolveManagedSubdivisionIds(actor));
-  return list.filter((u) => u.subdivisionId != null && managed.has(u.subdivisionId));
+  return list.filter((u) => {
+    if (u.subdivisionId != null && managed.has(u.subdivisionId)) return true;
+    return resolveManagedSubdivisionIds(u).some((id) => managed.has(id));
+  });
 }
 
 export async function usersAdminGuard(

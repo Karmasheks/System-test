@@ -101,11 +101,19 @@ export function useBudgetEntries(
     from?: string;
     to?: string;
     category?: string;
+    subdivisionId?: number;
   },
   options?: { enabled?: boolean }
 ) {
   return useQuery<BudgetEntry[]>({
-    queryKey: ["/api/budget", filters?.equipmentId, filters?.from, filters?.to, filters?.category],
+    queryKey: [
+      "/api/budget",
+      filters?.equipmentId,
+      filters?.from,
+      filters?.to,
+      filters?.category,
+      filters?.subdivisionId,
+    ],
     enabled: options?.enabled ?? true,
     queryFn: async () => {
       const res = await apiRequest(
@@ -115,6 +123,8 @@ export function useBudgetEntries(
           from: filters?.from,
           to: filters?.to,
           category: filters?.category,
+          subdivisionId:
+            filters?.subdivisionId != null ? String(filters.subdivisionId) : undefined,
         })}`
       );
       return res.json();
@@ -140,6 +150,7 @@ export function useBudgetMutations() {
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["/api/budget"] });
     qc.invalidateQueries({ queryKey: ["/api/budget/summary"] });
+    qc.invalidateQueries({ queryKey: ["/api/suppliers"] });
     qc.invalidateQueries({ queryKey: ["/api/warehouse/parts"] });
     qc.invalidateQueries({ queryKey: ["/api/warehouse/categories"] });
     qc.invalidateQueries({ queryKey: ["/api/warehouse/dashboard"] });

@@ -2,6 +2,11 @@ import type { Express, Request, Response } from "express";
 import type { AuthenticatedUser } from "./routes";
 import { getSubdivisionScopeForRequest } from "./subdivision-scope-middleware";
 import {
+  filterBudgetEntriesByScope,
+  filterBudgetEntriesBySubdivisionId,
+  loadEquipmentSubdivisionMap,
+} from "./subdivision-equipment-filter";
+import {
   insertContactSchema,
   insertSupplierSchema,
   createBudgetEntryRequestSchema,
@@ -19,6 +24,7 @@ import {
   updateSupplier,
   deleteSupplier,
   listBudgetEntries,
+  getBudgetEntryById,
   createBudgetEntry,
   updateBudgetEntry,
   deleteBudgetEntry,
@@ -57,6 +63,11 @@ async function syncBudgetWithWarehouse(
     notes?: string | null;
     warehousePartId?: number | null;
     addStock?: boolean;
+    externalLink?: string | null;
+    subdivisionId?: number | null;
+    subdivisionName?: string | null;
+    equipmentId?: string | null;
+    equipmentName?: string | null;
   },
   user: { id: number; name: string }
 ): Promise<number | null> {
@@ -88,6 +99,11 @@ async function syncBudgetWithWarehouse(
       storageLocation: input.storageLocation,
       notes: input.notes,
       initialQuantity: qty,
+      externalLink: input.externalLink,
+      subdivisionId: input.subdivisionId,
+      subdivisionName: input.subdivisionName,
+      equipmentId: input.equipmentId,
+      equipmentName: input.equipmentName,
     },
     user
   );
@@ -195,13 +211,25 @@ export function registerAssetManagementRoutes(
   // Budget
   app.get("/api/budget", authenticate, async (req, res) => {
     try {
-      const { equipmentId, from, to, category } = req.query;
-      const list = await listBudgetEntries({
+      const { equipmentId, from, to, category, subdivisionId } = req.query;
+      const subId =
+        subdivisionId != null && subdivisionId !== ""
+          ? Number(subdivisionId)
+          : undefined;
+      let list = await listBudgetEntries({
         equipmentId: equipmentId as string | undefined,
         from: from as string | undefined,
         to: to as string | undefined,
         category: category as string | undefined,
       });
+      const equipmentMap = await loadEquipmentSubdivisionMap();
+      if (Number.isFinite(subId)) {
+        list = filterBudgetEntriesBySubdivisionId(list, subId!, equipmentMap);
+      }
+      const scope = await getSubdivisionScopeForRequest(req);
+      if (scope && !scope.viewAll) {
+        list = filterBudgetEntriesByScope(list, equipmentMap, scope);
+      }
       res.json(list);
     } catch {
       res.status(500).json({ message: "Ошибка загрузки бюджета" });
@@ -229,13 +257,12 @@ export function registerAssetManagementRoutes(
       });
       const { linkToWarehouse: parsedLink, warehouseInitialQuantity: parsedQty, warehouseCategoryId: parsedCatId, ...budgetFields } = parsed;
 
-      const linkToWarehouse = warehouseOpts.linkToWarehouse || parsedLink === true;
+      const linkToWarehouse =
+        warehouseOpts.linkToWarehouse ||
+        parsedLink === true ||
+        budgetFields.category === "parts";
       const warehouseInitialQuantity = warehouseOpts.warehouseInitialQuantity ?? parsedQty;
       const warehouseCategoryId = warehouseOpts.warehouseCategoryId ?? parsedCatId ?? null;
-
-      if (linkToWarehouse && !budgetFields.warehousePartId && !warehouseCategoryId) {
-        return res.status(400).json({ message: "Выберите категорию запчасти на складе" });
-      }
 
       const warehousePartId = await syncBudgetWithWarehouse(
         {
@@ -249,6 +276,11 @@ export function registerAssetManagementRoutes(
           notes: budgetFields.notes,
           warehousePartId: budgetFields.warehousePartId,
           addStock: true,
+          externalLink: budgetFields.externalLink ?? null,
+          subdivisionId: budgetFields.subdivisionId ?? null,
+          subdivisionName: budgetFields.subdivisionName ?? null,
+          equipmentId: budgetFields.equipmentId ?? null,
+          equipmentName: budgetFields.equipmentName ?? null,
         },
         user
       );
@@ -256,11 +288,7 @@ export function registerAssetManagementRoutes(
       const entryData = {
         ...budgetFields,
         ...(linkToWarehouse
-          ? {
-              warehousePartId,
-              equipmentId: null,
-              equipmentName: null,
-            }
+          ? { warehousePartId }
           : {
               warehousePartId: null,
               storageLocation: null,
@@ -277,15 +305,22 @@ export function registerAssetManagementRoutes(
   app.put("/api/budget/:id", authenticate, requireRole(writeRoles), async (req, res) => {
     try {
       const user = req.user as AuthenticatedUser;
+      const entryId = Number(req.params.id);
+      const existing = await getBudgetEntryById(entryId);
+      if (!existing) return res.status(404).json({ message: "Не найдено" });
+
       const warehouseOpts = readBudgetWarehouseOptions(req.body);
       const parsed = createBudgetEntryRequestSchema.partial().parse(req.body);
       const { linkToWarehouse: parsedLink, warehouseInitialQuantity: parsedQty, warehouseCategoryId: parsedCatId, ...budgetFields } = parsed;
 
+      const category = String(
+        budgetFields.category ?? req.body.category ?? existing.category ?? ""
+      );
       const linkToWarehouse =
-        warehouseOpts.linkToWarehouse || parsedLink === true
-          ? true
-          : parsedLink === false
-            ? false
+        parsedLink === false
+          ? false
+          : warehouseOpts.linkToWarehouse || parsedLink === true || category === "parts"
+            ? true
             : undefined;
 
       let updateData: typeof budgetFields & { warehousePartId?: number | null } = { ...budgetFields };
@@ -301,26 +336,29 @@ export function registerAssetManagementRoutes(
             warehouseCategoryId,
             title: String(budgetFields.title ?? req.body.title ?? ""),
             amount: Number(budgetFields.amount ?? req.body.amount ?? 0),
-            category: String(budgetFields.category ?? req.body.category ?? "parts"),
+            category: category || "parts",
             storageLocation: budgetFields.storageLocation ?? req.body.storageLocation ?? null,
             notes: budgetFields.notes ?? req.body.notes ?? null,
             warehousePartId: budgetFields.warehousePartId ?? req.body.warehousePartId ?? null,
             addStock: false,
+            externalLink: budgetFields.externalLink ?? req.body.externalLink ?? null,
+            subdivisionId: budgetFields.subdivisionId ?? req.body.subdivisionId ?? null,
+            subdivisionName: budgetFields.subdivisionName ?? req.body.subdivisionName ?? null,
+            equipmentId: budgetFields.equipmentId ?? req.body.equipmentId ?? null,
+            equipmentName: budgetFields.equipmentName ?? req.body.equipmentName ?? null,
           },
           user
         );
         updateData = {
           ...updateData,
           warehousePartId,
-          equipmentId: null,
-          equipmentName: null,
         };
       } else if (linkToWarehouse === false) {
         updateData.warehousePartId = null;
         updateData.storageLocation = null;
       }
 
-      const row = await updateBudgetEntry(Number(req.params.id), updateData);
+      const row = await updateBudgetEntry(entryId, updateData);
       if (!row) return res.status(404).json({ message: "Не найдено" });
       res.json(row);
     } catch (e: any) {

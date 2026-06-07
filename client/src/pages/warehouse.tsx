@@ -5,6 +5,7 @@ import { Helmet } from "react-helmet";
 import { format } from "date-fns";
 import { ru } from "date-fns/locale";
 import { apiRequest } from "@/lib/queryClient";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -533,27 +534,36 @@ export default function WarehousePage() {
                       <TableHead>Место</TableHead>
                       <TableHead>Остаток</TableHead>
                       <TableHead>Мин.</TableHead>
-                      <TableHead></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {parts.map((part) => (
                       <TableRow
                         key={part.id}
-                        className={
+                        role="button"
+                        tabIndex={0}
+                        className={cn(
+                          "cursor-pointer",
                           (part.quantity ?? 0) <= 0
                             ? "bg-red-50/50 dark:bg-red-950/20"
                             : (part.minStock ?? 0) > 0 && (part.quantity ?? 0) <= (part.minStock ?? 0)
                               ? "bg-amber-50/50 dark:bg-amber-950/20"
                               : ""
-                        }
+                        )}
+                        onClick={() => setDetailPart(part)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            setDetailPart(part);
+                          }
+                        }}
                       >
                         <TableCell className="font-medium">{part.name}</TableCell>
                         <TableCell>{maskSensitiveValue(showSap, part.sapNumber)}</TableCell>
                         <TableCell>{part.categoryName ?? "—"}</TableCell>
                         <TableCell>{part.subdivisionName ?? "—"}</TableCell>
                         <TableCell>{part.storageLocation ?? part.equipmentName ?? "—"}</TableCell>
-                        <TableCell>
+                        <TableCell onClick={(e) => e.stopPropagation()}>
                           <PartStockBadge
                             part={part}
                             onOpenTask={openTaskById}
@@ -561,11 +571,6 @@ export default function WarehousePage() {
                           />
                         </TableCell>
                         <TableCell>{part.minStock ?? 0}</TableCell>
-                        <TableCell>
-                          <Button size="sm" variant="outline" onClick={() => setDetailPart(part)}>
-                            Открыть
-                          </Button>
-                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>

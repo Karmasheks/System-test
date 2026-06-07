@@ -26,12 +26,20 @@ import {
 } from "./subdivision-equipment-filter";
 
 // --- Contacts ---
+function matchesEquipmentFilter(
+  row: { equipmentId?: string | null; equipmentIds?: string[] | null },
+  equipmentId: string
+): boolean {
+  if (row.equipmentId === equipmentId) return true;
+  return (row.equipmentIds ?? []).includes(equipmentId);
+}
+
 export async function listContacts(filters?: { equipmentId?: string }) {
-  const q = db.select().from(contacts);
+  const rows = await db.select().from(contacts).orderBy(asc(contacts.name));
   if (filters?.equipmentId) {
-    return q.where(eq(contacts.equipmentId, filters.equipmentId)).orderBy(asc(contacts.name));
+    return rows.filter((row) => matchesEquipmentFilter(row, filters.equipmentId!));
   }
-  return q.orderBy(asc(contacts.name));
+  return rows;
 }
 
 export async function createContact(data: InsertContact) {
@@ -51,11 +59,11 @@ export async function deleteContact(id: number) {
 
 // --- Suppliers ---
 export async function listSuppliers(filters?: { equipmentId?: string }) {
-  const q = db.select().from(suppliers);
+  const rows = await db.select().from(suppliers).orderBy(asc(suppliers.name));
   if (filters?.equipmentId) {
-    return q.where(eq(suppliers.equipmentId, filters.equipmentId)).orderBy(asc(suppliers.name));
+    return rows.filter((row) => matchesEquipmentFilter(row, filters.equipmentId!));
   }
-  return q.orderBy(asc(suppliers.name));
+  return rows;
 }
 
 export async function createSupplier(data: InsertSupplier) {
