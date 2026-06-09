@@ -11,10 +11,9 @@ function generateTelegramLinkCode(): string {
   return `SL-${n}`;
 }
 
-export function registerTelegramRoutes(
-  app: Express,
-  authenticate: (req: Request, res: Response, next: Function) => void | Promise<void>
-): void {
+type AuthMiddleware = (req: Request, res: Response, next: Function) => void;
+
+export function registerTelegramRoutes(app: Express, authenticate: AuthMiddleware): void {
   app.post("/api/telegram/webhook", async (req, res) => {
     const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
     if (secret) {
