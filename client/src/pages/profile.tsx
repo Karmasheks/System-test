@@ -17,6 +17,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { UserAvatar } from "@/components/user-avatar";
 import { apiRequest } from "@/lib/queryClient";
 import { roleLabel } from "@shared/permissions-constants";
+import { TelegramLinkCard } from "@/components/profile/telegram-link-card";
 
 function isValidAvatarUrl(url: string): boolean {
   if (!url.trim()) return true;
@@ -487,7 +488,8 @@ export default function Profile() {
               </Card>
             </TabsContent>
 
-            <TabsContent value="notifications">
+            <TabsContent value="notifications" className="space-y-6">
+              <TelegramLinkCard />
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center">

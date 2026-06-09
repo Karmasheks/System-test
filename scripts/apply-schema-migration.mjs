@@ -47,6 +47,11 @@ const statements = [
     name TEXT NOT NULL UNIQUE,
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
   )`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_chat_id TEXT`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_username TEXT`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_link_code TEXT`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_link_code_expires_at TIMESTAMP`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_linked_at TIMESTAMP`,
   `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS actual_hours REAL`,
   `DO $$ BEGIN
     IF EXISTS (

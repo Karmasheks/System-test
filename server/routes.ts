@@ -53,6 +53,9 @@ import {
 } from "./task-access-service";
 import { notifyTaskCommentAdded, notifyNewTaskCreated } from "./task-notifications";
 import { syncTaskReminderNotifications } from "./notification-sync-service";
+import { registerTelegramRoutes } from "./telegram-routes";
+import { serializeUserForClient } from "./user-serializer";
+import { initTelegramBot } from "./telegram-bot";
 
 const lastReminderSyncByUser = new Map<number, number>();
 const REMINDER_SYNC_INTERVAL_MS = 15 * 60 * 1000;
@@ -342,10 +345,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const effectivePermissions = await getEffectivePermissionsForUser(user);
-      
-      // Return user without password
-      const { password, ...userWithoutPassword } = user;
-      return res.status(200).json({ ...userWithoutPassword, effectivePermissions });
+      return res.status(200).json(serializeUserForClient(user, { effectivePermissions }));
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }
@@ -381,8 +381,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const effectivePermissions = await getEffectivePermissionsForUser(updatedUser);
-      const { password, ...userWithoutPassword } = updatedUser;
-      return res.status(200).json({ ...userWithoutPassword, effectivePermissions });
+      return res.status(200).json(serializeUserForClient(updatedUser, { effectivePermissions }));
     } catch (error: any) {
       if (error.name === "ZodError") {
         return res.status(400).json({ message: error.errors?.[0]?.message ?? "Неверные данные" });
@@ -390,6 +389,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(500).json({ message: error.message });
     }
   });
+
+  registerTelegramRoutes(app, authenticate);
 
   app.patch("/api/auth/presence", authenticate, async (req, res) => {
     try {
@@ -2525,6 +2526,7 @@ app.delete("/api/maintenance/:id", authenticate, requireRole(writeRoles), async 
 
   await ensureDefaultRoleProfiles();
   await initSubdivisionSystem();
+  await initTelegramBot();
 
   const presenceSweepMs = 5 * 60 * 1000;
   setInterval(() => {

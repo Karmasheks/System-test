@@ -34,6 +34,11 @@ export const users = pgTable("users", {
   isActive: boolean("is_active").notNull().default(true),
   useCustomPermissions: boolean("use_custom_permissions").notNull().default(false),
   permissionOverrides: jsonb("permission_overrides").$type<UserPermissionOverrides | null>(),
+  telegramChatId: text("telegram_chat_id"),
+  telegramUsername: text("telegram_username"),
+  telegramLinkCode: text("telegram_link_code"),
+  telegramLinkCodeExpiresAt: timestamp("telegram_link_code_expires_at"),
+  telegramLinkedAt: timestamp("telegram_linked_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

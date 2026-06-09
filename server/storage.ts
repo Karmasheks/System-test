@@ -18,6 +18,8 @@ export interface IStorage {
   // User operations
   getUser(id: number): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
+  getUserByTelegramLinkCode(code: string): Promise<User | undefined>;
+  getUserByTelegramChatId(chatId: string): Promise<User | undefined>;
   getAllUsers(): Promise<User[]>;
   createUser(user: InsertUser): Promise<User>;
   updateUser(id: number, user: Partial<InsertUser>): Promise<User | undefined>;
@@ -127,6 +129,16 @@ export class PostgreSQLStorage implements IStorage {
 
   async getUserByEmail(email: string): Promise<User | undefined> {
     const result = await db.select().from(users).where(eq(users.email, email));
+    return result[0];
+  }
+
+  async getUserByTelegramLinkCode(code: string): Promise<User | undefined> {
+    const result = await db.select().from(users).where(eq(users.telegramLinkCode, code));
+    return result[0];
+  }
+
+  async getUserByTelegramChatId(chatId: string): Promise<User | undefined> {
+    const result = await db.select().from(users).where(eq(users.telegramChatId, chatId));
     return result[0];
   }
 
@@ -533,7 +545,18 @@ export class PostgreSQLStorage implements IStorage {
 
   async createNotification(notificationData: InsertNotification): Promise<Notification> {
     const result = await db.insert(notifications).values(notificationData).returning();
-    return result[0];
+    const notification = result[0];
+    try {
+      const { notifyTelegramUser } = await import("./telegram-bot");
+      await notifyTelegramUser(
+        notificationData.userId,
+        notificationData.title,
+        notificationData.message
+      );
+    } catch (err) {
+      console.error("Telegram dispatch error:", err);
+    }
+    return notification;
   }
 
   async updateNotification(id: number, updateData: Partial<InsertNotification>): Promise<Notification | undefined> {

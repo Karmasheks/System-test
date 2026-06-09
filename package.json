@@ -14,7 +14,8 @@
     "db:test": "node --env-file=.env scripts/test-db-connection.mjs",
     "db:seed-admin": "node --env-file=.env scripts/seed-admin.mjs",
     "db:cleanup": "node --env-file=.env scripts/cleanup-test-data.mjs",
-    "db:migrate": "node --env-file=.env scripts/migrate-database.mjs"
+    "db:migrate": "node --env-file=.env scripts/migrate-database.mjs",
+    "telegram:webhook": "node --env-file=.env scripts/register-telegram-webhook.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
