@@ -196,6 +196,7 @@ export async function registerTelegramWebhook(): Promise<void> {
     await telegramApi("setWebhook", {
       url,
       allowed_updates: ["message"],
+      drop_pending_updates: true,
       ...(secret ? { secret_token: secret } : {}),
     });
 

@@ -14,21 +14,33 @@ function generateTelegramLinkCode(): string {
 type AuthMiddleware = (req: Request, res: Response, next: Function) => void;
 
 export function registerTelegramRoutes(app: Express, authenticate: AuthMiddleware): void {
-  app.post("/api/telegram/webhook", async (req, res) => {
+  app.get("/api/telegram/health", (_req, res) => {
+    res.json({
+      configured: isTelegramConfigured(),
+      botUsername: getTelegramBotUsername() ?? process.env.TELEGRAM_BOT_USERNAME ?? null,
+    });
+  });
+
+  app.post("/api/telegram/webhook", (req, res) => {
     const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
     if (secret) {
       const header = req.header("X-Telegram-Bot-Api-Secret-Token");
       if (header !== secret) {
+        console.warn("Telegram webhook: неверный secret_token");
         return res.status(403).end();
       }
     }
 
-    try {
-      await handleTelegramUpdate(req.body as Record<string, unknown>);
-    } catch (err) {
-      console.error("Telegram webhook error:", err);
-    }
+    // Telegram ждёт быстрый 200 — обработка в фоне (медленная БД не должна вызывать timeout)
     res.status(200).end();
+
+    void (async () => {
+      try {
+        await handleTelegramUpdate(req.body as Record<string, unknown>);
+      } catch (err) {
+        console.error("Telegram webhook error:", err);
+      }
+    })();
   });
 
   app.get("/api/auth/telegram", authenticate, async (req, res) => {
