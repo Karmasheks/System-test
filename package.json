@@ -11,7 +11,9 @@
     "test": "echo \"No tests configured\"",
     "db:push": "node --env-file=.env ./node_modules/drizzle-kit/bin.cjs push",
     "db:test": "node --env-file=.env scripts/test-db-connection.mjs",
-    "db:seed-admin": "node --env-file=.env scripts/seed-admin.mjs"
+    "db:seed-admin": "node --env-file=.env scripts/seed-admin.mjs",
+    "db:cleanup": "node --env-file=.env scripts/cleanup-test-data.mjs",
+    "db:migrate": "node --env-file=.env scripts/migrate-database.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
