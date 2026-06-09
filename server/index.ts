@@ -1,8 +1,15 @@
 import express, { type Request, Response, NextFunction } from "express";
 import path from "path";
+import { fileURLToPath } from "url";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { initializeDatabase } from "./db";
+
+const serverRootDir = path.dirname(fileURLToPath(import.meta.url));
+/** Запуск из dist/ (npm start / Amvera) — production, даже если в .env NODE_ENV=development */
+const isProductionBundle =
+  serverRootDir.endsWith(`${path.sep}dist`) || serverRootDir.endsWith("/dist");
+const isProduction = process.env.NODE_ENV === "production" || isProductionBundle;
 
 const app = express();
 app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
@@ -56,18 +63,23 @@ res.status(status).json({ message });
   // importantly only setup vite in development and after
   // setting up all the other routes so the catch-all route
   // doesn't interfere with the other routes
-  if (app.get("env") === "development") {
-    await setupVite(app, server);
-  } else {
+  if (isProduction) {
     serveStatic(app);
+  } else {
+    await setupVite(app, server);
   }
 
-  // ALWAYS serve the app on port 5000
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
+  // PORT — из окружения (Amvera задаёт свой). Локально по умолчанию 5000.
   const port = Number(process.env.PORT) || 5000;
-  const host = process.env.HOST || "127.0.0.1";
+  // Amvera/контейнеры: 0.0.0.0. Локальный dev: 127.0.0.1 (0.0.0.0 тоже доступен как 127.0.0.1).
+  const host =
+    process.env.HOST ?? (isProduction ? "0.0.0.0" : "127.0.0.1");
+
   server.listen(port, host, () => {
-    log(`serving on http://${host}:${port}`);
+    if (host === "0.0.0.0") {
+      log(`serving on http://0.0.0.0:${port} (local: http://127.0.0.1:${port})`);
+    } else {
+      log(`serving on http://${host}:${port}`);
+    }
   });
 })();
