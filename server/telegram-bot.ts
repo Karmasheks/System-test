@@ -2,6 +2,7 @@ import { storage } from "./storage";
 import { log } from "./vite";
 
 const TELEGRAM_API = "https://api.telegram.org";
+const TELEGRAM_FETCH_TIMEOUT_MS = 12_000;
 
 export function isTelegramConfigured(): boolean {
   return Boolean(process.env.TELEGRAM_BOT_TOKEN);
@@ -21,10 +22,7 @@ export function getTelegramBotUsername(): string | null {
 
 function shouldUseTelegramPolling(): boolean {
   const v = process.env.TELEGRAM_USE_POLLING;
-  if (v === "0" || v === "false") return false;
-  if (v === "1" || v === "true") return true;
-  // По умолчанию polling: на Amvera входящий webhook часто недоступен
-  return true;
+  return v === "1" || v === "true";
 }
 
 async function telegramApi<T>(method: string, body?: Record<string, unknown>): Promise<T> {
@@ -32,6 +30,7 @@ async function telegramApi<T>(method: string, body?: Record<string, unknown>): P
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(TELEGRAM_FETCH_TIMEOUT_MS),
   });
   const data = (await res.json()) as { ok: boolean; description?: string; result?: T };
   if (!data.ok) {
@@ -187,7 +186,7 @@ async function refreshBotUsername(): Promise<void> {
   if (me.username) cachedBotUsername = me.username;
 }
 
-export async function registerTelegramWebhook(): Promise<void> {
+async function registerTelegramWebhook(): Promise<void> {
   if (!isTelegramConfigured() || !process.env.APP_PUBLIC_URL) {
     log("Telegram: пропуск webhook (нет токена или APP_PUBLIC_URL)");
     return;
@@ -213,30 +212,34 @@ export async function registerTelegramWebhook(): Promise<void> {
   }
 }
 
-export async function startTelegramPolling(): Promise<void> {
-  if (!isTelegramConfigured()) return;
+function startTelegramPolling(): void {
+  void (async () => {
+    try {
+      await refreshBotUsername();
+      await telegramApi("deleteWebhook", { drop_pending_updates: true });
+      log(`Telegram: режим polling (@${cachedBotUsername ?? "bot"})`);
+    } catch (err) {
+      console.error(
+        "Telegram polling не запущен (нет доступа к api.telegram.org?). Приложение работает без бота.",
+        err
+      );
+      return;
+    }
 
-  try {
-    await refreshBotUsername();
-    await telegramApi("deleteWebhook", { drop_pending_updates: true });
-    log(`Telegram: режим polling (@${cachedBotUsername ?? "bot"})`);
-  } catch (err) {
-    console.error("Telegram polling init failed:", err);
-    return;
-  }
+    let offset = 0;
+    let failStreak = 0;
 
-  let offset = 0;
-
-  const loop = async () => {
     for (;;) {
       try {
         const updates = await telegramApi<
           Array<{ update_id: number } & Record<string, unknown>>
         >("getUpdates", {
           offset,
-          timeout: 25,
+          timeout: 20,
           allowed_updates: ["message"],
         });
+
+        failStreak = 0;
 
         for (const update of updates) {
           offset = update.update_id + 1;
@@ -247,24 +250,33 @@ export async function startTelegramPolling(): Promise<void> {
           }
         }
       } catch (err) {
-        console.error("Telegram poll error:", err);
-        await new Promise((r) => setTimeout(r, 5000));
+        failStreak += 1;
+        const waitMs = Math.min(60_000, 5000 * failStreak);
+        if (failStreak === 1 || failStreak % 6 === 0) {
+          console.error("Telegram poll error (повтор через", waitMs, "ms):", err);
+        }
+        await new Promise((r) => setTimeout(r, waitMs));
       }
     }
-  };
-
-  void loop();
+  })();
 }
 
-export async function initTelegramBot(): Promise<void> {
+async function initTelegramBotAsync(): Promise<void> {
   if (!isTelegramConfigured()) {
     log("Telegram: TELEGRAM_BOT_TOKEN не задан — бот отключён");
     return;
   }
 
   if (shouldUseTelegramPolling()) {
-    await startTelegramPolling();
+    startTelegramPolling();
   } else {
     await registerTelegramWebhook();
   }
+}
+
+/** Не блокирует запуск сервера. */
+export function initTelegramBot(): void {
+  void initTelegramBotAsync().catch((err) => {
+    console.error("Telegram init error:", err);
+  });
 }

@@ -2526,7 +2526,7 @@ app.delete("/api/maintenance/:id", authenticate, requireRole(writeRoles), async 
 
   await ensureDefaultRoleProfiles();
   await initSubdivisionSystem();
-  await initTelegramBot();
+  initTelegramBot();
 
   const presenceSweepMs = 5 * 60 * 1000;
   setInterval(() => {
