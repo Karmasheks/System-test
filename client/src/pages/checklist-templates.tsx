@@ -104,7 +104,7 @@ export default function ChecklistTemplatesPage() {
       <Helmet>
         <title>Шаблоны чек-листов ТО — StarLine</title>
       </Helmet>
-      <main className="p-6 max-w-6xl mx-auto">
+      <main className="p-4 lg:p-6 w-full min-w-0">
           <div className="flex items-center gap-3 mb-6">
             <Link href="/service-requests">
               <Button variant="ghost" size="icon">

@@ -388,7 +388,7 @@ export default function Dashboard() {
         <title>Панель управления - Система управления оборудованием</title>
         <meta name="description" content="Общий обзор состояния оборудования, технического обслуживания и ежедневных осмотров" />
       </Helmet>
-      <div className="p-6">
+      <div className="p-4 lg:p-6 w-full min-w-0">
         <div className="mb-8 flex flex-wrap justify-between items-start gap-4">
           <div>
             <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">

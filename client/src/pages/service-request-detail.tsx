@@ -205,7 +205,7 @@ export default function ServiceRequestDetailPage() {
   return (
     <>
       <PageHelmet title={`Заявка #${request.id} — StarLine`} />
-      <main className="p-6 max-w-5xl">
+      <main className="p-4 lg:p-6 w-full min-w-0">
           <Link href="/service-requests">
             <Button variant="ghost" className="mb-4">
               <ArrowLeft className="h-4 w-4 mr-2" />

@@ -135,7 +135,7 @@ export default function ServiceRequestsPage() {
       <Helmet>
         <title>Сервисные заявки — StarLine</title>
       </Helmet>
-      <main className="p-6">
+      <main className="p-4 lg:p-6 w-full min-w-0">
           <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
             <div className="flex items-center gap-3">
               <ClipboardList className="h-8 w-8 text-blue-600" />

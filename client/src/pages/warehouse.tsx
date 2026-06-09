@@ -440,8 +440,8 @@ export default function WarehousePage() {
       <Helmet>
         <title>Склад — StarLine</title>
       </Helmet>
-      <div className="p-8">
-        <div className="max-w-7xl mx-auto space-y-6">
+      <div className="p-4 lg:p-6 w-full min-w-0">
+        <div className="w-full min-w-0 space-y-6">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-900 dark:text-white flex items-center gap-2">

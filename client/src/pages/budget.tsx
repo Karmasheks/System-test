@@ -575,7 +575,7 @@ export default function BudgetPage() {
   return (
     <>
       <Helmet><title>Затраты (Бюджет) — StarLine</title></Helmet>
-      <main className="p-6 max-w-6xl mx-auto space-y-6">
+      <main className="p-4 lg:p-6 w-full min-w-0 space-y-6">
         <div className="flex flex-wrap justify-between gap-4">
           <div className="flex items-center gap-3">
             <Wallet className="h-8 w-8 text-green-600" />

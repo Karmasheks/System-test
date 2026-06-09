@@ -400,8 +400,8 @@ export default function Equipment() {
         />
       </Helmet>
 
-      <main className="p-4 sm:p-6">
-        <div className="max-w-7xl mx-auto min-w-0">
+      <main className="p-4 lg:p-6 w-full min-w-0">
+        <div className="w-full min-w-0">
               <div className="flex flex-wrap justify-between items-start gap-3 mb-4">
                 <div>
                   <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Оборудование</h1>

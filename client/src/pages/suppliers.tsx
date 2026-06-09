@@ -121,7 +121,7 @@ export default function SuppliersPage() {
   return (
     <>
       <Helmet><title>Поставщики — StarLine</title></Helmet>
-      <main className="p-6 max-w-6xl mx-auto">
+      <main className="p-4 lg:p-6 w-full min-w-0">
         <div className="flex justify-between items-center mb-6">
           <div className="flex items-center gap-3">
             <Building2 className="h-8 w-8 text-blue-600" />

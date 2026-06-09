@@ -610,7 +610,7 @@ export default function Users() {
           <title>Управление пользователями | Система мониторинга</title>
         </Helmet>
         <main className="p-6">
-          <div className="max-w-7xl mx-auto flex items-center justify-center min-h-[50vh]">
+          <div className="w-full min-w-0 flex items-center justify-center min-h-[50vh]">
             <div className="text-center">
               <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
                 Доступ запрещен

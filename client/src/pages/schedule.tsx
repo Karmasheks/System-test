@@ -478,8 +478,8 @@ export default function Schedule() {
   return (
     <>
       <PageHelmet title={`${SCHEDULE_PAGE_TITLE} — StarLine`} />
-      <div className="p-8">
-        <div className="max-w-7xl mx-auto">
+      <div className="p-4 lg:p-6 w-full min-w-0">
+        <div className="w-full min-w-0">
               <div className="mb-8 flex flex-wrap justify-between items-start gap-4">
                 <div>
                   <h1 className="text-3xl font-bold text-gray-900 dark:text-white">{SCHEDULE_PAGE_TITLE}</h1>

@@ -231,8 +231,8 @@ export default function Profile() {
         <meta name="description" content="Настройки профиля и персональные данные пользователя" />
       </Helmet>
 
-      <main className="p-6">
-        <div className="max-w-4xl mx-auto">
+      <main className="p-4 lg:p-6 w-full min-w-0">
+        <div className="w-full min-w-0">
           <div className="mb-8">
             <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Профиль пользователя</h1>
             <p className="mt-2 text-gray-600 dark:text-gray-400">

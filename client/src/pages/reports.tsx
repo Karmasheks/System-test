@@ -329,8 +329,8 @@ export default function Reports() {
         <meta name="description" content="Подробные отчеты по оборудованию, техническому обслуживанию и эффективности работы" />
       </Helmet>
 
-      <div className="p-6">
-        <div className="max-w-7xl mx-auto">
+      <div className="p-4 lg:p-6 w-full min-w-0">
+        <div className="w-full min-w-0">
               {/* Заголовок и фильтры */}
               <div className="mb-8">
                 <div className="flex flex-wrap justify-between items-start gap-4 mb-6">
