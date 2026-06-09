@@ -4,7 +4,7 @@ import { log } from "./vite";
 const TELEGRAM_API = "https://api.telegram.org";
 
 export function isTelegramConfigured(): boolean {
-  return Boolean(process.env.TELEGRAM_BOT_TOKEN && process.env.APP_PUBLIC_URL);
+  return Boolean(process.env.TELEGRAM_BOT_TOKEN);
 }
 
 function botToken(): string {
@@ -17,6 +17,14 @@ let cachedBotUsername: string | null = process.env.TELEGRAM_BOT_USERNAME ?? null
 
 export function getTelegramBotUsername(): string | null {
   return cachedBotUsername;
+}
+
+function shouldUseTelegramPolling(): boolean {
+  const v = process.env.TELEGRAM_USE_POLLING;
+  if (v === "0" || v === "false") return false;
+  if (v === "1" || v === "true") return true;
+  // По умолчанию polling: на Amvera входящий webhook часто недоступен
+  return true;
 }
 
 async function telegramApi<T>(method: string, body?: Record<string, unknown>): Promise<T> {
@@ -171,27 +179,26 @@ export async function handleTelegramUpdate(update: Record<string, unknown>): Pro
     return;
   }
 
-  await reply(
-    chatId,
-    "Отправьте код из профиля (SL-XXXXX) или /help для помощи."
-  );
+  await reply(chatId, "Отправьте код из профиля (SL-XXXXX) или /help для помощи.");
+}
+
+async function refreshBotUsername(): Promise<void> {
+  const me = await telegramApi<{ username?: string }>("getMe");
+  if (me.username) cachedBotUsername = me.username;
 }
 
 export async function registerTelegramWebhook(): Promise<void> {
-  if (!isTelegramConfigured()) {
-    log("Telegram: пропуск webhook (нет TELEGRAM_BOT_TOKEN или APP_PUBLIC_URL)");
+  if (!isTelegramConfigured() || !process.env.APP_PUBLIC_URL) {
+    log("Telegram: пропуск webhook (нет токена или APP_PUBLIC_URL)");
     return;
   }
 
-  const base = process.env.APP_PUBLIC_URL!.replace(/\/$/, "");
+  const base = process.env.APP_PUBLIC_URL.replace(/\/$/, "");
   const url = `${base}/api/telegram/webhook`;
   const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
 
   try {
-    const me = await telegramApi<{ username?: string }>("getMe");
-    if (me.username) {
-      cachedBotUsername = me.username;
-    }
+    await refreshBotUsername();
 
     await telegramApi("setWebhook", {
       url,
@@ -206,7 +213,58 @@ export async function registerTelegramWebhook(): Promise<void> {
   }
 }
 
-export async function initTelegramBot(): Promise<void> {
+export async function startTelegramPolling(): Promise<void> {
   if (!isTelegramConfigured()) return;
-  await registerTelegramWebhook();
+
+  try {
+    await refreshBotUsername();
+    await telegramApi("deleteWebhook", { drop_pending_updates: true });
+    log(`Telegram: режим polling (@${cachedBotUsername ?? "bot"})`);
+  } catch (err) {
+    console.error("Telegram polling init failed:", err);
+    return;
+  }
+
+  let offset = 0;
+
+  const loop = async () => {
+    for (;;) {
+      try {
+        const updates = await telegramApi<
+          Array<{ update_id: number } & Record<string, unknown>>
+        >("getUpdates", {
+          offset,
+          timeout: 25,
+          allowed_updates: ["message"],
+        });
+
+        for (const update of updates) {
+          offset = update.update_id + 1;
+          try {
+            await handleTelegramUpdate(update);
+          } catch (err) {
+            console.error("Telegram update handler error:", err);
+          }
+        }
+      } catch (err) {
+        console.error("Telegram poll error:", err);
+        await new Promise((r) => setTimeout(r, 5000));
+      }
+    }
+  };
+
+  void loop();
+}
+
+export async function initTelegramBot(): Promise<void> {
+  if (!isTelegramConfigured()) {
+    log("Telegram: TELEGRAM_BOT_TOKEN не задан — бот отключён");
+    return;
+  }
+
+  if (shouldUseTelegramPolling()) {
+    await startTelegramPolling();
+  } else {
+    await registerTelegramWebhook();
+  }
 }

@@ -15,8 +15,14 @@ type AuthMiddleware = (req: Request, res: Response, next: Function) => void;
 
 export function registerTelegramRoutes(app: Express, authenticate: AuthMiddleware): void {
   app.get("/api/telegram/health", (_req, res) => {
+    const polling =
+      process.env.TELEGRAM_USE_POLLING === "1" ||
+      process.env.TELEGRAM_USE_POLLING === "true" ||
+      (process.env.TELEGRAM_USE_POLLING !== "0" &&
+        process.env.TELEGRAM_USE_POLLING !== "false");
     res.json({
       configured: isTelegramConfigured(),
+      mode: polling ? "polling" : "webhook",
       botUsername: getTelegramBotUsername() ?? process.env.TELEGRAM_BOT_USERNAME ?? null,
     });
   });
