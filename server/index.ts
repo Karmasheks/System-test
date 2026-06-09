@@ -69,17 +69,13 @@ res.status(status).json({ message });
     await setupVite(app, server);
   }
 
-  // PORT — из окружения (Amvera задаёт свой). Локально по умолчанию 5000.
+  // PORT: Amvera по умолчанию 80; локально в .env обычно 5000.
   const port = Number(process.env.PORT) || 5000;
-  // Amvera/контейнеры: 0.0.0.0. Локальный dev: 127.0.0.1 (0.0.0.0 тоже доступен как 127.0.0.1).
-  const host =
-    process.env.HOST ?? (isProduction ? "0.0.0.0" : "127.0.0.1");
+  // Всегда 0.0.0.0 — Amvera требует все интерфейсы; локально открывается как http://127.0.0.1:PORT
+  const host = process.env.HOST ?? "0.0.0.0";
 
   server.listen(port, host, () => {
-    if (host === "0.0.0.0") {
-      log(`serving on http://0.0.0.0:${port} (local: http://127.0.0.1:${port})`);
-    } else {
-      log(`serving on http://${host}:${port}`);
-    }
+    log(`serving on http://${host}:${port} (local: http://127.0.0.1:${port})`);
+    log(`mode: ${isProduction ? "production" : "development"}, bundle: ${isProductionBundle}`);
   });
 })();

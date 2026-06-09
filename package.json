@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "node --env-file=.env --import tsx server/index.ts",
     "build": "vite build && esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
-    "start": "node --env-file=.env dist/index.js",
+    "start": "node dist/index.js",
+    "start:local": "node --env-file=.env dist/index.js",
     "check": "tsc",
     "test": "echo \"No tests configured\"",
     "db:push": "node --env-file=.env ./node_modules/drizzle-kit/bin.cjs push",
