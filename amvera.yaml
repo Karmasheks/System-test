@@ -5,7 +5,8 @@ meta:
     version: 20
 
 build:
-  additionalCommands: AMVERA_CLEAN=1 node scripts/prepare-amvera.mjs && npm install && npm run build
+  # Сброс рабочей копии из git (Amvera иногда держит старый кэш без client/ и scripts/)
+  additionalCommands: git reset --hard HEAD && rm -rf node_modules dist project-source.tar.gz && npm install && npm run build
 
 run:
   scriptName: index.js
