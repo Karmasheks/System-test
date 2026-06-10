@@ -4,3 +4,6 @@ dist/
 env
 supabase-config.env
 uploads/
+project-source.tar.gz
+*.tar.gz
+tmp-psrc.tar.gz
