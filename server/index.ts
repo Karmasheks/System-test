@@ -51,8 +51,25 @@ const isProduction = process.env.NODE_ENV === "production" || isProductionBundle
 
 const app = express();
 
+function readBuildMeta(): { commit?: string; builtAt?: string } {
+  try {
+    const raw = fs.readFileSync(
+      path.join(process.cwd(), "dist", "public", "build-meta.json"),
+      "utf8",
+    );
+    return JSON.parse(raw) as { commit?: string; builtAt?: string };
+  } catch {
+    return {};
+  }
+}
+
 app.get("/api/health", (_req, res) => {
-  res.json({ ok: true });
+  const build = readBuildMeta();
+  res.json({
+    ok: true,
+    commit: build.commit ?? null,
+    builtAt: build.builtAt ?? null,
+  });
 });
 
 app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
