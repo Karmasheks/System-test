@@ -5,7 +5,14 @@ meta:
     version: 20
 
 build:
-  additionalCommands: sh -c 'cd /source && test -f client/index.html && rm -rf node_modules dist project-source.tar.gz && npm install && npm run build && test -f dist/index.js'
+  additionalCommands: sh -c 'cd /source && rm -rf dist && npm run build && test -f dist/index.js'
+  artifacts:
+    "dist/**": /
+    "node_modules/**": /
+    "index.js": /
+    "package.json": /
+    "package-lock.json": /
+    "uploads/**": /
 
 run:
   scriptName: index.js
