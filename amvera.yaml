@@ -5,7 +5,8 @@ meta:
     version: 20
 
 build:
-  additionalCommands: npm run build
+  # Чистая сборка: не использовать dist/node_modules из артефакта Amvera
+  additionalCommands: rm -rf dist && npm run build
 
 run:
   scriptName: index.js
