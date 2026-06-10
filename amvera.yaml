@@ -5,7 +5,8 @@ meta:
     version: 20
 
 build:
-  additionalCommands: sh -c 'for i in $(seq 1 60); do test -f /git/package.json && break; sleep 2; done; cd /git && rm -rf node_modules dist project-source.tar.gz && npm install && npm run build && test -f dist/index.js && rsync -a /git/ /source/ --exclude .git'
+  # /git в builder часто недоступен — собираем в /source (client/ уже в архиве)
+  additionalCommands: sh -c 'cd /source && test -f client/index.html && rm -rf node_modules dist project-source.tar.gz && npm install && npm run build && test -f dist/index.js'
 
 run:
   scriptName: index.js
