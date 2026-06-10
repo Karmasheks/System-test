@@ -1,5 +1,17 @@
 /**
- * Точка входа для Amvera (run.scriptName: index.js).
- * Запускает production-сборку из dist/, не server/index.ts + tsx.
+ * Точка входа Amvera (run.scriptName: index.js).
+ * dist/ не в Git — если сборка на Amvera пропущена, собираем перед запуском.
  */
-import "./dist/index.js";
+import fs from "fs";
+import path from "path";
+import { pathToFileURL } from "url";
+import { execSync } from "child_process";
+
+const distIndex = path.join(process.cwd(), "dist", "index.js");
+
+if (!fs.existsSync(distIndex)) {
+  console.log("[index.js] dist/index.js не найден — npm run build");
+  execSync("npm run build", { stdio: "inherit", env: process.env });
+}
+
+await import(pathToFileURL(distIndex).href);
