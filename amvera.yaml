@@ -5,7 +5,7 @@ meta:
     version: 20
 
 build:
-  additionalCommands: node scripts/prepare-amvera.mjs && npm install && npm run build
+  additionalCommands: AMVERA_CLEAN=1 node scripts/prepare-amvera.mjs && npm install && npm run build
 
 run:
   scriptName: index.js
