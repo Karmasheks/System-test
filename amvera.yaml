@@ -5,8 +5,7 @@ meta:
     version: 20
 
 build:
-  # Собираем в /git (полный clone), затем копируем всё в /source для деплоя
-  additionalCommands: sh -c "set -e && cd /git && rm -rf node_modules dist project-source.tar.gz && npm install && npm run build && test -f dist/index.js && rsync -a /git/ /source/ --exclude .git"
+  additionalCommands: sh /git/scripts/amvera-build.sh
 
 run:
   scriptName: index.js
