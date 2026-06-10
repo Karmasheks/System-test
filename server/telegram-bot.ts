@@ -186,9 +186,21 @@ async function refreshBotUsername(): Promise<void> {
   if (me.username) cachedBotUsername = me.username;
 }
 
+function isLikelyAmveraRuntime(): boolean {
+  return process.cwd().replace(/\\/g, "/") === "/app";
+}
+
 async function registerTelegramWebhook(): Promise<void> {
   if (!isTelegramConfigured() || !process.env.APP_PUBLIC_URL) {
     log("Telegram: пропуск webhook (нет токена или APP_PUBLIC_URL)");
+    return;
+  }
+
+  if (isLikelyAmveraRuntime() && process.env.TELEGRAM_ENABLE_WEBHOOK !== "1") {
+    log(
+      "Telegram: на Amvera webhook не регистрируем (исходящий api.telegram.org часто недоступен). " +
+        "Для попытки регистрации задайте TELEGRAM_ENABLE_WEBHOOK=1"
+    );
     return;
   }
 

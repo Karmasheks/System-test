@@ -10,17 +10,26 @@ function normalizePath(p: string): string {
   return p.replace(/\\/g, "/");
 }
 
-/** Запуск из dist/index.js (npm start / Amvera), даже если NODE_ENV=development в env */
+/** Production-сборка: dist/index.js, index.js (Amvera) или Amvera cwd /app */
 function detectProductionBundle(): boolean {
   const fromMeta = normalizePath(path.dirname(fileURLToPath(import.meta.url)));
   if (fromMeta.endsWith("/dist")) return true;
 
   const fromArgv = normalizePath(process.argv[1] ?? "");
   if (fromArgv.includes("/dist/") || fromArgv.endsWith("/dist/index.js")) return true;
-  if (fromArgv.includes("/server/index.ts")) return false;
+  if (fromArgv.endsWith("/index.js") && !fromArgv.includes("/server/")) return true;
 
+  const cwd = normalizePath(process.cwd());
   const distIndex = path.join(process.cwd(), "dist", "index.js");
-  if (fs.existsSync(distIndex) && !fromArgv.includes("server/index")) return true;
+  const distBuilt = fs.existsSync(distIndex);
+
+  // Amvera: панель часто запускает server/index.ts + tsx, cwd = /app
+  if (distBuilt && cwd === "/app" && fromArgv.includes("/server/index")) return true;
+
+  // Локальный npm run dev
+  if (fromArgv.includes("/server/index")) return false;
+
+  if (distBuilt) return true;
 
   return false;
 }

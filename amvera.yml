@@ -9,6 +9,5 @@ build:
   additionalCommands: npm run build
 
 run:
-  # Amvera читает amvera.yml (не .yaml). scriptName: index.js → dist/index.js
   scriptName: index.js
   containerPort: 80
