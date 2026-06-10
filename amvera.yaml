@@ -5,7 +5,7 @@ meta:
     version: 20
 
 build:
-  additionalCommands: sh /git/scripts/amvera-build.sh
+  additionalCommands: sh -c 'for i in $(seq 1 60); do test -f /git/package.json && break; sleep 2; done; cd /git && rm -rf node_modules dist project-source.tar.gz && npm install && npm run build && test -f dist/index.js && rsync -a /git/ /source/ --exclude .git'
 
 run:
   scriptName: index.js
