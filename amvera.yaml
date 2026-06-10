@@ -9,6 +9,6 @@ build:
   additionalCommands: npm run build
 
 run:
+  # Не задавайте в панели command с --import tsx — только npm run start
   command: npm run start
-  # Должен совпадать с портом в server/index.ts (production: 80). Не ставьте PORT=5000 в Amvera.
   containerPort: 80

@@ -1,14 +1,43 @@
 import express, { type Request, Response, NextFunction } from "express";
+import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { initializeDatabase } from "./db";
 
-const serverRootDir = path.dirname(fileURLToPath(import.meta.url));
-/** Запуск из dist/ (npm start / Amvera) — production, даже если в .env NODE_ENV=development */
-const isProductionBundle =
-  serverRootDir.endsWith(`${path.sep}dist`) || serverRootDir.endsWith("/dist");
+function normalizePath(p: string): string {
+  return p.replace(/\\/g, "/");
+}
+
+/** Запуск из dist/index.js (npm start / Amvera), даже если NODE_ENV=development в env */
+function detectProductionBundle(): boolean {
+  const fromMeta = normalizePath(path.dirname(fileURLToPath(import.meta.url)));
+  if (fromMeta.endsWith("/dist")) return true;
+
+  const fromArgv = normalizePath(process.argv[1] ?? "");
+  if (fromArgv.includes("/dist/") || fromArgv.endsWith("/dist/index.js")) return true;
+  if (fromArgv.includes("/server/index.ts")) return false;
+
+  const distIndex = path.join(process.cwd(), "dist", "index.js");
+  if (fs.existsSync(distIndex) && !fromArgv.includes("server/index")) return true;
+
+  return false;
+}
+
+function resolveListenPort(isProd: boolean): number {
+  const raw = process.env.PORT?.trim();
+  if (isProd) {
+    // PORT=5000 часто копируют из локального .env — на Amvera containerPort = 80
+    if (!raw || raw === "5000") return 80;
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : 80;
+  }
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : 5000;
+}
+
+const isProductionBundle = detectProductionBundle();
 const isProduction = process.env.NODE_ENV === "production" || isProductionBundle;
 
 const app = express();
@@ -74,9 +103,7 @@ res.status(status).json({ message });
     await setupVite(app, server);
   }
 
-  // Amvera: containerPort 80, PORT не задавать (или 80). Локально: PORT=5000 в .env.
-  const defaultPort = isProduction ? 80 : 5000;
-  const port = Number(process.env.PORT) || defaultPort;
+  const port = resolveListenPort(isProduction);
   const host = process.env.HOST ?? "0.0.0.0";
 
   if (isProduction && port !== 80) {
@@ -87,6 +114,8 @@ res.status(status).json({ message });
 
   server.listen(port, host, () => {
     log(`serving on http://${host}:${port} (local: http://127.0.0.1:${port})`);
-    log(`mode: ${isProduction ? "production" : "development"}, bundle: ${isProductionBundle}`);
+    log(
+      `mode: ${isProduction ? "production" : "development"}, bundle: ${isProductionBundle}, entry: ${normalizePath(process.argv[1] ?? "")}`
+    );
   });
 })();
