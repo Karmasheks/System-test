@@ -19,6 +19,8 @@ import {
   useBudgetEntries,
   useBudgetSummary,
   useBudgetMutations,
+  useBudgetCategories,
+  useBudgetCategoryMutations,
   useSuppliers,
   useSupplierMutations,
 } from "@/hooks/use-asset-management";
@@ -29,11 +31,18 @@ import { useSubdivisionFilter } from "@/hooks/use-subdivision-filter";
 import { useSubdivisions } from "@/hooks/use-subdivisions";
 import { SubdivisionFilterSelect } from "@/components/subdivision-filter-select";
 import { SubdivisionPicker } from "@/components/subdivision-picker";
+import {
+  emptySupplierForm,
+  SupplierFormFields,
+  type SupplierFormValues,
+} from "@/components/supplier-form-fields";
+import { buildSupplierCreatePayload } from "@/lib/supplier-form-payload";
 import { useTaskDialog } from "@/hooks/use-task-dialog";
 import { apiRequest } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
 import { BUDGET_CATEGORIES, budgetCategoryLabel } from "@shared/asset-constants";
 import { warehouseCategoryForBudget } from "@shared/warehouse-constants";
+import { buildEquipmentLinkPayload } from "@/lib/contact-supplier-utils";
 import {
   Wallet,
   Plus,
@@ -42,11 +51,11 @@ import {
   Package,
   ExternalLink,
   FileEdit,
-  Building2,
 } from "lucide-react";
 import type { BudgetEntry, Task } from "@shared/schema";
 
-const formDialogClass = "max-w-lg max-h-[90vh] overflow-y-auto";
+const formDialogClass =
+  "max-w-lg w-[min(100vw-2rem,32rem)] max-h-[90vh] overflow-y-auto overflow-x-hidden";
 
 export default function BudgetPage() {
   const { toast } = useToast();
@@ -80,7 +89,9 @@ export default function BudgetPage() {
   const { data: entries = [], isLoading } = useBudgetEntries(filters);
   const { data: summary } = useBudgetSummary(equipmentFilter !== "all" ? equipmentFilter : undefined);
   const { create, update, remove } = useBudgetMutations();
+  const { create: createBudgetCategory } = useBudgetCategoryMutations();
   const { create: createSupplier } = useSupplierMutations();
+  const { data: budgetCustomCategories = [] } = useBudgetCategories();
   const { allEquipment } = useEquipmentApi();
   const { data: suppliers = [] } = useSuppliers();
   const { data: warehouseParts = [] } = useWarehouseParts();
@@ -99,9 +110,10 @@ export default function BudgetPage() {
   const [detailEntry, setDetailEntry] = useState<BudgetEntry | null>(null);
   const [edit, setEdit] = useState<BudgetEntry | null>(null);
   const [linkMode, setLinkMode] = useState<"equipment" | "warehouse">("equipment");
-  const [warehouseOpen, setWarehouseOpen] = useState(true);
-  const [supplierDialogOpen, setSupplierDialogOpen] = useState(false);
-  const [newSupplier, setNewSupplier] = useState({ name: "", phone: "", contactPerson: "" });
+  const [warehouseOpen, setWarehouseOpen] = useState(false);
+  const [showNewSupplierForm, setShowNewSupplierForm] = useState(false);
+  const [newSupplier, setNewSupplier] = useState<SupplierFormValues>(emptySupplierForm());
+  const [formNewCategory, setFormNewCategory] = useState("");
   const [form, setForm] = useState({
     title: "",
     amount: "",
@@ -120,6 +132,26 @@ export default function BudgetPage() {
     externalLink: "",
     approvalLink: "",
   });
+
+  const builtInCategoryCodes = useMemo(
+    () => new Set<string>(BUDGET_CATEGORIES.map((c) => c.code)),
+    []
+  );
+
+  const customCategoriesForSelect = useMemo(() => {
+    const builtInLabels = new Set(BUDGET_CATEGORIES.map((c) => c.label.toLowerCase()));
+    return budgetCustomCategories.filter(
+      (c) => !builtInCategoryCodes.has(c.name) && !builtInLabels.has(c.name.toLowerCase())
+    );
+  }, [budgetCustomCategories, builtInCategoryCodes]);
+
+  const orphanFormCategory =
+    form.category &&
+    form.category !== "__new__" &&
+    !builtInCategoryCodes.has(form.category) &&
+    !customCategoriesForSelect.some((c) => c.name === form.category)
+      ? form.category
+      : null;
 
   const isPartsCategory = form.category === "parts";
   const showWarehouseSection = isPartsCategory || linkMode === "warehouse";
@@ -170,7 +202,6 @@ export default function BudgetPage() {
   useEffect(() => {
     if (isPartsCategory) {
       setLinkMode("warehouse");
-      setWarehouseOpen(true);
     }
   }, [isPartsCategory]);
 
@@ -194,7 +225,10 @@ export default function BudgetPage() {
   const reset = () => {
     setEdit(null);
     setLinkMode("equipment");
-    setWarehouseOpen(true);
+    setWarehouseOpen(false);
+    setFormNewCategory("");
+    setShowNewSupplierForm(false);
+    setNewSupplier(emptySupplierForm());
     setForm({
       title: "",
       amount: "",
@@ -219,7 +253,7 @@ export default function BudgetPage() {
     setEdit(e);
     const mode = e.storageLocation || e.warehousePartId || e.category === "parts" ? "warehouse" : "equipment";
     setLinkMode(mode);
-    setWarehouseOpen(true);
+    setWarehouseOpen(Boolean(e.warehousePartId || e.storageLocation));
     const linkedPart = e.warehousePartId
       ? warehouseParts.find((p) => p.id === e.warehousePartId)
       : undefined;
@@ -244,25 +278,39 @@ export default function BudgetPage() {
     setOpen(true);
   };
 
+  const toggleNewSupplierForm = () => {
+    if (showNewSupplierForm) {
+      setShowNewSupplierForm(false);
+      setNewSupplier(emptySupplierForm());
+      return;
+    }
+    setNewSupplier({
+      ...emptySupplierForm(),
+      subdivisionIds: form.subdivisionId ? [Number(form.subdivisionId)] : [],
+      equipmentIds: form.equipmentId ? [form.equipmentId] : [],
+    });
+    setShowNewSupplierForm(true);
+  };
+
   const saveSupplierInline = async () => {
     if (!newSupplier.name.trim()) {
       toast({ title: "Укажите название поставщика", variant: "destructive" });
       return;
     }
     try {
-      const subdivisionIds = form.subdivisionId ? [Number(form.subdivisionId)] : [];
-      const equipmentIds = form.equipmentId ? [form.equipmentId] : [];
-      const created = await createSupplier.mutateAsync({
-        name: newSupplier.name.trim(),
-        phone: newSupplier.phone.trim() || null,
-        contactPerson: newSupplier.contactPerson.trim() || null,
-        subdivisionIds,
-        equipmentIds,
-      });
+      const payload = buildSupplierCreatePayload(newSupplier, allEquipment);
+      if (!payload.subdivisionIds.length && form.subdivisionId) {
+        payload.subdivisionIds = [Number(form.subdivisionId)];
+      }
+      if (!payload.equipmentIds.length && form.equipmentId) {
+        const link = buildEquipmentLinkPayload([form.equipmentId], allEquipment);
+        Object.assign(payload, link);
+      }
+      const created = await createSupplier.mutateAsync(payload);
       setForm((f) => ({ ...f, supplierId: String(created.id) }));
-      setSupplierDialogOpen(false);
-      setNewSupplier({ name: "", phone: "", contactPerson: "" });
-      toast({ title: "Поставщик добавлен", description: "Он появится в справочнике поставщиков" });
+      setShowNewSupplierForm(false);
+      setNewSupplier(emptySupplierForm());
+      toast({ title: "Поставщик добавлен", description: "Выбран в этой затрате" });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Ошибка";
       toast({ title: "Не удалось создать поставщика", description: message, variant: "destructive" });
@@ -288,11 +336,27 @@ export default function BudgetPage() {
       return;
     }
 
+    let category = form.category;
+    if (category === "__new__") {
+      if (!formNewCategory.trim()) {
+        toast({ title: "Укажите название новой категории", variant: "destructive" });
+        return;
+      }
+      try {
+        const created = await createBudgetCategory.mutateAsync(formNewCategory.trim());
+        category = created.name;
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : "Ошибка";
+        toast({ title: "Не удалось создать категорию", description: message, variant: "destructive" });
+        return;
+      }
+    }
+
     const subId = form.subdivisionId ? Number(form.subdivisionId) : null;
     const payload = {
       title: form.title.trim(),
       amount: Number(form.amount),
-      category: form.category,
+      category,
       subdivisionId: subId,
       subdivisionName: subId ? subdivisionName(subId) : null,
       equipmentId: form.equipmentId || null,
@@ -315,7 +379,7 @@ export default function BudgetPage() {
     try {
       if (edit) await update.mutateAsync({ id: edit.id, ...payload });
       else await create.mutateAsync(payload);
-      const catLabel = selectedWarehouseCategory?.name ?? warehouseCategoryForBudget(form.category);
+      const catLabel = selectedWarehouseCategory?.name ?? warehouseCategoryForBudget(category);
       toast({
         title: "Сохранено",
         description:
@@ -372,14 +436,35 @@ export default function BudgetPage() {
       </div>
       <div>
         <Label>Категория</Label>
-        <Select value={form.category} onValueChange={(v) => setForm({ ...form, category: v })}>
+        <Select
+          value={form.category}
+          onValueChange={(v) => {
+            setForm({ ...form, category: v });
+            if (v !== "__new__") setFormNewCategory("");
+          }}
+        >
           <SelectTrigger><SelectValue /></SelectTrigger>
           <SelectContent>
             {BUDGET_CATEGORIES.map((c) => (
               <SelectItem key={c.code} value={c.code}>{c.label}</SelectItem>
             ))}
+            {customCategoriesForSelect.map((c) => (
+              <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>
+            ))}
+            {orphanFormCategory && (
+              <SelectItem value={orphanFormCategory}>{orphanFormCategory}</SelectItem>
+            )}
+            <SelectItem value="__new__">+ Новая категория…</SelectItem>
           </SelectContent>
         </Select>
+        {form.category === "__new__" && (
+          <Input
+            className="mt-2"
+            placeholder="Название категории"
+            value={formNewCategory}
+            onChange={(e) => setFormNewCategory(e.target.value)}
+          />
+        )}
       </div>
 
       <SubdivisionPicker
@@ -488,9 +573,14 @@ export default function BudgetPage() {
       <div>
         <div className="flex items-center justify-between gap-2 mb-1">
           <Label>Поставщик</Label>
-          <Button type="button" variant="link" className="h-auto p-0 text-xs" onClick={() => setSupplierDialogOpen(true)}>
+          <Button
+            type="button"
+            variant="link"
+            className="h-auto p-0 text-xs"
+            onClick={toggleNewSupplierForm}
+          >
             <Plus className="h-3 w-3 mr-1" />
-            Новый поставщик
+            {showNewSupplierForm ? "Скрыть форму" : "Новый поставщик"}
           </Button>
         </div>
         <Select value={form.supplierId || "none"} onValueChange={(v) => setForm({ ...form, supplierId: v === "none" ? "" : v })}>
@@ -502,6 +592,27 @@ export default function BudgetPage() {
             ))}
           </SelectContent>
         </Select>
+        {showNewSupplierForm && (
+          <div className="mt-3 rounded-lg border p-3 bg-muted/30 space-y-3">
+            <p className="text-xs text-muted-foreground">
+              Полная карточка поставщика — как на странице «Поставщики». После сохранения он будет выбран в этой
+              затрате, остальные поля затраты не сбросятся.
+            </p>
+            <SupplierFormFields
+              value={newSupplier}
+              onChange={setNewSupplier}
+              equipment={allEquipment}
+            />
+            <div className="flex gap-2 pt-1">
+              <Button type="button" size="sm" onClick={saveSupplierInline} disabled={createSupplier.isPending}>
+                Добавить поставщика
+              </Button>
+              <Button type="button" size="sm" variant="outline" onClick={toggleNewSupplierForm}>
+                Отмена
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
 
       <div>
@@ -644,6 +755,9 @@ export default function BudgetPage() {
                   <SelectItem value="all">Все</SelectItem>
                   {BUDGET_CATEGORIES.map((c) => (
                     <SelectItem key={c.code} value={c.code}>{c.label}</SelectItem>
+                  ))}
+                  {customCategoriesForSelect.map((c) => (
+                    <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -823,50 +937,6 @@ export default function BudgetPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={supplierDialogOpen} onOpenChange={setSupplierDialogOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Building2 className="h-5 w-5" />
-              Новый поставщик
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div>
-              <Label>Название *</Label>
-              <Input
-                value={newSupplier.name}
-                onChange={(e) => setNewSupplier({ ...newSupplier, name: e.target.value })}
-              />
-            </div>
-            <div>
-              <Label>Контактное лицо</Label>
-              <Input
-                value={newSupplier.contactPerson}
-                onChange={(e) => setNewSupplier({ ...newSupplier, contactPerson: e.target.value })}
-              />
-            </div>
-            <div>
-              <Label>Телефон</Label>
-              <Input
-                value={newSupplier.phone}
-                onChange={(e) => setNewSupplier({ ...newSupplier, phone: e.target.value })}
-              />
-            </div>
-            {form.subdivisionId && (
-              <p className="text-xs text-muted-foreground">
-                Будет привязан к подразделению: {subdivisionName(Number(form.subdivisionId))}
-              </p>
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setSupplierDialogOpen(false)}>Отмена</Button>
-            <Button onClick={saveSupplierInline} disabled={createSupplier.isPending}>
-              Добавить
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </>
   );
 }

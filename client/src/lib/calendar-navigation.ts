@@ -19,7 +19,7 @@ export function getCalendarItemHref(
     case "service_request":
       return `/service-requests/${sourceId}`;
     case "remark":
-      return `/remarks?remark=${sourceId}`;
+      return `/tasks?section=remarks`;
     case "inspection":
       return `/daily-inspection-new?inspection=${sourceId}`;
     default:

@@ -25,14 +25,18 @@ function parseSearch(search: string): { scope: MyWorkScope; section: MyWorkSecti
   const params = new URLSearchParams(raw);
   const scopeParam = params.get("scope");
   const scope: MyWorkScope =
-    scopeParam === "created" ? "created" : scopeParam === "all" ? "all" : "assigned";
+    scopeParam === "assigned"
+      ? "assigned"
+      : scopeParam === "created"
+        ? "created"
+        : "all";
   return { scope, section: parseSection(params) };
 }
 
 function buildSearch(scope: MyWorkScope, section: MyWorkSection): string {
   const params = new URLSearchParams();
-  if (scope === "created") params.set("scope", "created");
-  else if (scope === "all") params.set("scope", "all");
+  if (scope === "assigned") params.set("scope", "assigned");
+  else if (scope === "created") params.set("scope", "created");
   if (section !== "tasks") params.set("section", section);
   const qs = params.toString();
   return qs ? `?${qs}` : "";

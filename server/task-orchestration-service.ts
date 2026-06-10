@@ -9,7 +9,12 @@ import {
   type InsertTask,
 } from "@shared/schema";
 import type { TaskSourceType } from "@shared/task-source-constants";
-import { eq, and, or, isNull, desc } from "drizzle-orm";
+import {
+  isServiceRequestVoidStatus,
+  STATUS_LABELS,
+  type ServiceRequestStatus,
+} from "@shared/service-request-constants";
+import { eq, and, or, isNull, desc, gte, lte } from "drizzle-orm";
 
 type AuthUser = { id: number; name: string };
 
@@ -124,13 +129,32 @@ export async function createTaskFromRemark(
   remark: typeof remarks.$inferSelect,
   user: AuthUser
 ): Promise<Task> {
+  if (remark.linkedTaskId) {
+    const linked = await storage.getTask(remark.linkedTaskId);
+    if (linked) return linked;
+  }
+
+  if (remark.type === "inspection" && remark.inspectionId) {
+    const byInspection = await findTaskBySource("inspection", remark.inspectionId);
+    if (byInspection) {
+      await db
+        .update(remarks)
+        .set({ linkedTaskId: byInspection.id, updatedAt: new Date() })
+        .where(eq(remarks.id, remark.id));
+      return byInspection;
+    }
+  }
+
+  const inspectionSourceId =
+    remark.type === "inspection" && remark.inspectionId ? remark.inspectionId : null;
+
   const task = await createLinkedTask({
     title: remark.title,
     description: remark.description,
     priority: remark.priority,
     equipmentId: remark.equipmentId,
     sourceType: remark.type === "inspection" ? "inspection" : "remark",
-    sourceId: remark.id,
+    sourceId: inspectionSourceId ?? remark.id,
     remarkId: remark.id,
     createdBy: user.name,
     createdById: user.id,
@@ -290,6 +314,9 @@ export function taskCompletionBlockedByServiceRequest(
   progress: ServiceRequestWorkProgress
 ): string | null {
   if (!task.serviceRequestId) return null;
+  if (isServiceRequestVoidStatus(progress.requestStatus)) {
+    return null;
+  }
   if (progress.requestComplete && progress.subtasksCompleted >= progress.subtasksTotal) {
     return null;
   }
@@ -338,6 +365,59 @@ export async function tryCompleteParentTaskForServiceRequest(
     comment: `Автозавершение: сервисная заявка #${serviceRequestId} закрыта, все подзадачи выполнены`,
   });
   await issueTaskReservations(rootTask.id, user, rootTask.title);
+  return (await storage.getTask(rootTask.id)) ?? null;
+}
+
+/** Отменяет открытые задачи заявки при статусах «отменено», «дубликат», «отпала необходимость». */
+export async function tryFinalizeTasksForVoidServiceRequest(
+  serviceRequestId: number,
+  voidStatus: ServiceRequestStatus,
+  user: AuthUser
+): Promise<Task | null> {
+  if (!isServiceRequestVoidStatus(voidStatus)) return null;
+
+  const allTasks = await listTasksForServiceRequest(serviceRequestId);
+  const statusLabel = STATUS_LABELS[voidStatus] ?? voidStatus;
+  const historyComment = `Автоотмена: сервисная заявка #${serviceRequestId} — ${statusLabel}`;
+
+  for (const t of allTasks) {
+    if (t.parentTaskId == null) continue;
+    if (t.status === "completed" || t.status === "cancelled") continue;
+
+    await storage.updateTask(t.id, {
+      status: "cancelled",
+      lastModifiedBy: user.name,
+      lastModifiedById: user.id,
+    });
+    await storage.createTaskStatusHistory({
+      taskId: t.id,
+      fromStatus: t.status,
+      toStatus: "cancelled",
+      changedById: user.id,
+      changedByName: user.name,
+      comment: historyComment,
+    });
+  }
+
+  const rootTask = allTasks.find((t) => t.parentTaskId == null);
+  if (!rootTask || rootTask.status === "completed" || rootTask.status === "cancelled") {
+    return null;
+  }
+
+  await storage.updateTask(rootTask.id, {
+    status: "cancelled",
+    lastModifiedBy: user.name,
+    lastModifiedById: user.id,
+  });
+  await storage.createTaskStatusHistory({
+    taskId: rootTask.id,
+    fromStatus: rootTask.status,
+    toStatus: "cancelled",
+    changedById: user.id,
+    changedByName: user.name,
+    comment: historyComment,
+  });
+
   return (await storage.getTask(rootTask.id)) ?? null;
 }
 
@@ -585,7 +665,8 @@ export async function createLinkedTaskFromInspection(
   });
 }
 
-export async function createRemarkFromDailyInspection(
+/** Создаёт или обновляет замечание и связанную задачу по результатам осмотра (без дублей). */
+export async function syncRemarkFromDailyInspection(
   inspection: {
     id: number;
     equipmentId: string;
@@ -597,44 +678,132 @@ export async function createRemarkFromDailyInspection(
   },
   user: AuthUser
 ) {
-  const existing = await db
+  const issuesCount =
+    inspection.issuesCount ?? countIssuesFromCheckResults(inspection.checkResults);
+  const description = (inspection.comments ?? []).filter(Boolean).join("\n").trim();
+
+  const [byInspection] = await db
     .select()
     .from(remarks)
     .where(eq(remarks.inspectionId, inspection.id))
     .limit(1);
 
-  if (existing[0]) {
-    return existing[0];
+  let remark = byInspection;
+
+  if (!remark) {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const end = new Date();
+    end.setHours(23, 59, 59, 999);
+    const [byEquipmentToday] = await db
+      .select()
+      .from(remarks)
+      .where(
+        and(
+          eq(remarks.equipmentId, inspection.equipmentId),
+          eq(remarks.type, "inspection"),
+          gte(remarks.createdAt, start),
+          lte(remarks.createdAt, end)
+        )
+      )
+      .orderBy(desc(remarks.createdAt))
+      .limit(1);
+    remark = byEquipmentToday;
   }
 
-  const description = (inspection.comments ?? []).filter(Boolean).join("\n").trim();
-  if (!description && !(inspection.issuesCount ?? 0)) {
-    return null;
+  if (issuesCount === 0 && !description) {
+    if (remark && remark.status !== "resolved" && remark.status !== "closed") {
+      await storage.updateRemark(String(remark.id), {
+        status: "resolved",
+        resolvedAt: new Date(),
+        resolvedBy: user.name,
+        inspectionId: inspection.id,
+      });
+      if (remark.linkedTaskId) {
+        const task = await storage.getTask(remark.linkedTaskId);
+        if (task && task.status !== "completed") {
+          await storage.updateTask(remark.linkedTaskId, {
+            status: "completed",
+            completedAt: new Date(),
+          });
+        }
+      }
+    }
+    return remark ?? null;
   }
 
   const hasCritical = inspection.checkResults?.includes("critical");
   const priority = hasCritical
     ? "critical"
-    : (inspection.issuesCount ?? 0) > 2
+    : issuesCount > 2
       ? "high"
       : "medium";
 
-  const remark = await storage.createRemark({
+  const remarkPayload = {
     title: `Осмотр: ${inspection.equipmentName}`,
     description: description || "Отклонения при ежедневном осмотре",
     equipmentName: inspection.equipmentName,
     equipmentId: inspection.equipmentId,
     type: "inspection",
     priority,
-    status: "open",
-    reportedBy: inspection.inspectedBy ?? user.name,
-    assignedTo: user.name,
     inspectionId: inspection.id,
-    notes: [],
-  });
+    reportedBy: inspection.inspectedBy ?? user.name,
+    assignedTo: inspection.inspectedBy ?? user.name,
+  };
+
+  let reopened = false;
+  if (remark) {
+    reopened = remark.status === "resolved" || remark.status === "closed";
+    const updated = await storage.updateRemark(String(remark.id), {
+      ...remarkPayload,
+      status: reopened ? "open" : remark.status,
+      resolvedAt: reopened ? null : remark.resolvedAt,
+      resolvedBy: reopened ? null : remark.resolvedBy,
+      updatedAt: new Date(),
+    });
+    remark = updated ?? remark;
+  } else {
+    remark = await storage.createRemark({
+      ...remarkPayload,
+      status: "open",
+      notes: [],
+    });
+  }
+
+  if (remark.linkedTaskId) {
+    const task = await storage.getTask(remark.linkedTaskId);
+    if (task) {
+      await storage.updateTask(remark.linkedTaskId, {
+        title: remark.title,
+        description: remark.description,
+        priority: remark.priority,
+        status:
+          task.status === "completed"
+            ? "completed"
+            : reopened && issuesCount > 0
+              ? "pending"
+              : task.status,
+        completedAt:
+          issuesCount === 0 && task.status !== "completed"
+            ? new Date()
+            : reopened
+              ? null
+              : task.completedAt,
+      });
+      return remark;
+    }
+  }
 
   await createTaskFromRemark(remark, user);
   return remark;
+}
+
+/** @deprecated use syncRemarkFromDailyInspection */
+export async function createRemarkFromDailyInspection(
+  inspection: Parameters<typeof syncRemarkFromDailyInspection>[0],
+  user: AuthUser
+) {
+  return syncRemarkFromDailyInspection(inspection, user);
 }
 
 export async function createMaintenanceFromServiceRequest(

@@ -29,7 +29,10 @@ export const BUDGET_TO_WAREHOUSE_CATEGORY: Record<string, string> = {
 };
 
 export function warehouseCategoryForBudget(budgetCategory: string): string {
-  return BUDGET_TO_WAREHOUSE_CATEGORY[budgetCategory] ?? "Прочее";
+  if (BUDGET_TO_WAREHOUSE_CATEGORY[budgetCategory]) {
+    return BUDGET_TO_WAREHOUSE_CATEGORY[budgetCategory];
+  }
+  return budgetCategory;
 }
 
 export function warehouseAlertLabel(code: string): string {

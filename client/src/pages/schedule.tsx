@@ -44,6 +44,13 @@ import {
   filterItemsBySubdivision,
 } from "@/lib/subdivision-filter";
 import { equipmentOptionLabel } from "@/lib/equipment-label";
+import {
+  equipmentModelFromId,
+  formatServiceRequestCalendarLabel,
+  formatTaskCalendarLabel,
+  serviceRequestCalendarTitle,
+  taskCalendarTitle,
+} from "@/lib/calendar-event-label";
 
 const SCHEDULE_PAGE_TITLE = "План ТО и задач";
 
@@ -618,21 +625,28 @@ export default function Schedule() {
                                   </div>
                                   <div className="space-y-1">
                                     {dayTasks.map((task: any) => {
-                                      const taskEquipment = task.equipmentId ?
-                                        equipment.find((e: any) => e.id === task.equipmentId) : null;
-                                      const equipmentName = taskEquipment ? taskEquipment.name : task.equipmentId;
+                                      const taskEquipment = task.equipmentId
+                                        ? equipment.find((e: any) => e.id === task.equipmentId)
+                                        : null;
+                                      const equipmentModel =
+                                        taskEquipment?.model?.trim() ||
+                                        equipmentModelFromId(task.equipmentId, equipment);
                                       const href = getCalendarItemHref("task", task.id);
                                       const isCompleted = task.status === "completed";
+                                      const chipLabel = formatTaskCalendarLabel(task.id, equipmentModel);
 
                                       const chip = (
                                         <div
                                           className={`text-xs p-1 rounded cursor-pointer hover:opacity-80 transition-opacity ${getCalendarTaskChipClass(task.taskType, isCompleted)}`}
-                                          title={`${taskTypeLabel(task.taskType, task.maintenanceType)}: ${task.title}${equipmentName ? ` — ${equipmentName}` : ""}`}
+                                          title={taskCalendarTitle(
+                                            task.id,
+                                            task.title,
+                                            equipmentModel,
+                                            taskEquipment?.name
+                                          )}
                                           onClick={(e) => e.stopPropagation()}
                                         >
-                                          {task.title.length > 10
-                                            ? `${task.title.substring(0, 10)}...`
-                                            : task.title}
+                                          {chipLabel}
                                         </div>
                                       );
 
@@ -648,14 +662,25 @@ export default function Schedule() {
                                     {daySr.map((sr: any) => {
                                       const href = getCalendarItemHref("service_request", sr.sourceId);
                                       if (!href) return null;
+                                      const equipmentModel =
+                                        sr.equipmentModel?.trim() ||
+                                        equipmentModelFromId(sr.equipmentId, equipment);
+                                      const srLabel = formatServiceRequestCalendarLabel(
+                                        sr.sourceId,
+                                        equipmentModel
+                                      );
                                       return (
                                         <Link key={sr.id} href={href}>
                                           <div
                                             className={`text-xs p-1 rounded cursor-pointer hover:opacity-80 ${getCalendarServiceRequestChipClass(sr.isCompleted)}`}
-                                            title={sr.title}
+                                            title={serviceRequestCalendarTitle(
+                                              sr.sourceId,
+                                              equipmentModel,
+                                              sr.equipmentName
+                                            )}
                                             onClick={(e) => e.stopPropagation()}
                                           >
-                                            {sr.isCompleted ? "✓" : "●"} Заявка #{sr.sourceId}
+                                            {sr.isCompleted ? "✓" : "●"} {srLabel}
                                           </div>
                                         </Link>
                                       );
@@ -792,16 +817,27 @@ export default function Schedule() {
                         (eventFilter !== "service_request" && eventFilter !== "remark")) &&
                         filteredUpcomingTasks.map((task) => {
                           const href = getCalendarItemHref("task", task.id);
+                          const taskEquipment = task.equipmentId
+                            ? equipment.find((e) => e.id === task.equipmentId)
+                            : null;
+                          const equipmentModel =
+                            taskEquipment?.model?.trim() ||
+                            equipmentModelFromId(task.equipmentId, equipment);
                           const card = (
                             <div className="border rounded-lg p-3 dark:border-gray-700 cursor-pointer hover:bg-muted/50">
                               <div className="flex items-start justify-between mb-2 gap-2">
                                 <h4 className="font-medium text-gray-900 dark:text-white">
-                                  {task.title}
+                                  {formatTaskCalendarLabel(task.id, equipmentModel, 40)}
                                 </h4>
                                 <Badge variant="outline">
                                   {taskTypeLabel(task.taskType, task.maintenanceType)}
                                 </Badge>
                               </div>
+                              {task.title && (
+                                <p className="text-xs text-muted-foreground truncate mb-1">
+                                  {task.title}
+                                </p>
+                              )}
                               <div className="text-xs text-gray-500 dark:text-gray-400">
                                 📅{" "}
                                 {task.dueDate &&

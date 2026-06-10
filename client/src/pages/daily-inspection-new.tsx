@@ -58,6 +58,12 @@ function mapStatusToCheckResult(status: InspectionItem['status']): string {
   return status;
 }
 
+function mapCheckResultToStatus(result: string | undefined): InspectionItem["status"] {
+  if (result === "critical") return "critical";
+  if (result === "issue") return "attention";
+  return "ok";
+}
+
 function getDeviatedItems(items: InspectionItem[]): InspectionItem[] {
   return items.filter((item) => item.status === 'attention' || item.status === 'critical');
 }
@@ -93,9 +99,29 @@ function getStatusLabel(status: InspectionItem['status']): string {
   }
 }
 
+function countInspectionIssues(inspection: DailyInspection): number {
+  if (typeof inspection.issuesCount === "number") {
+    return inspection.issuesCount;
+  }
+  if (inspection.checkResults?.length) {
+    return inspection.checkResults.filter((r) => r === "issue" || r === "critical").length;
+  }
+  return 0;
+}
+
+function mapDbWorkingStatus(
+  status: string | null | undefined
+): EquipmentInspection["workingStatus"] {
+  if (status === "not_working" || status === "maintenance" || status === "working") {
+    return status;
+  }
+  return "working";
+}
+
 // Интерфейс для данных осмотра оборудования
 interface EquipmentInspection {
   equipmentId: string;
+  dailyInspectionId?: number;
   status: 'not_started' | 'in_progress' | 'completed';
   inspectedBy?: string;
   inspectionDate?: Date;
@@ -436,6 +462,8 @@ export default function DailyInspection() {
       queryClient.invalidateQueries({ queryKey: ['/api/daily-inspections'] });
       queryClient.invalidateQueries({ queryKey: ['/api/equipment'] });
       queryClient.invalidateQueries({ queryKey: ['/api/remarks'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/tasks'] });
+      window.dispatchEvent(new CustomEvent('dailyInspectionsUpdated'));
     },
   });
 
@@ -503,30 +531,28 @@ export default function DailyInspection() {
 
   // Синхронизация локального состояния с данными из базы данных
   useEffect(() => {
-    if (dailyInspections.length > 0) {
-      const today = format(new Date(), 'yyyy-MM-dd');
-      const todayInspections = dailyInspections.filter((inspection: DailyInspection) => {
-        const inspectionDate = new Date(inspection.inspectionDate);
-        return format(inspectionDate, 'yyyy-MM-dd') === today;
-      });
+    const today = format(new Date(), "yyyy-MM-dd");
+    const todayInspections = dailyInspections.filter((inspection: DailyInspection) => {
+      const inspectionDate = new Date(inspection.inspectionDate);
+      return format(inspectionDate, "yyyy-MM-dd") === today;
+    });
 
-      const inspectionsByEquipment: Record<string, EquipmentInspection> = {};
-      
-      todayInspections.forEach((inspection: DailyInspection) => {
-        inspectionsByEquipment[inspection.equipmentId] = {
-          equipmentId: inspection.equipmentId,
-          status: 'completed',
-          inspectedBy: inspection.inspectedBy,
-          inspectionDate: new Date(inspection.inspectionDate),
-          issues: Array.isArray(inspection.comments) ? inspection.comments.length : 0,
-          workingStatus: inspection.status === 'completed' ? 'working' : 'not_working',
-          notes: Array.isArray(inspection.comments) ? inspection.comments.join('; ') : (inspection.comments || '')
-        };
-      });
+    const inspectionsByEquipment: Record<string, EquipmentInspection> = {};
 
-      setEquipmentInspections(inspectionsByEquipment);
-      console.log('Синхронизированы осмотры из базы данных:', Object.keys(inspectionsByEquipment).length);
-    }
+    todayInspections.forEach((inspection: DailyInspection) => {
+      inspectionsByEquipment[inspection.equipmentId] = {
+        equipmentId: inspection.equipmentId,
+        dailyInspectionId: inspection.id,
+        status: inspection.status === "completed" ? "completed" : "in_progress",
+        inspectedBy: inspection.inspectedBy,
+        inspectionDate: new Date(inspection.inspectionDate),
+        issues: countInspectionIssues(inspection),
+        workingStatus: mapDbWorkingStatus(inspection.workingStatus),
+        notes: Array.isArray(inspection.comments) ? inspection.comments.join("; ") : "",
+      };
+    });
+
+    setEquipmentInspections(inspectionsByEquipment);
   }, [dailyInspections]);
 
   // Сохранение данных осмотров в localStorage при изменении
@@ -613,20 +639,21 @@ export default function DailyInspection() {
     };
 
     try {
-      await createDailyInspectionMutation.mutateAsync(inspectionData);
+      const savedInspection = await createDailyInspectionMutation.mutateAsync(inspectionData);
 
       // Обновляем локальное состояние
-      setEquipmentInspections(prev => ({
+      setEquipmentInspections((prev) => ({
         ...prev,
         [selectedEquipment.id]: {
           equipmentId: selectedEquipment.id,
-          status: 'completed',
-          inspectedBy: user?.name || 'Неизвестно',
+          dailyInspectionId: savedInspection.id,
+          status: "completed",
+          inspectedBy: user?.name || "Неизвестно",
           inspectionDate: new Date(),
           issues: totalIssues,
           workingStatus,
-          notes: commentLines.join('; ')
-        }
+          notes: commentLines.join("; "),
+        },
       }));
 
       // Очищаем сохраненный прогресс после успешного завершения
@@ -662,8 +689,13 @@ export default function DailyInspection() {
 
   // Функция загрузки элементов осмотра из базы данных
   const loadInspectionItemsFromDatabase = (equipment: Equipment, prioritizeProgress: boolean = true) => {
-    console.log('Загружаем элементы осмотра для оборудования:', equipment.id);
-    
+    const todayStr = format(new Date(), "yyyy-MM-dd");
+    const todayInspection = dailyInspections.find(
+      (row) =>
+        row.equipmentId === equipment.id &&
+        format(new Date(row.inspectionDate), "yyyy-MM-dd") === todayStr
+    );
+
     // Загружаем чек-лист из базы данных первым делом
     const checklist = getChecklistByEquipmentId(equipment.id);
     let items: ChecklistItem[] = [];
@@ -685,13 +717,38 @@ export default function DailyInspection() {
     }
 
     // Создаем базовые элементы осмотра на основе чек-листа
-    const inspectionItems: InspectionItem[] = items.map((item, index) => ({
+    const baseItems: InspectionItem[] = items.map((item, index) => ({
       id: `${equipment.id}-${index}`,
       category: item.category,
       item: item.item,
       checked: false,
-      status: 'ok',
+      status: "ok" as const,
     }));
+
+    if (
+      todayInspection?.checkResults?.length &&
+      todayInspection.status === "completed"
+    ) {
+      const fromDb = baseItems.map((baseItem, index) => {
+        const result = todayInspection.checkResults[index];
+        const status = mapCheckResultToStatus(result);
+        return {
+          ...baseItem,
+          checked: result != null && result !== "ok",
+          status,
+        };
+      });
+      setInspectionItems(fromDb);
+      const commentLine = (todayInspection.comments ?? []).find((line) =>
+        line.startsWith("Комментарий:")
+      );
+      if (commentLine) {
+        setGeneralNotes(commentLine.replace(/^Комментарий:\s*/, "").trim());
+      } else {
+        setGeneralNotes("");
+      }
+      return;
+    }
 
     // Если есть сохраненный прогресс, восстанавливаем только статусы и заметки
     if (prioritizeProgress) {
@@ -699,7 +756,7 @@ export default function DailyInspection() {
       
       if (savedProgress && savedProgress.length > 0) {
         // Совмещаем структуру из базы данных с сохраненным прогрессом
-        const mergedItems = inspectionItems.map(baseItem => {
+        const mergedItems = baseItems.map(baseItem => {
           const savedItem = savedProgress.find(saved => 
             saved.category === baseItem.category && saved.item === baseItem.item
           );
@@ -725,7 +782,7 @@ export default function DailyInspection() {
       }
     }
 
-    setInspectionItems(inspectionItems);
+    setInspectionItems(baseItems);
   };
 
   // Обновляем элементы осмотра при выборе оборудования
@@ -733,7 +790,7 @@ export default function DailyInspection() {
     if (selectedEquipment) {
       loadInspectionItemsFromDatabase(selectedEquipment);
     }
-  }, [selectedEquipment, checklists, getChecklistByEquipmentId]);
+  }, [selectedEquipment, checklists, dailyInspections, getChecklistByEquipmentId]);
 
   // Прослушиваем события обновления чек-листов и перезагружаем элементы
   useEffect(() => {
@@ -1204,7 +1261,7 @@ export default function DailyInspection() {
                     <div>
                       <span className="text-sm font-medium">Замечания:</span>
                       <p className="text-lg font-bold text-yellow-600">
-                        {inspectionItems.filter(i => i.status === 'attention').length}
+                        {getDeviatedItems(inspectionItems).length}
                       </p>
                     </div>
                     <div>

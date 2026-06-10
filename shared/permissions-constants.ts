@@ -185,17 +185,61 @@ export interface SensitiveFieldDefinition {
 }
 
 export const DASHBOARD_BLOCK_DEFINITIONS: DashboardBlockDefinition[] = [
-  { key: "dash_calendar_stats", label: "Календарь (запланировано / выполнено / ожидают)", description: "Три карточки календаря вверху панели" },
-  { key: "dash_budget_total", label: "Бюджет (итого)", description: "Карточка «Бюджет (всего)» на панели" },
-  { key: "dash_warehouse_alerts", label: "Склад: требует внимания", description: "Блок оповещений о нехватке запчастей на складе" },
-  { key: "dash_main_metrics", label: "Основные метрики", description: "Оборудование, ТО за месяц, осмотры, пользователи" },
-  { key: "dash_inspection_progress", label: "Прогресс ежедневных осмотров", description: "Большая карточка с прогрессом осмотров" },
-  { key: "dash_tasks_stats", label: "Статистика задач", description: "Карточка со статистикой задач" },
-  { key: "dash_upcoming_tasks", label: "Ближайшие задачи", description: "Список задач на ближайшие 3 дня" },
-  { key: "dash_maintenance_types", label: "ТО по типам", description: "Статистика ТО по типам за месяц" },
-  { key: "dash_equipment_types", label: "Оборудование по типам", description: "Распределение оборудования по категориям" },
-  { key: "dash_recent_activities", label: "Последние события", description: "Лента недавних действий в системе" },
-  { key: "dash_attention", label: "Требует внимания", description: "Неработающее оборудование, замечания, проблемы осмотра" },
+  {
+    key: "dash_calendar_stats",
+    label: "План месяца",
+    description: "Строка «план / готово / ждут» по календарю",
+  },
+  {
+    key: "dash_budget_total",
+    label: "Бюджет",
+    description: "Сумма бюджета на панели",
+  },
+  {
+    key: "dash_warehouse_alerts",
+    label: "Склад: оповещения",
+    description: "Список нехватки запчастей и кнопка в блоке «Внимание»",
+  },
+  {
+    key: "dash_main_metrics",
+    label: "Ключевые показатели",
+    description: "Плитки: оборудование, ТО, ремонт, осмотры, задачи, замечания",
+  },
+  {
+    key: "dash_inspection_progress",
+    label: "Осмотры сегодня",
+    description: "Прогресс и статусы ежедневных осмотров",
+  },
+  {
+    key: "dash_tasks_stats",
+    label: "Статистика задач",
+    description: "Сводка по задачам в правой колонке",
+  },
+  {
+    key: "dash_upcoming_tasks",
+    label: "Ближайшие задачи",
+    description: "Список задач на 3 дня в блоке «План работ»",
+  },
+  {
+    key: "dash_maintenance_types",
+    label: "План ТО и ремонта",
+    description: "Списки ТО и ремонта на 14 дней и разбивка ТО по типам в детализации",
+  },
+  {
+    key: "dash_equipment_types",
+    label: "Оборудование по типам",
+    description: "Детализация: распределение оборудования по категориям",
+  },
+  {
+    key: "dash_recent_activities",
+    label: "События",
+    description: "Лента недавних действий (рядом с детализацией)",
+  },
+  {
+    key: "dash_attention",
+    label: "Блок «Внимание»",
+    description: "Чипы: склад, осмотры, замечания, просрочки",
+  },
 ];
 
 export const MODULE_DEFINITIONS: ModuleDefinition[] = [

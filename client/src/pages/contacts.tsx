@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Helmet } from "react-helmet";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,7 +12,10 @@ import { maskSensitiveValue, useAccessControl } from "@/hooks/use-access-control
 import { useContacts, useContactMutations, useSuppliers } from "@/hooks/use-asset-management";
 import { useEquipmentApi } from "@/hooks/use-equipment-api";
 import { useSubdivisions } from "@/hooks/use-subdivisions";
+import { useSubdivisionFilter } from "@/hooks/use-subdivision-filter";
+import { SubdivisionFilterSelect } from "@/components/subdivision-filter-select";
 import { SubdivisionMultiPicker } from "@/components/subdivision-multi-picker";
+import { filterItemsBySubdivisionIds } from "@/lib/subdivision-filter";
 import { EquipmentMultiPicker } from "@/components/equipment-multi-picker";
 import {
   buildEquipmentLinkPayload,
@@ -35,6 +38,17 @@ export default function ContactsPage() {
   const { data: contacts = [], isLoading } = useContacts();
   const { data: suppliers = [] } = useSuppliers();
   const { data: subdivisions = [] } = useSubdivisions();
+  const {
+    filterValue,
+    setFilterValue,
+    filterSubdivisionId,
+    availableSubdivisions,
+    showFilter,
+  } = useSubdivisionFilter();
+  const filteredContacts = useMemo(
+    () => filterItemsBySubdivisionIds(contacts, filterSubdivisionId),
+    [contacts, filterSubdivisionId]
+  );
   const { allEquipment } = useEquipmentApi();
   const { create, update, remove } = useContactMutations();
   const [open, setOpen] = useState(false);
@@ -137,11 +151,27 @@ export default function ContactsPage() {
           </Button>
         </div>
         <Card>
-          <CardHeader><CardTitle>Список ({contacts.length})</CardTitle></CardHeader>
+          <CardHeader className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+            <CardTitle>Список ({filteredContacts.length})</CardTitle>
+            {showFilter && (
+              <SubdivisionFilterSelect
+                value={filterValue}
+                onChange={setFilterValue}
+                subdivisions={availableSubdivisions}
+                className="w-56"
+              />
+            )}
+          </CardHeader>
           <CardContent className="overflow-x-auto">
             {isLoading ? (
               <p className="text-gray-500">Загрузка…</p>
             ) : (
+              <>
+                {filterSubdivisionId != null && (
+                  <p className="text-sm text-muted-foreground mb-3">
+                    Показано: {filteredContacts.length} из {contacts.length}
+                  </p>
+                )}
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -156,7 +186,7 @@ export default function ContactsPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {contacts.map((c) => (
+                  {filteredContacts.map((c) => (
                     <TableRow key={c.id}>
                       <TableCell className="font-medium">{c.name}</TableCell>
                       <TableCell>{c.company ?? "—"}</TableCell>
@@ -181,6 +211,7 @@ export default function ContactsPage() {
                   ))}
                 </TableBody>
               </Table>
+              </>
             )}
           </CardContent>
         </Card>

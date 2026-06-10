@@ -12,7 +12,12 @@ import { useToast } from "@/hooks/use-toast";
 import { useTeamUsers } from "@/hooks/use-warehouse";
 import { TASK_TYPES, type TaskTypeCode } from "@shared/task-constants";
 import { TASK_STATUS_LABELS, taskStatusLabel } from "@shared/task-status-constants";
-import { SERVICE_REQUEST_TYPES, STATUS_LABELS, type ServiceRequestStatus } from "@shared/service-request-constants";
+import {
+  isServiceRequestVoidStatus,
+  SERVICE_REQUEST_TYPES,
+  STATUS_LABELS,
+  type ServiceRequestStatus,
+} from "@shared/service-request-constants";
 import type { Equipment, TaskCoexecutor, TaskStatusHistory, RequestStatusHistory } from "@shared/schema";
 import {
   Dialog,
@@ -339,8 +344,13 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
   });
 
   const srWorkProgress = serviceRequestHistoryPayload?.workProgress ?? null;
+  const srIsVoid = Boolean(
+    srWorkProgress && isServiceRequestVoidStatus(srWorkProgress.requestStatus)
+  );
   const workViaServiceRequest = Boolean(linkedServiceRequestId);
-  const taskManagedViaServiceRequest = Boolean(linkedServiceRequestId && isRootTask);
+  const taskManagedViaServiceRequest = Boolean(
+    linkedServiceRequestId && isRootTask && !srIsVoid
+  );
 
   const canViewTaskDetails = Boolean(
     editingTask &&
@@ -781,19 +791,19 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    if (
-      editingTask &&
-      data.status === "completed" &&
+    const srBlocksTaskCompletion =
       linkedServiceRequestId &&
       srWorkProgress &&
+      !isServiceRequestVoidStatus(srWorkProgress.requestStatus) &&
       (!srWorkProgress.requestComplete ||
-        srWorkProgress.subtasksCompleted < srWorkProgress.subtasksTotal)
-    ) {
+        srWorkProgress.subtasksCompleted < srWorkProgress.subtasksTotal);
+
+    if (editingTask && data.status === "completed" && srBlocksTaskCompletion) {
       toast({
         title: "Завершение через заявку",
         description:
-          srWorkProgress.subtasksTotal > srWorkProgress.subtasksCompleted
-            ? `Завершите подзадачи в заявке #${linkedServiceRequestId} (${srWorkProgress.subtasksCompleted}/${srWorkProgress.subtasksTotal})`
+          srWorkProgress!.subtasksTotal > srWorkProgress!.subtasksCompleted
+            ? `Завершите подзадачи в заявке #${linkedServiceRequestId} (${srWorkProgress!.subtasksCompleted}/${srWorkProgress!.subtasksTotal})`
             : `Закройте сервисную заявку #${linkedServiceRequestId} — задача завершится автоматически`,
         variant: "destructive",
       });
@@ -967,6 +977,11 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
                       Завершение — через сервисную заявку
                     </span>
                   )}
+                  {srIsVoid && isRootTask && (
+                    <span className="text-xs text-muted-foreground">
+                      Заявка закрыта без выполнения — задачу можно завершить вручную
+                    </span>
+                  )}
                 </div>
                 {isCompletingTask && canModify && (
                   <div className="rounded-md border border-green-200 bg-green-50/50 dark:bg-green-950/20 p-3 max-w-2xl">
@@ -1083,9 +1098,11 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
                   <div>
                     <p className="text-sm font-medium">Сервисная заявка #{linkedServiceRequestId}</p>
                     <p className="text-xs text-muted-foreground">
-                      {taskManagedViaServiceRequest
-                        ? "Подзадачи и дальнейшая работа ведутся в заявке. Родительская задача закроется после закрытия заявки."
-                        : "Задача связана с сервисной заявкой"}
+                      {srIsVoid
+                        ? `Статус заявки: ${STATUS_LABELS[srWorkProgress!.requestStatus as ServiceRequestStatus] ?? srWorkProgress!.requestStatus}. Связанные задачи можно завершить вручную.`
+                        : taskManagedViaServiceRequest
+                          ? "Подзадачи и дальнейшая работа ведутся в заявке. Родительская задача закроется после закрытия заявки."
+                          : "Задача связана с сервисной заявкой"}
                     </p>
                   </div>
                   <Button

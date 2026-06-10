@@ -3,6 +3,7 @@ import { storage } from "./storage";
 import {
   canManageSubdivisionId,
   isSystemAdmin,
+  normalizeExtraSubdivisionIds,
   resolveManagedSubdivisionIds,
 } from "@shared/subdivision-scope";
 import { isSubdivisionAdminRole } from "@shared/subdivision-admin-roles";
@@ -96,6 +97,16 @@ export function sanitizeUserWritePayload(actor: User, data: Record<string, unkno
       throw new Error("Подразделение вне вашей зоны управления");
     }
     sanitized.subdivisionId = subId;
+  }
+
+  if (sanitized.extraSubdivisionIds !== undefined) {
+    const extras = normalizeExtraSubdivisionIds(sanitized.extraSubdivisionIds);
+    for (const id of extras) {
+      if (!canManageSubdivisionId(actor, id)) {
+        throw new Error("Дополнительное подразделение вне вашей зоны управления");
+      }
+    }
+    sanitized.extraSubdivisionIds = extras;
   }
 
   return sanitized;

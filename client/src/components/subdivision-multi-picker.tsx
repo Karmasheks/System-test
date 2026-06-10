@@ -8,6 +8,8 @@ type Props = {
   disabled?: boolean;
   label?: string;
   description?: string;
+  /** Если задано — показывать только эти подразделения */
+  allowedIds?: number[];
 };
 
 export function SubdivisionMultiPicker({
@@ -16,8 +18,12 @@ export function SubdivisionMultiPicker({
   disabled,
   label = "Подразделения",
   description,
+  allowedIds,
 }: Props) {
   const { data: subdivisions = [] } = useSubdivisions();
+  const visible = allowedIds?.length
+    ? subdivisions.filter((s) => allowedIds.includes(s.id))
+    : subdivisions;
   const selected = new Set(value);
 
   const toggle = (id: number, checked: boolean) => {
@@ -32,10 +38,10 @@ export function SubdivisionMultiPicker({
       <Label>{label}</Label>
       {description && <p className="text-xs text-muted-foreground">{description}</p>}
       <div className="grid gap-2 sm:grid-cols-2 max-h-36 overflow-y-auto border rounded-md p-2">
-        {subdivisions.length === 0 ? (
+        {visible.length === 0 ? (
           <p className="text-sm text-muted-foreground col-span-2">Подразделения не найдены</p>
         ) : (
-          subdivisions.map((s) => (
+          visible.map((s) => (
             <label key={s.id} className="flex items-center gap-2 text-sm cursor-pointer min-w-0">
               <Checkbox
                 checked={selected.has(s.id)}

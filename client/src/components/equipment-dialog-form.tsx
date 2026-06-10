@@ -4,6 +4,7 @@ import { DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { EQUIPMENT_STATUSES, EQUIPMENT_STATUS_LABELS } from "@shared/equipment-status-constants";
 
 type MaintenancePeriodOption = {
   value: string;
@@ -139,9 +140,11 @@ export default function EquipmentDialogForm({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="active">Активно</SelectItem>
-              <SelectItem value="maintenance">ТО</SelectItem>
-              <SelectItem value="inactive">Неактивно</SelectItem>
+              {EQUIPMENT_STATUSES.filter((code) => code !== "decommissioned").map((code) => (
+                <SelectItem key={code} value={code}>
+                  {EQUIPMENT_STATUS_LABELS[code]}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>

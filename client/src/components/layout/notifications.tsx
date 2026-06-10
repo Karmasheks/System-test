@@ -288,7 +288,9 @@ export function NotificationsDropdown() {
           type: 'remark',
           title: remark.status === 'in_progress' ? 'Замечание в работе' : 'Открытое замечание',
           description: `${remark.equipmentName} - ${(remark.description ?? '').substring(0, 50)}${(remark.description?.length ?? 0) > 50 ? '...' : ''}`,
-          link: linkedTaskId ? `/tasks?task=${linkedTaskId}` : '/tasks',
+          link: linkedTaskId
+            ? `/tasks?task=${linkedTaskId}`
+            : "/tasks?section=remarks",
           equipmentId: remark.equipmentId,
           priority,
           createdAt: new Date(remark.createdAt),

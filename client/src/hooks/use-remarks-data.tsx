@@ -16,6 +16,8 @@ export interface Remark {
   resolvedAt?: Date;
   notes: string[];
   source?: 'daily_inspection' | 'maintenance' | 'manual' | string;
+  linkedTaskId?: number | null;
+  inspectionId?: number | null;
 }
 
 interface RemarksContextType {

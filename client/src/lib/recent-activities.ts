@@ -30,6 +30,7 @@ export function buildRecentActivities(params: {
     title?: string;
     description?: string;
     status: string;
+    linkedTaskId?: number | null;
     createdAt: string | Date;
     updatedAt?: string | Date;
   }>;
@@ -62,7 +63,9 @@ export function buildRecentActivities(params: {
       time: toTime(ts),
       icon: AlertTriangle,
       color: "text-amber-600 dark:text-amber-400",
-      link: "/remarks",
+      link: remark.linkedTaskId
+        ? `/tasks?task=${remark.linkedTaskId}`
+        : "/tasks?section=remarks",
       timestamp: ts,
     });
   }

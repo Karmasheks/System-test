@@ -7,27 +7,25 @@ import { emptyTaskStats, type Task, type TaskStats } from "@/types/api";
 import { useAuth } from "@/hooks/use-auth";
 import { useAccessControl } from "@/hooks/use-access-control";
 import { useToast } from "@/hooks/use-toast";
-import { useRemarksData } from "@/hooks/use-remarks-data";
+import { useRemarksData, type Remark } from "@/hooks/use-remarks-data";
 import { useDailyInspections } from "@/hooks/use-daily-inspections";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { 
-  Settings, 
-  Calendar, 
-  Clock, 
-  CheckCircle, 
-  AlertTriangle, 
-  Users, 
+import {
+  Settings,
+  Calendar,
+  Clock,
+  CheckCircle,
+  AlertTriangle,
   Wrench,
   Eye,
-  TrendingUp,
   Activity,
-  BarChart3,
-  XCircle,
-  Package
+  Package,
+  type LucideIcon,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { format, startOfMonth, endOfMonth, isWithinInterval, addDays } from "date-fns";
 import { ru } from "date-fns/locale";
 import { useCalendarStats, useBudgetSummary } from "@/hooks/use-asset-management";
@@ -62,6 +60,130 @@ function computeTaskStats(tasks: Task[]): TaskStats {
       return new Date(t.dueDate) < new Date();
     }).length,
   };
+}
+
+function isRemarkOpen(status: Remark["status"]) {
+  return status === "open" || status === "in_progress";
+}
+
+function remarkMatchesInspection(
+  remark: Remark,
+  inspection: { id?: number; equipmentId: string }
+) {
+  return (
+    remark.inspectionId === inspection.id ||
+    (remark.inspectionId == null && remark.equipmentId === inspection.equipmentId)
+  );
+}
+
+/** Open inspection issues: prefer live remark status, not stale inspection.issuesCount */
+function deriveInspectionIssuesFromRemarks(
+  inspection: {
+    id?: number;
+    equipmentId: string;
+    issues?: number;
+    issuesCount?: number;
+    checkResults?: string[];
+  },
+  remarks: Remark[]
+): number {
+  const inspectionRemarks = remarks.filter(
+    (r) => r.type === "inspection" && remarkMatchesInspection(r, inspection)
+  );
+  const openCount = inspectionRemarks.filter((r) => isRemarkOpen(r.status)).length;
+  if (openCount > 0) return openCount;
+  if (inspectionRemarks.length > 0) return 0;
+
+  if (typeof inspection.issuesCount === "number" && inspection.issuesCount > 0) {
+    return inspection.issuesCount;
+  }
+  if (inspection.issues != null && inspection.issues > 0) return inspection.issues;
+  if (inspection.checkResults?.length) {
+    return inspection.checkResults.filter((r) => r === "issue" || r === "critical").length;
+  }
+  return 0;
+}
+
+function DashKpi({
+  icon: Icon,
+  label,
+  value,
+  hint,
+  onClick,
+  className,
+  valueClassName,
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: string | number;
+  hint?: string;
+  onClick?: () => void;
+  className?: string;
+  valueClassName?: string;
+}) {
+  const Wrapper = onClick ? "button" : "div";
+  return (
+    <Wrapper
+      type={onClick ? "button" : undefined}
+      onClick={onClick}
+      className={cn(
+        "rounded-lg border bg-card p-3 min-w-0",
+        onClick && "hover:bg-accent/50 transition-colors text-left w-full",
+        className
+      )}
+    >
+      <div className="flex items-center gap-1.5 mb-1">
+        <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <span className="text-[11px] font-medium text-muted-foreground truncate">{label}</span>
+      </div>
+      <p className={cn("text-lg font-bold tabular-nums leading-tight", valueClassName)}>{value}</p>
+      {hint && <p className="text-[10px] text-muted-foreground mt-0.5 truncate">{hint}</p>}
+    </Wrapper>
+  );
+}
+
+function ScheduledWorkRow({
+  task,
+  equipmentLabel,
+  overdue,
+  onClick,
+}: {
+  task: Task;
+  equipmentLabel: string;
+  overdue?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "w-full text-left p-2 rounded-md border text-sm transition-colors hover:bg-accent/40",
+        overdue && "border-red-200 bg-red-50/80 dark:bg-red-950/20 dark:border-red-900"
+      )}
+    >
+      <div className="flex justify-between gap-2">
+        <div className="min-w-0">
+          <p className="font-medium truncate">{task.title}</p>
+          <p className="text-xs text-muted-foreground truncate">
+            {equipmentLabel} · {taskTypeLabel(task.taskType, task.maintenanceType)}
+          </p>
+        </div>
+        <div className="shrink-0 text-right">
+          <p className="text-xs tabular-nums">
+            {format(new Date(task.dueDate!), "dd.MM", { locale: ru })}
+          </p>
+          {overdue ? (
+            <Badge variant="destructive" className="text-[10px] mt-0.5">Просрочено</Badge>
+          ) : (
+            <Badge variant="outline" className="text-[10px] mt-0.5">
+              {taskStatusLabel(task.status)}
+            </Badge>
+          )}
+        </div>
+      </div>
+    </button>
+  );
 }
 
 export default function Dashboard() {
@@ -101,19 +223,6 @@ export default function Dashboard() {
   const [resolveAlertTarget, setResolveAlertTarget] = useState<WarehouseAlertWithPart | null>(null);
   const [resolveForm, setResolveForm] = useState({ resolutionType: "restocked", comment: "" });
 
-  const { data: usersList = [] } = useQuery<{ id: number; subdivisionId?: number | null }[]>({
-    queryKey: ["/api/users"],
-    queryFn: async () => {
-      const token = localStorage.getItem("token");
-      const res = await fetch("/api/users", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) return [];
-      return res.json();
-    },
-    enabled: !!user,
-  });
-
   const scopedEquipment = useMemo(
     () => filterItemsBySubdivision(getActiveEquipment(), filterSubdivisionId),
     [equipmentList, filterSubdivisionId, getActiveEquipment]
@@ -152,6 +261,11 @@ export default function Dashboard() {
     [scopedTasks]
   );
 
+  const repairTasks = useMemo(
+    () => scopedTasks.filter((t) => t.taskType === "repair" && t.dueDate),
+    [scopedTasks]
+  );
+
   const scopedServiceRequests = useMemo(
     () => filterItemsBySubdivision(serviceRequests, filterSubdivisionId),
     [serviceRequests, filterSubdivisionId]
@@ -166,11 +280,6 @@ export default function Dashboard() {
       ),
     [warehouseAlerts, filterSubdivisionId]
   );
-
-  const scopedUsers = useMemo(() => {
-    if (filterSubdivisionId == null) return usersList;
-    return usersList.filter((u) => u.subdivisionId === filterSubdivisionId);
-  }, [usersList, filterSubdivisionId]);
 
   const scopedCalStats = useMemo(() => {
     if (filterSubdivisionId == null && calStats) return calStats;
@@ -257,8 +366,33 @@ export default function Dashboard() {
         return date >= now && date <= horizon && task.status !== "completed";
       })
       .sort((a, b) => new Date(a.dueDate!).getTime() - new Date(b.dueDate!).getTime())
-      .slice(0, 6);
+      .slice(0, 4);
   }, [maintenanceTasks]);
+
+  const overdueRepairs = useMemo(() => {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    return repairTasks
+      .filter((task) => {
+        if (task.status === "completed" || task.status === "cancelled") return false;
+        return new Date(task.dueDate!) < now;
+      })
+      .sort((a, b) => new Date(a.dueDate!).getTime() - new Date(b.dueDate!).getTime())
+      .slice(0, 3);
+  }, [repairTasks]);
+
+  const upcomingRepairs = useMemo(() => {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const horizon = addDays(now, 14);
+    return repairTasks
+      .filter((task) => {
+        const date = new Date(task.dueDate!);
+        return date >= now && date <= horizon && task.status !== "completed";
+      })
+      .sort((a, b) => new Date(a.dueDate!).getTime() - new Date(b.dueDate!).getTime())
+      .slice(0, 4);
+  }, [repairTasks]);
 
   const todayInspectionsInScope = useMemo(() => {
     const today = getTodayInspections();
@@ -268,12 +402,6 @@ export default function Dashboard() {
   const dailyInspectionData = useMemo(() => {
     const equipmentTotal = scopedEquipment.length;
     const uniqueEquipmentIds = new Set(todayInspectionsInScope.map((i) => i.equipmentId));
-    const deriveIssues = (inspection: (typeof todayInspectionsInScope)[0]) => {
-      if (inspection.issues != null && inspection.issues > 0) return inspection.issues;
-      const results = (inspection as { checkResults?: string[] }).checkResults;
-      if (results?.length) return results.filter((r) => r === "issue" || r === "critical").length;
-      return 0;
-    };
     const deriveWorking = (inspection: (typeof todayInspectionsInScope)[0]) => {
       const ws = (inspection as { workingStatus?: string }).workingStatus;
       if (ws) return ws;
@@ -289,11 +417,14 @@ export default function Dashboard() {
       notWorking: todayInspectionsInScope.filter((i) => deriveWorking(i) === "not_working").length,
       onMaintenance: todayInspectionsInScope.filter((i) => deriveWorking(i) === "maintenance").length,
       working: todayInspectionsInScope.filter((i) => deriveWorking(i) === "working").length,
-      issues: todayInspectionsInScope.reduce((sum, i) => sum + deriveIssues(i), 0),
+      issues: todayInspectionsInScope.reduce(
+        (sum, i) => sum + deriveInspectionIssuesFromRemarks(i, scopedRemarks),
+        0
+      ),
       progress:
         equipmentTotal > 0 ? Math.round((totalInspected / equipmentTotal) * 100) : 0,
     };
-  }, [todayInspectionsInScope, scopedEquipment.length]);
+  }, [todayInspectionsInScope, scopedEquipment.length, scopedRemarks]);
 
   useEffect(() => {
     const handleTaskChange = () => {
@@ -346,6 +477,7 @@ export default function Dashboard() {
     total: activeEquipment.length,
     active: activeEquipment.filter((eq) => eq.status === "active").length,
     maintenance: activeEquipment.filter((eq) => eq.status === "maintenance").length,
+    repair: activeEquipment.filter((eq) => eq.status === "repair").length,
     inactive: activeEquipment.filter((eq) => eq.status === "inactive").length,
     categories: typeCounts,
   };
@@ -357,19 +489,46 @@ export default function Dashboard() {
     isWithinInterval(new Date(task.dueDate!), { start: monthStart, end: monthEnd })
   );
 
+  const thisMonthRepairs = repairTasks.filter((task) =>
+    isWithinInterval(new Date(task.dueDate!), { start: monthStart, end: monthEnd })
+  );
+
+  const openRepairRequests = scopedServiceRequests.filter(
+    (r) =>
+      (r.requestType === "repair" || r.requestType === "diagnostics") &&
+      !["closed", "cancelled", "duplicate", "not_needed"].includes(r.status)
+  );
+
+  const overdueWorkCount =
+    maintenanceTasks.filter((t) => {
+      if (t.status === "completed" || t.status === "cancelled" || !t.dueDate) return false;
+      const now = new Date();
+      now.setHours(0, 0, 0, 0);
+      return new Date(t.dueDate) < now;
+    }).length +
+    repairTasks.filter((t) => {
+      if (t.status === "completed" || t.status === "cancelled" || !t.dueDate) return false;
+      const now = new Date();
+      now.setHours(0, 0, 0, 0);
+      return new Date(t.dueDate) < now;
+    }).length;
+
   const maintenanceTypesThisMonth = thisMonthMaintenance.reduce<Record<string, number>>((acc, task) => {
     const typeLabel = taskTypeLabel(task.taskType, task.maintenanceType);
     acc[typeLabel] = (acc[typeLabel] || 0) + 1;
     return acc;
   }, {});
 
-  const usersData = {
-    total: scopedUsers.length,
-    onlineToday: scopedUsers.length > 0 ? 1 : 0,
-  };
-
-  const openRemarksCount = scopedRemarks.filter((r) => r.status === "open").length;
-  const criticalRemarksCount = scopedRemarks.filter((r) => r.priority === "critical" && r.status === "open").length;
+  const openRemarksCount = scopedRemarks.filter((r) => isRemarkOpen(r.status)).length;
+  const openNonInspectionRemarksCount = scopedRemarks.filter(
+    (r) => r.type !== "inspection" && isRemarkOpen(r.status)
+  ).length;
+  const criticalRemarksCount = scopedRemarks.filter(
+    (r) =>
+      r.priority === "critical" &&
+      r.status !== "resolved" &&
+      r.status !== "closed"
+  ).length;
 
   const recentActivities = buildRecentActivities({
     remarks: scopedRemarks,
@@ -379,8 +538,33 @@ export default function Dashboard() {
       inspected: dailyInspectionData.inspected,
       total: dailyInspectionData.total,
     },
-    limit: 8,
+    limit: 6,
   });
+
+  const hasAttentionAlerts =
+    warehouseAlertCount > 0 ||
+    dailyInspectionData.notWorking > 0 ||
+    dailyInspectionData.issues > 0 ||
+    openRemarksCount > 0 ||
+    scopedTaskStats.overdue > 0 ||
+    overdueWorkCount > 0;
+
+  const taskEquipmentLabel = (equipmentId: string | null | undefined) =>
+    equipmentId ? equipmentNameById.get(equipmentId) ?? equipmentId : "Без оборудования";
+
+  const showPlanWork =
+    isDashboardBlockVisible("dash_maintenance_types") ||
+    isDashboardBlockVisible("dash_upcoming_tasks");
+  const showMaintenanceTypesDetail =
+    isDashboardBlockVisible("dash_maintenance_types") &&
+    Object.keys(maintenanceTypesThisMonth).length > 0;
+  const showEquipmentTypesDetail = isDashboardBlockVisible("dash_equipment_types");
+  const showDetailsBlock = showEquipmentTypesDetail || showMaintenanceTypesDetail;
+  const showRecentActivities = isDashboardBlockVisible("dash_recent_activities");
+  const showInspection = isDashboardBlockVisible("dash_inspection_progress");
+  const showTasksStats = isDashboardBlockVisible("dash_tasks_stats");
+  const showLeftColumn = showPlanWork || showDetailsBlock || showRecentActivities;
+  const showRightColumn = showInspection || showTasksStats;
 
   return (
     <>
@@ -388,591 +572,567 @@ export default function Dashboard() {
         <title>Панель управления - Система управления оборудованием</title>
         <meta name="description" content="Общий обзор состояния оборудования, технического обслуживания и ежедневных осмотров" />
       </Helmet>
-      <div className="p-4 lg:p-6 w-full min-w-0">
-        <div className="mb-8 flex flex-wrap justify-between items-start gap-4">
+      <div className="p-4 lg:p-5 w-full min-w-0 max-w-[1600px] mx-auto space-y-4">
+        <div className="flex flex-wrap justify-between items-start gap-3">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">
-              Панель управления
-            </h1>
-            <p className="text-gray-600 dark:text-gray-400 mt-2">
-              Добро пожаловать, {user.name}! Сегодня {format(new Date(), "d MMMM yyyy", { locale: ru })}
+            <h1 className="text-2xl font-bold tracking-tight">Панель управления</h1>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              {user.name} · {format(new Date(), "d MMMM yyyy", { locale: ru })}
+              {filterSubdivisionId != null && ` · ${filterLabel}`}
             </p>
-            {filterSubdivisionId != null && (
-              <p className="text-sm text-primary-600 dark:text-primary-400 mt-1">
-                Фильтр: {filterLabel}
-              </p>
-            )}
           </div>
-          <div className="flex flex-wrap items-end gap-3">
+          <div className="flex flex-wrap items-center gap-2">
             {isAdmin && <SubdivisionsPanel />}
             {showFilter && (
               <SubdivisionFilterSelect
                 value={filterValue}
                 onChange={setFilterValue}
                 subdivisions={availableSubdivisions}
-                className="w-52"
+                className="w-48"
               />
             )}
           </div>
         </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-        {isDashboardBlockVisible("dash_calendar_stats") && (
-          <>
-            <Card><CardContent className="pt-4"><p className="text-xs text-gray-500">Календарь: запланировано</p><p className="text-xl font-bold">{scopedCalStats?.planned ?? 0}</p></CardContent></Card>
-            <Card><CardContent className="pt-4"><p className="text-xs text-gray-500">Календарь: выполнено</p><p className="text-xl font-bold text-green-600">{scopedCalStats?.completed ?? 0}</p></CardContent></Card>
-            <Card><CardContent className="pt-4"><p className="text-xs text-gray-500">Календарь: ожидают</p><p className="text-xl font-bold text-orange-600">{scopedCalStats?.pending ?? 0}</p></CardContent></Card>
-          </>
+        {isDashboardBlockVisible("dash_main_metrics") && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+            <DashKpi
+              icon={Settings}
+              label="Оборудование"
+              value={equipmentData.total}
+              hint={`${equipmentData.active} активно`}
+              onClick={() => setLocation("/equipment")}
+            />
+            <DashKpi
+              icon={Calendar}
+              label="На ТО"
+              value={equipmentData.maintenance}
+              valueClassName="text-emerald-600"
+              onClick={() => setLocation("/equipment")}
+            />
+            <DashKpi
+              icon={Wrench}
+              label="В ремонте"
+              value={equipmentData.repair}
+              valueClassName="text-rose-600"
+              hint={openRepairRequests.length > 0 ? `${openRepairRequests.length} заявок` : undefined}
+              onClick={() => setLocation("/service-requests")}
+            />
+            <DashKpi
+              icon={Eye}
+              label="Осмотры"
+              value={`${dailyInspectionData.inspected}/${dailyInspectionData.total}`}
+              hint={`${dailyInspectionData.progress}% сегодня`}
+              onClick={() => setLocation("/daily-inspection")}
+            />
+            <DashKpi
+              icon={CheckCircle}
+              label="Задачи"
+              value={scopedTaskStats.pending + scopedTaskStats.inProgress}
+              hint={
+                scopedTaskStats.overdue > 0
+                  ? `${scopedTaskStats.overdue} просрочено`
+                  : `${scopedTaskStats.completed} выполнено`
+              }
+              valueClassName={scopedTaskStats.overdue > 0 ? "text-red-600" : undefined}
+              onClick={() => setLocation("/tasks")}
+            />
+            <DashKpi
+              icon={AlertTriangle}
+              label="Замечания"
+              value={openRemarksCount}
+              hint={criticalRemarksCount > 0 ? `${criticalRemarksCount} критичных` : "открыты"}
+              valueClassName={openRemarksCount > 0 ? "text-amber-600" : undefined}
+              onClick={() => setLocation("/tasks?section=remarks")}
+            />
+          </div>
         )}
-        {isDashboardBlockVisible("dash_budget_total") && (
-          <Card><CardContent className="pt-4"><p className="text-xs text-gray-500">Бюджет (всего)</p><p className="text-xl font-bold">{(budgetSummary?.total ?? 0).toLocaleString("ru")} ₽</p></CardContent></Card>
-        )}
-      </div>
 
-      {isDashboardBlockVisible("dash_warehouse_alerts") && warehouseAlertCount > 0 && (
-        <Card className="mb-8 border-amber-300 dark:border-amber-700">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-amber-800 dark:text-amber-200">
-              <Package className="w-5 h-5" />
-              Склад: требует внимания ({warehouseAlertCount})
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {scopedWarehouseAlerts.slice(0, 8).map((alert) => (
-              <div
-                key={alert.id}
-                className={`flex flex-wrap items-center justify-between gap-2 p-3 rounded border ${
-                  alert.alertType === "zero_stock"
-                    ? "bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-800"
-                    : "bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-800"
-                }`}
-              >
-                <div>
-                  <p className="font-medium">{alert.part?.name}</p>
-                  <p className="text-sm text-muted-foreground">
-                    {warehouseAlertLabel(alert.alertType)} · остаток: {alert.part?.quantity ?? 0} · мин: {alert.part?.minStock ?? 0}
+        {(isDashboardBlockVisible("dash_calendar_stats") ||
+          isDashboardBlockVisible("dash_budget_total")) && (
+          <div className="flex flex-wrap gap-2">
+            {isDashboardBlockVisible("dash_calendar_stats") && (
+              <Card className="flex-1 min-w-[200px]">
+                <CardContent className="py-3 px-4 flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Calendar className="h-4 w-4" />
+                    <span className="font-medium text-foreground">План {monthLabel}</span>
+                  </div>
+                  <div className="flex gap-4 text-sm tabular-nums">
+                    <span>
+                      <span className="text-muted-foreground">план </span>
+                      <strong>{scopedCalStats?.planned ?? 0}</strong>
+                    </span>
+                    <span>
+                      <span className="text-muted-foreground">готово </span>
+                      <strong className="text-green-600">{scopedCalStats?.completed ?? 0}</strong>
+                    </span>
+                    <span>
+                      <span className="text-muted-foreground">ждут </span>
+                      <strong className="text-orange-600">{scopedCalStats?.pending ?? 0}</strong>
+                    </span>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+            {isDashboardBlockVisible("dash_budget_total") && (
+              <Card className="min-w-[140px]">
+                <CardContent className="py-3 px-4">
+                  <p className="text-[11px] text-muted-foreground">Бюджет</p>
+                  <p className="text-lg font-bold tabular-nums">
+                    {(budgetSummary?.total ?? 0).toLocaleString("ru")} ₽
                   </p>
-                </div>
-                <div className="flex gap-2">
-                  <Button size="sm" variant="outline" onClick={() => setLocation("/warehouse")}>
-                    Открыть склад
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        )}
+
+        {isDashboardBlockVisible("dash_attention") && hasAttentionAlerts && (
+          <Card className="border-amber-200 dark:border-amber-900 bg-amber-50/40 dark:bg-amber-950/20">
+            <CardContent className="py-3 px-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-semibold text-amber-800 dark:text-amber-200 flex items-center gap-1 mr-1">
+                  <AlertTriangle className="h-3.5 w-3.5" />
+                  Внимание
+                </span>
+                {warehouseAlertCount > 0 && isDashboardBlockVisible("dash_warehouse_alerts") && (
+                  <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setLocation("/warehouse")}>
+                    Склад: {warehouseAlertCount}
                   </Button>
+                )}
+                {dailyInspectionData.notWorking > 0 && (
                   <Button
                     size="sm"
-                    onClick={() => {
-                      setResolveAlertTarget(alert);
-                      setResolveForm({ resolutionType: "restocked", comment: "" });
-                    }}
+                    variant="outline"
+                    className="h-7 text-xs border-red-200 text-red-700"
+                    onClick={() => setLocation("/daily-inspection")}
                   >
-                    Решено
+                    Не работает: {dailyInspectionData.notWorking}
                   </Button>
+                )}
+                {dailyInspectionData.issues > 0 && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs"
+                    onClick={() => setLocation("/tasks?section=remarks")}
+                  >
+                    Проблемы осмотра: {dailyInspectionData.issues}
+                  </Button>
+                )}
+                {openNonInspectionRemarksCount > 0 && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs"
+                    onClick={() => setLocation("/tasks?section=remarks")}
+                  >
+                    Замечания: {openNonInspectionRemarksCount}
+                  </Button>
+                )}
+                {scopedTaskStats.overdue > 0 && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs border-red-200 text-red-700"
+                    onClick={() => setLocation("/tasks")}
+                  >
+                    Просроченные задачи: {scopedTaskStats.overdue}
+                  </Button>
+                )}
+                {overdueWorkCount > 0 && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs border-red-200 text-red-700"
+                    onClick={() => setLocation("/schedule")}
+                  >
+                    Просрочено ТО/ремонт: {overdueWorkCount}
+                  </Button>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {isDashboardBlockVisible("dash_warehouse_alerts") && warehouseAlertCount > 0 && (
+          <Card className="border-amber-200 dark:border-amber-800">
+            <CardHeader className="py-3 px-4">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <Package className="h-4 w-4" />
+                Склад ({warehouseAlertCount})
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="px-4 pb-3 space-y-1.5">
+              {scopedWarehouseAlerts.slice(0, 4).map((alert) => (
+                <div
+                  key={alert.id}
+                  className={cn(
+                    "flex flex-wrap items-center justify-between gap-2 p-2 rounded-md border text-sm",
+                    alert.alertType === "zero_stock"
+                      ? "bg-red-50 border-red-200 dark:bg-red-950/30"
+                      : "bg-amber-50 border-amber-200 dark:bg-amber-950/30"
+                  )}
+                >
+                  <div className="min-w-0">
+                    <p className="font-medium truncate">{alert.part?.name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {warehouseAlertLabel(alert.alertType)} · {alert.part?.quantity ?? 0} / мин {alert.part?.minStock ?? 0}
+                    </p>
+                  </div>
+                  <div className="flex gap-1 shrink-0">
+                    <Button size="sm" variant="ghost" className="h-7" onClick={() => setLocation("/warehouse")}>
+                      Склад
+                    </Button>
+                    <Button
+                      size="sm"
+                      className="h-7"
+                      onClick={() => {
+                        setResolveAlertTarget(alert);
+                        setResolveForm({ resolutionType: "restocked", comment: "" });
+                      }}
+                    >
+                      Решено
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      )}
+              ))}
+              {warehouseAlertCount > 4 && (
+                <Button variant="link" size="sm" className="h-7 px-0" onClick={() => setLocation("/warehouse")}>
+                  Все оповещения ({warehouseAlertCount})
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
-      {/* Основные метрики */}
-      {isDashboardBlockVisible("dash_main_metrics") && (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-                {/* Общее оборудование */}
-                <Card>
-                  <CardContent className="p-6">
-                    <div className="flex items-center">
-                      <Settings className="h-10 w-10 text-blue-600" />
-                      <div className="ml-4">
-                        <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Всего оборудования</p>
-                        <p className="text-3xl font-bold text-gray-900 dark:text-gray-100">{equipmentData.total}</p>
-                        <p className="text-sm text-green-600">
-                          {equipmentData.active} активно, {equipmentData.maintenance} на ТО / в ремонте
-                        </p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {/* ТО на месяц */}
-                <Card>
-                  <CardContent className="p-6">
-                    <div className="flex items-center">
-                      <Wrench className="h-10 w-10 text-green-600" />
-                      <div className="ml-4">
-                        <p className="text-sm font-medium text-gray-600 dark:text-gray-400 capitalize">
-                          ТО за {monthLabel}
-                        </p>
-                        <p className="text-3xl font-bold text-gray-900 dark:text-gray-100">
-                          {thisMonthMaintenance.length}
-                        </p>
-                        <p className="text-sm text-blue-600">
-                          {thisMonthMaintenance.filter((t) => t.status === "completed").length} выполнено,{" "}
-                          {thisMonthMaintenance.filter((t) => t.status === "in_progress").length} в процессе
-                        </p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {/* Ежедневные осмотры */}
-                <Card>
-                  <CardContent className="p-6">
-                    <div className="flex items-center">
-                      <Eye className="h-10 w-10 text-purple-600" />
-                      <div className="ml-4">
-                        <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Осмотры сегодня</p>
-                        <p className="text-3xl font-bold text-gray-900 dark:text-gray-100">
-                          {dailyInspectionData.inspected}/{dailyInspectionData.total}
-                        </p>
-                        <p className="text-sm text-purple-600">
-                          {dailyInspectionData.progress}% завершено
-                        </p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {/* Пользователи */}
-                <Card>
-                  <CardContent className="p-6">
-                    <div className="flex items-center">
-                      <Users className="h-10 w-10 text-orange-600" />
-                      <div className="ml-4">
-                        <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Пользователи</p>
-                        <p className="text-3xl font-bold text-gray-900 dark:text-gray-100">{usersData.total}</p>
-                        <p className="text-sm text-orange-600">
-                          {usersData.onlineToday} активен сегодня
-                        </p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
-      )}
-
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
-                {isDashboardBlockVisible("dash_inspection_progress") && (
-                <Card className="lg:col-span-2">
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Activity className="h-5 w-5" />
-                      Ежедневные осмотры - {format(new Date(), 'd MMMM', { locale: ru })}
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-4">
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm font-medium">Общий прогресс</span>
-                        <span className="text-sm text-gray-600">{dailyInspectionData.inspected} из {dailyInspectionData.total}</span>
-                      </div>
-                      <Progress value={dailyInspectionData.progress} className="w-full" />
-                      
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
-                        <div className="text-center">
-                          <div className="flex items-center justify-center mb-2">
-                            <CheckCircle className="h-6 w-6 text-green-600" />
-                          </div>
-                          <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{dailyInspectionData.inspected}</p>
-                          <p className="text-sm text-gray-600">Осмотрено</p>
-                        </div>
-                        <div className="text-center">
-                          <div className="flex items-center justify-center mb-2">
-                            <Settings className="h-6 w-6 text-blue-600" />
-                          </div>
-                          <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{dailyInspectionData.working}</p>
-                          <p className="text-sm text-gray-600">Работает</p>
-                        </div>
-                        <div className="text-center">
-                          <div className="flex items-center justify-center mb-2">
-                            <Clock className="h-6 w-6 text-yellow-600" />
-                          </div>
-                          <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{dailyInspectionData.onMaintenance}</p>
-                          <p className="text-sm text-gray-600">На ТО</p>
-                        </div>
-                        <div className="text-center">
-                          <div className="flex items-center justify-center mb-2">
-                            <XCircle className="h-6 w-6 text-red-600" />
-                          </div>
-                          <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{dailyInspectionData.notWorking}</p>
-                          <p className="text-sm text-gray-600">Не работает</p>
-                        </div>
-                      </div>
-
-                      {dailyInspectionData.issues > 0 && (
-                        <div 
-                          className="mt-4 p-3 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-800 cursor-pointer hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors"
-                          onClick={() => {
-                            setLocation("/tasks");
-                            setTimeout(() => {
-                              window.dispatchEvent(new CustomEvent('navigateToRemarks'));
-                            }, 100);
-                          }}
-                        >
-                          <div className="flex items-center gap-2">
-                            <AlertTriangle className="h-5 w-5 text-red-600" />
-                            <span className="font-medium text-red-800 dark:text-red-200">
-                              Обнаружено проблем: {dailyInspectionData.issues}
-                            </span>
-                          </div>
-                        </div>
+        {(showLeftColumn || showRightColumn) && (
+        <div
+          className={cn(
+            "grid grid-cols-1 gap-4",
+            showLeftColumn && showRightColumn && "lg:grid-cols-12"
+          )}
+        >
+          {showLeftColumn && (
+          <div
+            className={cn(
+              "space-y-4",
+              showRightColumn ? "lg:col-span-7" : "lg:col-span-12"
+            )}
+          >
+              {showPlanWork && (
+              <Card>
+                <CardHeader className="py-3 px-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <CardTitle className="text-sm font-semibold">План работ</CardTitle>
+                    <div className="flex gap-2 text-xs">
+                      {isDashboardBlockVisible("dash_main_metrics") && (
+                        <>
+                          <Badge variant="outline" className="text-emerald-700">
+                            ТО {monthLabel}: {thisMonthMaintenance.length}
+                          </Badge>
+                          <Badge variant="outline" className="text-rose-700">
+                            Ремонт: {thisMonthRepairs.length}
+                          </Badge>
+                        </>
                       )}
                     </div>
-                  </CardContent>
-                </Card>
-                )}
-
-                {isDashboardBlockVisible("dash_tasks_stats") && (
-                <Card className="cursor-pointer hover:shadow-lg transition-shadow" onClick={() => setLocation("/tasks")}>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <CheckCircle className="h-5 w-5" />
-                      Статистика задач
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-4">
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="text-center">
-                          <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{scopedTaskStats.total}</p>
-                          <p className="text-sm text-gray-600 dark:text-gray-400">Всего задач</p>
-                        </div>
-                        <div className="text-center">
-                          <p className="text-2xl font-bold text-green-600">{scopedTaskStats.completed}</p>
-                          <p className="text-sm text-gray-600 dark:text-gray-400">Выполнено</p>
+                  </div>
+                </CardHeader>
+                <CardContent className="px-4 pb-4 space-y-4">
+                  {isDashboardBlockVisible("dash_maintenance_types") && (
+                    <>
+                      <div>
+                        <p className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1">
+                          <Calendar className="h-3 w-3" />
+                          ТО · 14 дней
+                        </p>
+                        <div className="space-y-1.5">
+                          {overdueMaintenance.map((task) => (
+                            <ScheduledWorkRow
+                              key={`mo-${task.id}`}
+                              task={task}
+                              equipmentLabel={taskEquipmentLabel(task.equipmentId)}
+                              overdue
+                              onClick={() => setLocation("/schedule")}
+                            />
+                          ))}
+                          {upcomingMaintenance.map((task) => (
+                            <ScheduledWorkRow
+                              key={task.id}
+                              task={task}
+                              equipmentLabel={taskEquipmentLabel(task.equipmentId)}
+                              onClick={() => setLocation("/schedule")}
+                            />
+                          ))}
+                          {overdueMaintenance.length === 0 && upcomingMaintenance.length === 0 && (
+                            <p className="text-xs text-muted-foreground py-1">Нет запланированного ТО</p>
+                          )}
                         </div>
                       </div>
-                      
-                      <div className="space-y-2">
-                        <div className="flex justify-between text-sm">
-                          <span>В ожидании: {scopedTaskStats.pending}</span>
-                          <span>В работе: {scopedTaskStats.inProgress}</span>
+                      <div>
+                        <p className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1">
+                          <Wrench className="h-3 w-3" />
+                          Ремонт · 14 дней
+                        </p>
+                        <div className="space-y-1.5">
+                          {overdueRepairs.map((task) => (
+                            <ScheduledWorkRow
+                              key={`ro-${task.id}`}
+                              task={task}
+                              equipmentLabel={taskEquipmentLabel(task.equipmentId)}
+                              overdue
+                              onClick={() => setLocation("/tasks")}
+                            />
+                          ))}
+                          {upcomingRepairs.map((task) => (
+                            <ScheduledWorkRow
+                              key={task.id}
+                              task={task}
+                              equipmentLabel={taskEquipmentLabel(task.equipmentId)}
+                              onClick={() => setLocation("/tasks")}
+                            />
+                          ))}
+                          {overdueRepairs.length === 0 && upcomingRepairs.length === 0 && (
+                            <p className="text-xs text-muted-foreground py-1">Нет запланированных ремонтов</p>
+                          )}
                         </div>
-                        {scopedTaskStats.overdue > 0 && (
-                          <div className="flex items-center gap-1 text-red-600">
-                            <AlertTriangle className="h-4 w-4" />
-                            <span className="text-sm">Просрочено: {scopedTaskStats.overdue}</span>
-                          </div>
+                      </div>
+                    </>
+                  )}
+                  {isDashboardBlockVisible("dash_upcoming_tasks") && (
+                    <div>
+                      <p className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1">
+                        <Clock className="h-3 w-3" />
+                        Задачи · 3 дня
+                      </p>
+                      <div className="space-y-1.5">
+                        {upcomingTasks.length === 0 ? (
+                          <p className="text-xs text-muted-foreground py-1">Нет срочных задач</p>
+                        ) : (
+                          upcomingTasks.slice(0, 4).map((task) => (
+                            <ScheduledWorkRow
+                              key={task.id}
+                              task={task}
+                              equipmentLabel={taskEquipmentLabel(task.equipmentId)}
+                              onClick={() => setLocation("/tasks")}
+                            />
+                          ))
                         )}
                       </div>
-                      
-                      <div className="pt-2">
-                        <Progress 
-                          value={scopedTaskStats.total > 0 ? (scopedTaskStats.completed / scopedTaskStats.total) * 100 : 0} 
-                          className="h-2"
-                        />
-                        <p className="text-xs text-gray-500 mt-1 text-center">
-                          {scopedTaskStats.total > 0 ? Math.round((scopedTaskStats.completed / scopedTaskStats.total) * 100) : 0}% завершено
-                        </p>
-                      </div>
                     </div>
-                  </CardContent>
-                </Card>
-                )}
+                  )}
+                  <Button variant="outline" size="sm" className="w-full h-8" onClick={() => setLocation("/schedule")}>
+                    Календарь и план
+                  </Button>
+                </CardContent>
+              </Card>
+              )}
 
-                {isDashboardBlockVisible("dash_upcoming_tasks") && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Clock className="h-5 w-5" />
-                      Ближайшие задачи (3 дня)
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-3">
-                      {upcomingTasks.length === 0 ? (
-                        <div className="text-center py-4">
-                          <CheckCircle className="h-8 w-8 text-green-500 mx-auto mb-2" />
-                          <p className="text-sm text-gray-500">Нет задач на ближайшие 3 дня</p>
-                        </div>
-                      ) : (
-                        upcomingTasks.slice(0, 5).map((task: any) => (
-                          <div
-                            key={task.id}
-                            className="p-3 border rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-colors"
-                            onClick={() => setLocation("/tasks")}
-                          >
-                            <div className="flex items-start justify-between">
-                              <div className="flex-1">
-                                <h4 className="font-medium text-sm text-gray-900 dark:text-gray-100">
-                                  {task.title}
-                                </h4>
-                                {task.equipmentId && (
-                                  <p className="text-xs text-gray-500 mt-1 flex items-center gap-1">
-                                    <Wrench className="h-3 w-3" />
-                                    Оборудование: {(() => {
-                                      const eq = activeEquipment.find((e) => e.id === task.equipmentId);
-                                      return eq ? eq.name : task.equipmentId;
-                                    })()}
-                                  </p>
-                                )}
-                                <div className="flex items-center gap-2 mt-2">
-                                  <Badge 
-                                    variant={
-                                      task.priority === 'urgent' ? 'destructive' :
-                                      task.priority === 'high' ? 'default' :
-                                      'secondary'
-                                    }
-                                    className="text-xs"
-                                  >
-                                    {task.priority === 'urgent' ? 'Срочно' :
-                                     task.priority === 'high' ? 'Высокий' :
-                                     task.priority === 'medium' ? 'Средний' : 'Низкий'}
-                                  </Badge>
-                                  <span className="text-xs text-gray-500">
-                                    {format(new Date(task.dueDate), 'dd.MM.yyyy', { locale: ru })}
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        ))
-                      )}
-                      
-                      {upcomingTasks.length > 5 && (
-                        <div className="text-center pt-2">
-                          <Button 
-                            variant="outline" 
-                            size="sm"
-                            onClick={() => setLocation("/tasks")}
-                          >
-                            Показать все ({upcomingTasks.length})
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
+              {(showDetailsBlock || showRecentActivities) && (
+              <div
+                className={cn(
+                  "grid gap-3",
+                  showDetailsBlock && showRecentActivities && "grid-cols-1 sm:grid-cols-2"
                 )}
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                {isDashboardBlockVisible("dash_maintenance_types") && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Wrench className="h-5 w-5" />
-                      Ближайшие ТО (14 дней)
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-3">
-                      {overdueMaintenance.length > 0 && (
-                        <div className="space-y-2">
-                          <p className="text-xs font-medium text-red-600 flex items-center gap-1">
-                            <AlertTriangle className="h-3.5 w-3.5" />
-                            Просрочено в календаре ({overdueMaintenance.length})
+              >
+                {showDetailsBlock && (
+                  <Card className="min-w-0">
+                    <CardHeader className="py-3 px-4">
+                      <CardTitle className="text-sm">Детализация</CardTitle>
+                    </CardHeader>
+                    <CardContent className="px-4 pb-3 space-y-3 max-h-[220px] overflow-y-auto">
+                      {showEquipmentTypesDetail && (
+                        <div>
+                          <p className="text-xs font-medium text-muted-foreground mb-1.5">
+                            Оборудование по типам
                           </p>
-                          {overdueMaintenance.map((task) => (
-                            <div
-                              key={`overdue-${task.id}`}
-                              className="p-2 border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 cursor-pointer"
-                              onClick={() => setLocation("/schedule")}
-                            >
-                              <div className="flex justify-between gap-2 text-sm">
-                                <div className="min-w-0">
-                                  <p className="font-medium truncate text-red-900 dark:text-red-100">{task.title}</p>
-                                  <p className="text-xs text-red-700 dark:text-red-300 truncate">
-                                    {task.equipmentId
-                                      ? equipmentNameById.get(task.equipmentId) ?? task.equipmentId
-                                      : "Без оборудования"}
-                                    {" · "}
-                                    {taskTypeLabel(task.taskType, task.maintenanceType)}
-                                  </p>
-                                </div>
-                                <div className="text-right shrink-0">
-                                  <p className="text-xs text-red-700 dark:text-red-300">
-                                    {format(new Date(task.dueDate!), "dd.MM", { locale: ru })}
-                                  </p>
-                                  <Badge variant="destructive" className="text-[10px] mt-1">
-                                    Просрочено
+                          <div className="space-y-1">
+                            {Object.entries(equipmentData.categories)
+                              .sort(([, a], [, b]) => b - a)
+                              .slice(0, 6)
+                              .map(([category, count]) => (
+                                <div key={category} className="flex justify-between text-xs gap-2">
+                                  <span className="truncate">{category}</span>
+                                  <Badge variant="outline" className="shrink-0 h-5 text-[10px]">
+                                    {count}
                                   </Badge>
                                 </div>
-                              </div>
-                            </div>
-                          ))}
+                              ))}
+                          </div>
                         </div>
                       )}
-                      {upcomingMaintenance.length === 0 && overdueMaintenance.length === 0 ? (
-                        <p className="text-sm text-muted-foreground text-center py-2">
-                          Нет запланированного ТО на ближайшие 2 недели
-                        </p>
-                      ) : (
-                        upcomingMaintenance.map((task) => (
-                          <div
-                            key={task.id}
-                            className="p-2 border rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer"
-                            onClick={() => setLocation("/schedule")}
-                          >
-                            <div className="flex justify-between gap-2 text-sm">
-                              <div className="min-w-0">
-                                <p className="font-medium truncate">{task.title}</p>
-                                <p className="text-xs text-muted-foreground truncate">
-                                  {task.equipmentId
-                                    ? equipmentNameById.get(task.equipmentId) ?? task.equipmentId
-                                    : "Без оборудования"}
-                                  {" · "}
-                                  {taskTypeLabel(task.taskType, task.maintenanceType)}
-                                </p>
-                              </div>
-                              <div className="text-right shrink-0">
-                                <p className="text-xs">
-                                  {format(new Date(task.dueDate!), "dd.MM", { locale: ru })}
-                                </p>
-                                <Badge variant="outline" className="text-[10px] mt-1">
-                                  {taskStatusLabel(task.status)}
+                      {showMaintenanceTypesDetail && (
+                        <div>
+                          <p className="text-xs font-medium text-muted-foreground mb-1.5 capitalize">
+                            ТО по типам · {monthLabel}
+                          </p>
+                          <div className="space-y-1">
+                            {Object.entries(maintenanceTypesThisMonth).map(([type, count]) => (
+                              <div key={type} className="flex justify-between text-xs gap-2">
+                                <span className="truncate">{type}</span>
+                                <Badge variant="outline" className="shrink-0 h-5 text-[10px]">
+                                  {count}
                                 </Badge>
                               </div>
-                            </div>
+                            ))}
                           </div>
-                        ))
+                        </div>
                       )}
-                      <Button variant="outline" size="sm" className="w-full" onClick={() => setLocation("/schedule")}>
-                        План ТО и задач
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
+                    </CardContent>
+                  </Card>
                 )}
-
-                {isDashboardBlockVisible("dash_maintenance_types") && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2 capitalize">
-                      <BarChart3 className="h-5 w-5" />
-                      ТО по типам ({monthLabel})
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-3">
-                      {Object.keys(maintenanceTypesThisMonth).length === 0 ? (
-                        <p className="text-sm text-muted-foreground">Нет записей ТО за этот месяц</p>
-                      ) : (
-                        Object.entries(maintenanceTypesThisMonth).map(([type, count]) => (
-                          <div key={type} className="flex justify-between items-center">
-                            <span className="text-sm font-medium">{type}</span>
-                            <Badge variant="outline">{count}</Badge>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-                )}
-
-                {isDashboardBlockVisible("dash_equipment_types") && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <TrendingUp className="h-5 w-5" />
-                      Оборудование по типам
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-3 max-h-48 overflow-y-auto">
-                      {Object.keys(equipmentData.categories).length === 0 ? (
-                        <p className="text-sm text-muted-foreground">Оборудование не добавлено</p>
-                      ) : (
-                        Object.entries(equipmentData.categories)
-                          .sort(([, a], [, b]) => b - a)
-                          .map(([category, count]) => (
-                            <div key={category} className="flex justify-between items-center">
-                              <span className="text-sm font-medium">{category}</span>
-                              <Badge variant="outline">{count}</Badge>
-                            </div>
-                          ))
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-                )}
-
-                {isDashboardBlockVisible("dash_recent_activities") && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Activity className="h-5 w-5" />
-                      Последние события
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-4">
+                {showRecentActivities && (
+                  <Card className="min-w-0">
+                    <CardHeader className="py-3 px-4">
+                      <CardTitle className="text-sm flex items-center gap-2">
+                        <Activity className="h-4 w-4" />
+                        События
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="px-4 pb-3 space-y-2 max-h-[220px] overflow-y-auto">
                       {recentActivities.length === 0 ? (
-                        <p className="text-sm text-muted-foreground text-center py-4">
-                          Пока нет событий — создайте оборудование, задачи или ТО
-                        </p>
+                        <p className="text-xs text-muted-foreground">Нет недавних событий</p>
                       ) : (
                         recentActivities.map((activity) => (
-                          <div
+                          <button
                             key={activity.id}
-                            className={`flex items-start gap-3 ${activity.link ? "cursor-pointer hover:bg-accent/50 rounded-md p-1 -m-1" : ""}`}
+                            type="button"
+                            disabled={!activity.link}
                             onClick={() => activity.link && setLocation(activity.link)}
+                            className={cn(
+                              "w-full text-left flex gap-2 rounded-md p-1.5 -mx-1.5",
+                              activity.link && "hover:bg-accent/50"
+                            )}
                           >
-                            <activity.icon className={`h-5 w-5 mt-0.5 shrink-0 ${activity.color}`} />
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                            <activity.icon
+                              className={cn("h-3.5 w-3.5 shrink-0 mt-0.5", activity.color)}
+                            />
+                            <div className="min-w-0">
+                              <p className="text-xs font-medium leading-snug line-clamp-2">
                                 {activity.message}
                               </p>
-                              <p className="text-xs text-muted-foreground">{activity.time}</p>
+                              <p className="text-[10px] text-muted-foreground">{activity.time}</p>
                             </div>
-                          </div>
+                          </button>
                         ))
                       )}
-                    </div>
-                  </CardContent>
-                </Card>
+                    </CardContent>
+                  </Card>
                 )}
               </div>
-
-              {isDashboardBlockVisible("dash_attention") &&
-              (dailyInspectionData.issues > 0 || dailyInspectionData.notWorking > 0 || openRemarksCount > 0) && (
-                <Card className="mt-8">
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2 text-red-600">
-                      <AlertTriangle className="h-5 w-5" />
-                      Требует внимания
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      {dailyInspectionData.notWorking > 0 && (
-                        <div 
-                          className="p-4 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-800 cursor-pointer hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors"
-                          onClick={() => setLocation("/daily-inspection")}
-                        >
-                          <div className="flex items-center gap-2 mb-2">
-                            <XCircle className="h-5 w-5 text-red-600" />
-                            <span className="font-medium text-red-800 dark:text-red-200">Неработающее оборудование</span>
-                          </div>
-                          <p className="text-2xl font-bold text-red-600">{dailyInspectionData.notWorking}</p>
-                          <p className="text-sm text-red-600">ед. оборудования</p>
-                        </div>
-                      )}
-
-                      {openRemarksCount > 0 && (
-                        <div 
-                          className="p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg border border-yellow-200 dark:border-yellow-800 cursor-pointer hover:bg-yellow-100 dark:hover:bg-yellow-900/30 transition-colors"
-                          onClick={() => setLocation("/remarks")}
-                        >
-                          <div className="flex items-center gap-2 mb-2">
-                            <AlertTriangle className="h-5 w-5 text-yellow-600" />
-                            <span className="font-medium text-yellow-800 dark:text-yellow-200">Открытые замечания</span>
-                          </div>
-                          <p className="text-2xl font-bold text-yellow-600">{openRemarksCount}</p>
-                          <p className="text-sm text-yellow-600">
-                            требуют решения
-                            {criticalRemarksCount > 0 && (
-                              <span className="text-red-600 font-semibold ml-2">
-                                ({criticalRemarksCount} критичных)
-                              </span>
-                            )}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
               )}
-      </div>
+          </div>
+          )}
 
+          {showRightColumn && (
+          <div
+            className={cn(
+              "space-y-4",
+              showLeftColumn ? "lg:col-span-5" : "lg:col-span-12"
+            )}
+          >
+            {showInspection && (
+              <Card>
+                <CardHeader className="py-3 px-4">
+                  <CardTitle className="text-sm flex items-center gap-2">
+                    <Activity className="h-4 w-4" />
+                    Осмотры · {format(new Date(), "d MMM", { locale: ru })}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="px-4 pb-4 space-y-3">
+                  <div className="flex justify-between text-xs">
+                    <span>{dailyInspectionData.inspected} из {dailyInspectionData.total}</span>
+                    <span className="text-muted-foreground">{dailyInspectionData.progress}%</span>
+                  </div>
+                  <Progress value={dailyInspectionData.progress} className="h-1.5" />
+                  <div className="grid grid-cols-4 gap-2 text-center">
+                    <div>
+                      <p className="text-base font-bold tabular-nums">{dailyInspectionData.inspected}</p>
+                      <p className="text-[10px] text-muted-foreground">осмотрено</p>
+                    </div>
+                    <div>
+                      <p className="text-base font-bold tabular-nums text-blue-600">{dailyInspectionData.working}</p>
+                      <p className="text-[10px] text-muted-foreground">работает</p>
+                    </div>
+                    <div>
+                      <p className="text-base font-bold tabular-nums text-amber-600">{dailyInspectionData.onMaintenance}</p>
+                      <p className="text-[10px] text-muted-foreground">на ТО</p>
+                    </div>
+                    <div>
+                      <p className="text-base font-bold tabular-nums text-red-600">{dailyInspectionData.notWorking}</p>
+                      <p className="text-[10px] text-muted-foreground">не работает</p>
+                    </div>
+                  </div>
+                  {dailyInspectionData.issues > 0 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full h-8 text-red-700 border-red-200"
+                      onClick={() => setLocation("/tasks?section=remarks")}
+                    >
+                      Проблемы: {dailyInspectionData.issues}
+                    </Button>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="w-full h-8"
+                    onClick={() => setLocation("/daily-inspection")}
+                  >
+                    Открыть осмотры
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
+
+            {showTasksStats && (
+              <Card
+                className="cursor-pointer hover:bg-accent/30 transition-colors"
+                onClick={() => setLocation("/tasks")}
+              >
+                <CardHeader className="py-3 px-4">
+                  <CardTitle className="text-sm flex items-center gap-2">
+                    <CheckCircle className="h-4 w-4" />
+                    Задачи
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="px-4 pb-4">
+                  <div className="grid grid-cols-4 gap-2 text-center mb-3">
+                    <div>
+                      <p className="text-lg font-bold">{scopedTaskStats.total}</p>
+                      <p className="text-[10px] text-muted-foreground">всего</p>
+                    </div>
+                    <div>
+                      <p className="text-lg font-bold text-green-600">{scopedTaskStats.completed}</p>
+                      <p className="text-[10px] text-muted-foreground">готово</p>
+                    </div>
+                    <div>
+                      <p className="text-lg font-bold">{scopedTaskStats.pending}</p>
+                      <p className="text-[10px] text-muted-foreground">ожидают</p>
+                    </div>
+                    <div>
+                      <p className="text-lg font-bold text-red-600">{scopedTaskStats.overdue}</p>
+                      <p className="text-[10px] text-muted-foreground">просрочено</p>
+                    </div>
+                  </div>
+                  <Progress
+                    value={
+                      scopedTaskStats.total > 0
+                        ? (scopedTaskStats.completed / scopedTaskStats.total) * 100
+                        : 0
+                    }
+                    className="h-1.5"
+                  />
+                </CardContent>
+              </Card>
+            )}
+          </div>
+          )}
+        </div>
+        )}
+      </div>
       <Dialog open={!!resolveAlertTarget} onOpenChange={(open) => !open && setResolveAlertTarget(null)}>
         {resolveAlertTarget ? (
         <DialogContent>

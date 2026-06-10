@@ -239,7 +239,9 @@ export async function getEquipmentActivity(equipmentId: string): Promise<Equipme
       statusLabel: REMARK_STATUS_LABELS[row.status] ?? row.status,
       occurredAt: (row.updatedAt ?? row.createdAt).toISOString(),
       actor: row.reportedBy,
-      href: `/remarks?highlight=${row.id}`,
+      href: row.linkedTaskId
+        ? `/tasks?task=${row.linkedTaskId}`
+        : `/tasks?section=remarks`,
       links,
     });
   }
@@ -255,7 +257,7 @@ export async function getEquipmentActivity(equipmentId: string): Promise<Equipme
       statusLabel: row.workingStatus ?? row.status,
       occurredAt: row.inspectionDate.toISOString(),
       actor: row.inspectedBy,
-      href: `/daily-inspection?highlight=${row.id}`,
+      href: `/daily-inspection-new?inspection=${row.id}`,
       links: [],
     });
   }

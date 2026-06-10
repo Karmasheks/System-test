@@ -78,13 +78,14 @@ import {
 import { linkBudgetToServiceRequest } from "./asset-management-storage";
 import { validateTransition, WorkflowError } from "./service-request-workflow";
 import { updateChecklistItemSchema, insertChecklistTemplateSchema } from "@shared/schema";
-import { isToRequestType } from "@shared/service-request-constants";
+import { isServiceRequestVoidStatus, isToRequestType } from "@shared/service-request-constants";
 import { reservePartForWork, handleServiceRequestWarehouseTransition } from "./part-reservation-service";
 import {
   createServiceRequestSubtask,
   listTasksForServiceRequest,
   getServiceRequestWorkProgress,
   tryCompleteParentTaskForServiceRequest,
+  tryFinalizeTasksForVoidServiceRequest,
 } from "./task-orchestration-service";
 
 type AuthMiddleware = (req: Request, res: Response, next: Function) => void;
@@ -604,6 +605,8 @@ export function registerServiceRequestRoutes(
 
       if (effectiveTo === "closed") {
         await tryCompleteParentTaskForServiceRequest(id, user);
+      } else if (isServiceRequestVoidStatus(effectiveTo)) {
+        await tryFinalizeTasksForVoidServiceRequest(id, effectiveTo, user);
       }
 
       res.json(updated);

@@ -113,7 +113,7 @@ export async function sendEquipmentForRepair(
   await db
     .update(equipment)
     .set({
-      status: "maintenance",
+      status: "repair",
       homeSubdivisionId: homeId,
       homeSubdivisionName: homeName,
       repairSubdivisionId: repair.subdivisionId,
@@ -134,13 +134,13 @@ export async function sendEquipmentForRepair(
     actor,
   });
 
-  if (oldStatus !== "maintenance") {
+  if (oldStatus !== "repair") {
     await appendEquipmentEvent({
       equipmentId,
       eventType: "status_changed",
-      description: `Статус: ${equipmentStatusLabel(oldStatus)} → ${equipmentStatusLabel("maintenance")}`,
+      description: `Статус: ${equipmentStatusLabel(oldStatus)} → ${equipmentStatusLabel("repair")}`,
       oldValue: equipmentStatusLabel(oldStatus),
-      newValue: equipmentStatusLabel("maintenance"),
+      newValue: equipmentStatusLabel("repair"),
       actor,
     });
   }

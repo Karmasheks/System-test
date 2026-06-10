@@ -29,7 +29,8 @@ export function formatEquipmentResponsible(value: string | null | undefined): st
 
 export const EQUIPMENT_STATUS_LABELS: Record<string, string> = {
   active: "Активно",
-  maintenance: "На ТО / в ремонте",
+  maintenance: "На ТО",
+  repair: "В ремонте",
   inactive: "Неактивно",
   decommissioned: "Выведено из эксплуатации",
 };
@@ -45,7 +46,7 @@ export function isEquipmentAvailableForInspection(eq: {
   repairSubdivisionId?: number | null;
 }): boolean {
   if (eq.status === "decommissioned" || eq.status === "inactive") return false;
-  if (eq.status === "maintenance") return false;
+  if (eq.status === "maintenance" || eq.status === "repair") return false;
   if (eq.repairSubdivisionId != null) return false;
   return eq.status === "active";
 }

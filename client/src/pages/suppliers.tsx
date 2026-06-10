@@ -1,25 +1,28 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Helmet } from "react-helmet";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { useSuppliers, useSupplierMutations } from "@/hooks/use-asset-management";
 import { useEquipmentApi } from "@/hooks/use-equipment-api";
 import { useSubdivisions } from "@/hooks/use-subdivisions";
-import { SubdivisionMultiPicker } from "@/components/subdivision-multi-picker";
-import { EquipmentMultiPicker } from "@/components/equipment-multi-picker";
+import { useSubdivisionFilter } from "@/hooks/use-subdivision-filter";
+import { SubdivisionFilterSelect } from "@/components/subdivision-filter-select";
+import { filterItemsBySubdivisionIds } from "@/lib/subdivision-filter";
 import {
-  buildEquipmentLinkPayload,
   equipmentLabels,
   normalizeEquipmentIds,
   normalizeSubdivisionIds,
   subdivisionLabels,
 } from "@/lib/contact-supplier-utils";
+import { buildSupplierCreatePayload } from "@/lib/supplier-form-payload";
+import {
+  emptySupplierForm,
+  SupplierFormFields,
+  type SupplierFormValues,
+} from "@/components/supplier-form-fields";
 import { Building2, Plus, Trash2 } from "lucide-react";
 import type { Supplier } from "@shared/schema";
 
@@ -30,34 +33,25 @@ export default function SuppliersPage() {
   const { toast } = useToast();
   const { data: suppliers = [], isLoading } = useSuppliers();
   const { data: subdivisions = [] } = useSubdivisions();
+  const {
+    filterValue,
+    setFilterValue,
+    filterSubdivisionId,
+    availableSubdivisions,
+    showFilter,
+  } = useSubdivisionFilter();
+  const filteredSuppliers = useMemo(
+    () => filterItemsBySubdivisionIds(suppliers, filterSubdivisionId),
+    [suppliers, filterSubdivisionId]
+  );
   const { create, update, remove } = useSupplierMutations();
   const { allEquipment } = useEquipmentApi();
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState<Supplier | null>(null);
-  const [form, setForm] = useState({
-    name: "",
-    contactPerson: "",
-    phone: "",
-    email: "",
-    address: "",
-    website: "",
-    notes: "",
-    equipmentIds: [] as string[],
-    subdivisionIds: [] as number[],
-  });
+  const [form, setForm] = useState<SupplierFormValues>(emptySupplierForm());
 
   const reset = () => {
-    setForm({
-      name: "",
-      contactPerson: "",
-      phone: "",
-      email: "",
-      address: "",
-      website: "",
-      notes: "",
-      equipmentIds: [],
-      subdivisionIds: [],
-    });
+    setForm(emptySupplierForm());
     setEdit(null);
   };
 
@@ -66,6 +60,7 @@ export default function SuppliersPage() {
     setForm({
       name: s.name,
       contactPerson: s.contactPerson ?? "",
+      position: s.position ?? "",
       phone: s.phone ?? "",
       email: s.email ?? "",
       address: s.address ?? "",
@@ -77,44 +72,21 @@ export default function SuppliersPage() {
     setOpen(true);
   };
 
-  const handleEquipmentChange = (equipmentIds: string[]) => {
-    const subdivisionSet = new Set(form.subdivisionIds);
-    for (const id of equipmentIds) {
-      const eq = allEquipment.find((e) => e.id === id);
-      if (eq?.subdivisionId) subdivisionSet.add(eq.subdivisionId);
-    }
-    setForm((prev) => ({
-      ...prev,
-      equipmentIds,
-      subdivisionIds: Array.from(subdivisionSet).sort((a, b) => a - b),
-    }));
-  };
-
   const save = async () => {
     if (!form.name.trim()) {
       toast({ title: "Укажите название", variant: "destructive" });
       return;
     }
-    const equipmentLink = buildEquipmentLinkPayload(form.equipmentIds, allEquipment);
-    const payload = {
-      name: form.name.trim(),
-      contactPerson: form.contactPerson || null,
-      phone: form.phone || null,
-      email: form.email || null,
-      address: form.address || null,
-      website: form.website || null,
-      notes: form.notes.trim() || null,
-      subdivisionIds: form.subdivisionIds,
-      ...equipmentLink,
-    };
+    const payload = buildSupplierCreatePayload(form, allEquipment);
     try {
       if (edit) await update.mutateAsync({ id: edit.id, ...payload });
       else await create.mutateAsync(payload);
       toast({ title: "Сохранено" });
       setOpen(false);
       reset();
-    } catch (e: any) {
-      toast({ title: "Ошибка", description: e.message, variant: "destructive" });
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Ошибка";
+      toast({ title: "Ошибка", description: message, variant: "destructive" });
     }
   };
 
@@ -132,16 +104,33 @@ export default function SuppliersPage() {
           </Button>
         </div>
         <Card>
-          <CardHeader><CardTitle>Список ({suppliers.length})</CardTitle></CardHeader>
+          <CardHeader className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+            <CardTitle>Список ({filteredSuppliers.length})</CardTitle>
+            {showFilter && (
+              <SubdivisionFilterSelect
+                value={filterValue}
+                onChange={setFilterValue}
+                subdivisions={availableSubdivisions}
+                className="w-56"
+              />
+            )}
+          </CardHeader>
           <CardContent className="overflow-x-auto">
             {isLoading ? (
               <p className="text-gray-500">Загрузка…</p>
             ) : (
+              <>
+                {filterSubdivisionId != null && (
+                  <p className="text-sm text-muted-foreground mb-3">
+                    Показано: {filteredSuppliers.length} из {suppliers.length}
+                  </p>
+                )}
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Название</TableHead>
                     <TableHead>Контакт</TableHead>
+                    <TableHead>Должность</TableHead>
                     <TableHead>Подразделения</TableHead>
                     <TableHead>Оборудование</TableHead>
                     <TableHead>Комментарий</TableHead>
@@ -151,10 +140,11 @@ export default function SuppliersPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {suppliers.map((s) => (
+                  {filteredSuppliers.map((s) => (
                     <TableRow key={s.id}>
                       <TableCell className="font-medium">{s.name}</TableCell>
                       <TableCell>{s.contactPerson ?? "—"}</TableCell>
+                      <TableCell>{s.position ?? "—"}</TableCell>
                       <TableCell className="text-sm max-w-[140px]">
                         {subdivisionLabels(normalizeSubdivisionIds(s), subdivisions)}
                       </TableCell>
@@ -176,6 +166,7 @@ export default function SuppliersPage() {
                   ))}
                 </TableBody>
               </Table>
+              </>
             )}
           </CardContent>
         </Card>
@@ -186,69 +177,8 @@ export default function SuppliersPage() {
           <DialogHeader>
             <DialogTitle>{edit ? "Редактировать поставщика" : "Новый поставщик"}</DialogTitle>
           </DialogHeader>
-          <div className="grid gap-3 pb-2">
-            <div>
-              <Label>Название *</Label>
-              <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-            </div>
-            <div>
-              <Label>Контактное лицо</Label>
-              <Input value={form.contactPerson} onChange={(e) => setForm({ ...form, contactPerson: e.target.value })} />
-            </div>
-            <div>
-              <Label>Телефон</Label>
-              <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
-            </div>
-            <div>
-              <Label>Email</Label>
-              <Input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-            </div>
-            <div>
-              <Label>Адрес</Label>
-              <Input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
-            </div>
-            <div>
-              <Label>Сайт</Label>
-              <Input value={form.website} onChange={(e) => setForm({ ...form, website: e.target.value })} />
-            </div>
-
-            <SubdivisionMultiPicker
-              value={form.subdivisionIds}
-              onChange={(subdivisionIds) => {
-                const subSet = new Set(subdivisionIds);
-                const equipmentIds =
-                  subdivisionIds.length === 0
-                    ? form.equipmentIds
-                    : form.equipmentIds.filter((id) => {
-                        const eq = allEquipment.find((e) => e.id === id);
-                        return eq?.subdivisionId != null && subSet.has(eq.subdivisionId);
-                      });
-                setForm({ ...form, subdivisionIds, equipmentIds });
-              }}
-              description="Поставщик может обслуживать несколько подразделений"
-            />
-
-            <EquipmentMultiPicker
-              equipment={allEquipment}
-              value={form.equipmentIds}
-              subdivisionIds={form.subdivisionIds}
-              onChange={handleEquipmentChange}
-              description="Оборудование, для которого актуален поставщик"
-            />
-
-            <div>
-              <Label>Комментарий</Label>
-              <Textarea
-                value={form.notes}
-                onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                placeholder="Заметки по поставщику…"
-                rows={3}
-                className="resize-y min-h-[72px]"
-              />
-            </div>
-
-            <Button onClick={save} className="mt-1">Сохранить</Button>
-          </div>
+          <SupplierFormFields value={form} onChange={setForm} equipment={allEquipment} />
+          <Button onClick={save} className="mt-1">Сохранить</Button>
         </DialogContent>
       </Dialog>
     </>

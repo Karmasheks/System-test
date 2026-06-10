@@ -67,6 +67,15 @@ export const STATUS_LABELS: Record<ServiceRequestStatus, string> = {
   not_needed: "Отпала необходимость",
 };
 
+/** Заявка закрыта без выполнения работ — связанные задачи можно завершить или отменить */
+export const SR_VOID_STATUSES = ["cancelled", "duplicate", "not_needed"] as const;
+
+export type ServiceRequestVoidStatus = (typeof SR_VOID_STATUSES)[number];
+
+export function isServiceRequestVoidStatus(status: string): boolean {
+  return (SR_VOID_STATUSES as readonly string[]).includes(status);
+}
+
 export const MANAGER_ROLES = ["admin", "manager"] as const;
 export const ADMIN_ROLES = ["admin"] as const;
 

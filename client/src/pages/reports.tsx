@@ -36,6 +36,7 @@ import {
   CheckCircle,
   XCircle,
   Clock,
+  Wrench,
   Settings,
   Eye,
   FileSpreadsheet,
@@ -177,6 +178,7 @@ export default function Reports() {
     const statusCounts = {
       active: filtered.filter((item) => item.status === "active").length,
       maintenance: filtered.filter((item) => item.status === "maintenance").length,
+      repair: filtered.filter((item) => item.status === "repair").length,
       inactive: filtered.filter((item) => item.status === "inactive").length,
     };
     const typeDistribution = scopedEquipment.reduce(
@@ -438,6 +440,7 @@ export default function Reports() {
                             <SelectItem value="all">Все статусы</SelectItem>
                             <SelectItem value="active">Активное</SelectItem>
                             <SelectItem value="maintenance">{EQUIPMENT_STATUS_LABELS.maintenance}</SelectItem>
+                            <SelectItem value="repair">{EQUIPMENT_STATUS_LABELS.repair}</SelectItem>
                             <SelectItem value="inactive">Неактивное</SelectItem>
                           </SelectContent>
                         </Select>
@@ -496,8 +499,18 @@ export default function Reports() {
                           </div>
                           {reportData.statusCounts.maintenance > 0 && (
                             <div className="flex items-center gap-2 text-xs">
-                              <Clock className="h-3 w-3 text-yellow-600" />
-                              <span className="text-yellow-600">{reportData.statusCounts.maintenance} {EQUIPMENT_STATUS_LABELS.maintenance.toLowerCase()}</span>
+                              <Clock className="h-3 w-3 text-emerald-600" />
+                              <span className="text-emerald-600">
+                                {reportData.statusCounts.maintenance} {EQUIPMENT_STATUS_LABELS.maintenance.toLowerCase()}
+                              </span>
+                            </div>
+                          )}
+                          {reportData.statusCounts.repair > 0 && (
+                            <div className="flex items-center gap-2 text-xs">
+                              <Wrench className="h-3 w-3 text-rose-600" />
+                              <span className="text-rose-600">
+                                {reportData.statusCounts.repair} {EQUIPMENT_STATUS_LABELS.repair.toLowerCase()}
+                              </span>
                             </div>
                           )}
                           {reportData.statusCounts.inactive > 0 && (

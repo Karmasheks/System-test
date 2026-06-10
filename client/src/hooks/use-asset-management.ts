@@ -1,7 +1,14 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { downloadCsv, formatRuDateTime } from "@/lib/export-utils";
-import type { Contact, Supplier, BudgetEntry, Document, DocumentCategory } from "@shared/schema";
+import type {
+  Contact,
+  Supplier,
+  BudgetEntry,
+  BudgetCategory,
+  Document,
+  DocumentCategory,
+} from "@shared/schema";
 
 function qs(params: Record<string, string | undefined>) {
   const p = new URLSearchParams();
@@ -90,6 +97,30 @@ export function useSupplierMutations() {
         await apiRequest("DELETE", `/api/suppliers/${id}`);
       },
       onSuccess: invalidate,
+    }),
+  };
+}
+
+// Budget categories
+export function useBudgetCategories() {
+  return useQuery<BudgetCategory[]>({
+    queryKey: ["/api/budget/categories"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/budget/categories");
+      return res.json();
+    },
+  });
+}
+
+export function useBudgetCategoryMutations() {
+  const qc = useQueryClient();
+  return {
+    create: useMutation({
+      mutationFn: async (name: string) => {
+        const res = await apiRequest("POST", "/api/budget/categories", { name });
+        return res.json() as Promise<BudgetCategory>;
+      },
+      onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/budget/categories"] }),
     }),
   };
 }

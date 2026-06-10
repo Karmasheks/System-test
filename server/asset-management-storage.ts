@@ -5,6 +5,7 @@ import {
   contacts,
   suppliers,
   budgetEntries,
+  budgetCategories,
   documents,
   documentCategories,
   tasks,
@@ -79,6 +80,16 @@ export async function updateSupplier(id: number, data: Partial<InsertSupplier>) 
 export async function deleteSupplier(id: number) {
   const result = await db.delete(suppliers).where(eq(suppliers.id, id)).returning();
   return result.length > 0;
+}
+
+// --- Budget categories ---
+export async function listBudgetCategories() {
+  return db.select().from(budgetCategories).orderBy(asc(budgetCategories.name));
+}
+
+export async function createBudgetCategory(name: string) {
+  const [row] = await db.insert(budgetCategories).values({ name }).returning();
+  return row;
 }
 
 // --- Budget ---
@@ -277,6 +288,7 @@ export type CalendarEvent = {
   status: string;
   equipmentId?: string | null;
   equipmentName?: string | null;
+  equipmentModel?: string | null;
   isCompleted: boolean;
   isPending: boolean;
 };
@@ -300,6 +312,15 @@ export async function getCalendarEvents(
   const { fromDate, toDate } = parseDateRange(from, to);
   const events: CalendarEvent[] = [];
 
+  const equipmentRows = await db
+    .select({ id: equipment.id, model: equipment.model })
+    .from(equipment);
+  const modelByEquipmentId = new Map(
+    equipmentRows.map((row) => [row.id, row.model?.trim() || null])
+  );
+  const modelFor = (equipmentId?: string | null) =>
+    equipmentId ? modelByEquipmentId.get(equipmentId) ?? null : null;
+
   let allTasks = await db.select().from(tasks);
   if (scope && !scope.viewAll) {
     allTasks = filterBySubdivisionScope(allTasks, scope);
@@ -319,6 +340,7 @@ export async function getCalendarEvents(
       status: t.status,
       equipmentId: t.equipmentId,
       equipmentName: null,
+      equipmentModel: modelFor(t.equipmentId),
       isCompleted: done,
       isPending: !done && (t.status === "pending" || t.status === "in_progress"),
     });
@@ -343,6 +365,7 @@ export async function getCalendarEvents(
       status: r.status,
       equipmentId: r.equipmentId,
       equipmentName: r.equipmentName,
+      equipmentModel: modelFor(r.equipmentId),
       isCompleted: false,
       isPending: r.status === "open" || r.status === "in_progress",
     });
@@ -374,6 +397,7 @@ export async function getCalendarEvents(
       status: r.status,
       equipmentId: r.equipmentId,
       equipmentName: r.equipmentName,
+      equipmentModel: modelFor(r.equipmentId),
       isCompleted: done,
       isPending: pending && !done,
     });
@@ -441,7 +465,7 @@ export async function getReportsData(from?: string, to?: string, equipmentId?: s
     ? await db.select().from(equipment).where(eq(equipment.id, equipmentId))
     : await db.select().from(equipment);
   const downtimeEquipment = eqList.filter(
-    (e) => e.status === "maintenance" || e.status === "inactive"
+    (e) => e.status === "maintenance" || e.status === "repair" || e.status === "inactive"
   );
 
   const openRequests = await db.select().from(serviceRequests);

@@ -31,10 +31,10 @@ import { maskSensitiveValue, useAccessControl } from "@/hooks/use-access-control
 import { PermissionEditor, type PermissionEditorState } from "@/components/admin/permission-editor";
 import { RoleProfilesPanel } from "@/components/admin/role-profiles-panel";
 import { SubdivisionsPanel } from "@/components/admin/subdivisions-panel";
-import { SubdivisionAccessEditor } from "@/components/admin/subdivision-access-editor";
 import { ManagedSubdivisionsEditor } from "@/components/admin/managed-subdivisions-editor";
 import { SubdivisionTransferPanel } from "@/components/admin/subdivision-transfer-panel";
-import { SubdivisionPicker } from "@/components/subdivision-picker";
+import { SubdivisionMultiPicker } from "@/components/subdivision-multi-picker";
+import { splitUserWorkSubdivisionIds, userWorkSubdivisionIds } from "@/lib/user-subdivisions";
 import { SubdivisionFilterSelect } from "@/components/subdivision-filter-select";
 import { useSubdivisions } from "@/hooks/use-subdivisions";
 import { useSubdivisionFilter } from "@/hooks/use-subdivision-filter";
@@ -127,23 +127,26 @@ export default function Users() {
   const getSubdivisionCell = (item: {
     role?: string;
     subdivisionId?: number | null;
+    extraSubdivisionIds?: number[] | null;
     viewAllSubdivisions?: boolean;
     managedSubdivisionIds?: number[] | null;
   }) => {
-    const primary = subdivisionName(item.subdivisionId);
+    const workIds = userWorkSubdivisionIds(item.subdivisionId, item.extraSubdivisionIds);
+    const workNames = workIds.map((id) => subdivisionName(id));
+    const primary = workNames[0] ?? subdivisionName(item.subdivisionId);
     const managed = resolveManagedSubdivisionIds({
       role: item.role ?? "",
       managedSubdivisionIds: item.managedSubdivisionIds,
     });
     const full = [
-      primary,
+      workNames.length > 0 ? workNames.join(", ") : primary,
       item.viewAllSubdivisions ? "Видит все подразделения" : null,
       managed.length > 0 ? `Админ: ${formatManagedSubdivisions(managed)}` : null,
     ]
       .filter(Boolean)
       .join(" · ");
 
-    return { primary, managed, full };
+    return { primary, workCount: workIds.length, managed, full };
   };
 
   const userMatchesSubdivisionFilter = (
@@ -575,6 +578,44 @@ export default function Users() {
   const isSubdivisionAdminRoleSelected = isSubdivisionAdminRole(formData.role);
   const selectedSubdivisionAdminId = parseSubdivisionAdminRoleKey(formData.role);
 
+  const renderWorkSubdivisionsField = () => {
+    if (isSubdivisionAdminRoleSelected && selectedSubdivisionAdminId) {
+      return (
+        <p className="text-sm text-muted-foreground pt-2">
+          {subdivisionName(selectedSubdivisionAdminId)} — назначается по выбранной роли
+        </p>
+      );
+    }
+    return (
+      <div className="space-y-2">
+        {formData.role === "admin" && (
+          <p className="text-xs text-muted-foreground">
+            Администратор системы видит все подразделения. Укажите, в каких подразделениях
+            сотрудник работает — это только для отображения и отчётов.
+          </p>
+        )}
+        <SubdivisionMultiPicker
+          value={userWorkSubdivisionIds(formData.subdivisionId, formData.extraSubdivisionIds)}
+          onChange={(ids) => {
+            const split = splitUserWorkSubdivisionIds(ids);
+            setFormData((p) => ({
+              ...p,
+              subdivisionId: split.subdivisionId,
+              extraSubdivisionIds: split.extraSubdivisionIds,
+            }));
+          }}
+          label=""
+          allowedIds={managedSubdivisionFilter}
+          description={
+            formData.role === "admin"
+              ? "Организационная принадлежность"
+              : "Отметьте все подразделения, в которых работает сотрудник"
+          }
+        />
+      </div>
+    );
+  };
+
   const renderRoleSelect = () => (
     <Select value={formData.role} onValueChange={handleRoleChange}>
       <SelectTrigger>
@@ -788,8 +829,19 @@ export default function Users() {
                               <p className="truncate leading-tight font-medium">
                                 {subdivision.primary}
                               </p>
-                              {(item.viewAllSubdivisions || subdivision.managed.length > 0) && (
+                              {(item.viewAllSubdivisions ||
+                                subdivision.workCount > 1 ||
+                                subdivision.managed.length > 0) && (
                                 <div className="flex flex-wrap gap-0.5 mt-0.5">
+                                  {subdivision.workCount > 1 && (
+                                    <Badge
+                                      variant="outline"
+                                      className="text-[9px] px-1 py-0 h-3.5 font-normal"
+                                      title={subdivision.full.split(" · ")[0]}
+                                    >
+                                      +{subdivision.workCount - 1}
+                                    </Badge>
+                                  )}
                                   {item.viewAllSubdivisions && (
                                     <Badge variant="outline" className="text-[9px] px-1 py-0 h-3.5 font-normal">
                                       все
@@ -883,22 +935,8 @@ export default function Users() {
               </div>
             </div>
             <div className="grid grid-cols-4 items-start gap-4">
-              <Label className="text-right pt-2">Подразделение</Label>
-              <div className="col-span-3">
-                {isSubdivisionAdminRoleSelected && selectedSubdivisionAdminId ? (
-                  <p className="text-sm text-muted-foreground pt-2">
-                    {subdivisionName(selectedSubdivisionAdminId)} — назначается по выбранной роли
-                  </p>
-                ) : (
-                  <SubdivisionPicker
-                    value={formData.subdivisionId}
-                    onChange={(id) => setFormData((p) => ({ ...p, subdivisionId: id }))}
-                    label=""
-                    required={formData.role !== "admin"}
-                    allowedIds={managedSubdivisionFilter}
-                  />
-                )}
-              </div>
+              <Label className="text-right pt-2">Подразделения</Label>
+              <div className="col-span-3">{renderWorkSubdivisionsField()}</div>
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="position" className="text-right">Должность</Label>
@@ -1004,22 +1042,8 @@ export default function Users() {
                 <div className="col-span-3">{renderRoleSelect()}</div>
               </div>
               <div className="grid grid-cols-4 items-start gap-4">
-                <Label className="text-right pt-2">Подразделение</Label>
-                <div className="col-span-3">
-                  {isSubdivisionAdminRoleSelected && selectedSubdivisionAdminId ? (
-                    <p className="text-sm text-muted-foreground pt-2">
-                      {subdivisionName(selectedSubdivisionAdminId)} — назначается по выбранной роли
-                    </p>
-                  ) : (
-                    <SubdivisionPicker
-                      value={formData.subdivisionId}
-                      onChange={(id) => setFormData((p) => ({ ...p, subdivisionId: id }))}
-                      label=""
-                      required={formData.role !== "admin"}
-                      allowedIds={managedSubdivisionFilter}
-                    />
-                  )}
-                </div>
+                <Label className="text-right pt-2">Подразделения</Label>
+                <div className="col-span-3">{renderWorkSubdivisionsField()}</div>
               </div>
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label htmlFor="edit-position" className="text-right">Должность</Label>
@@ -1097,17 +1121,25 @@ export default function Users() {
               </div>
             </TabsContent>
             <TabsContent value="access" className="space-y-4 pt-4">
-              <SubdivisionAccessEditor
-                primarySubdivisionId={formData.subdivisionId}
-                onPrimaryChange={(id) => setFormData((p) => ({ ...p, subdivisionId: id }))}
-                extraSubdivisionIds={formData.extraSubdivisionIds}
-                onExtraChange={(ids) => setFormData((p) => ({ ...p, extraSubdivisionIds: ids }))}
-                viewAllSubdivisions={formData.viewAllSubdivisions}
-                onViewAllChange={(v) => setFormData((p) => ({ ...p, viewAllSubdivisions: v }))}
-                isAdminRole={formData.role === "admin"}
-                allowViewAll={systemAdmin}
-                disabled={isSubdivisionAdminRoleSelected && !!selectedSubdivisionAdminId}
-              />
+              {systemAdmin && formData.role !== "admin" && (
+                <div className="flex items-start gap-3 rounded-md border p-4">
+                  <Checkbox
+                    id="edit-view-all-subdivisions"
+                    checked={formData.viewAllSubdivisions}
+                    onCheckedChange={(c) =>
+                      setFormData((p) => ({ ...p, viewAllSubdivisions: c === true }))
+                    }
+                  />
+                  <div>
+                    <Label htmlFor="edit-view-all-subdivisions" className="cursor-pointer font-medium">
+                      Видит все подразделения
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      Как у администратора системы — без фильтра по подразделениям
+                    </p>
+                  </div>
+                </div>
+              )}
 
               {systemAdmin && formData.role !== "admin" && (
                 <ManagedSubdivisionsEditor
@@ -1233,9 +1265,14 @@ export default function Users() {
                 </Badge>
               </div>
               <div>
-                <Label className="text-sm font-medium">Подразделение:</Label>
+                <Label className="text-sm font-medium">Подразделения:</Label>
                 <p className="text-sm">
-                  {subdivisionName(selectedUser?.subdivisionId)}
+                  {userWorkSubdivisionIds(
+                    selectedUser?.subdivisionId,
+                    selectedUser?.extraSubdivisionIds
+                  )
+                    .map((id) => subdivisionName(id))
+                    .join(", ") || "Не указано"}
                   {selectedUser?.viewAllSubdivisions ? " · видит все подразделения" : ""}
                 </p>
               </div>

@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EquipmentStatusBadge } from "@/components/equipment-status-badge";
-import { PlusCircle, FileEdit, Trash2, Settings, Calendar, Clock, ExternalLink, Link2 } from "lucide-react";
+import { PlusCircle, FileEdit, Trash2, Settings, Calendar, Clock, ExternalLink, Link2, Wrench } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -456,7 +456,7 @@ export default function Equipment() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-4">
                 <Card>
                   <CardContent className="p-4">
                     <div className="flex items-center">
@@ -486,11 +486,25 @@ export default function Equipment() {
                 <Card>
                   <CardContent className="p-4">
                     <div className="flex items-center">
-                      <Calendar className="h-6 w-6 text-amber-600" />
+                      <Calendar className="h-6 w-6 text-emerald-600" />
                       <div className="ml-3">
-                        <p className="text-xs font-medium text-gray-600 dark:text-gray-400">ТО / ремонт</p>
+                        <p className="text-xs font-medium text-gray-600 dark:text-gray-400">На ТО</p>
                         <p className="text-xl font-bold text-gray-900 dark:text-gray-100">
                           {equipment.filter((eq) => eq.status === "maintenance").length}
+                        </p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardContent className="p-4">
+                    <div className="flex items-center">
+                      <Wrench className="h-6 w-6 text-rose-600" />
+                      <div className="ml-3">
+                        <p className="text-xs font-medium text-gray-600 dark:text-gray-400">В ремонте</p>
+                        <p className="text-xl font-bold text-gray-900 dark:text-gray-100">
+                          {equipment.filter((eq) => eq.status === "repair").length}
                         </p>
                       </div>
                     </div>
@@ -606,7 +620,9 @@ export default function Equipment() {
                               <EquipmentImageThumbnail url={equipmentItem.imageUrls?.[0]} />
                             </td>
                             <td className="p-2 min-w-0">
-                              <p className="font-medium truncate">{equipmentItem.name}</p>
+                              <p className="font-medium line-clamp-2 break-words leading-snug">
+                                {equipmentItem.name}
+                              </p>
                               <p className="text-xs text-muted-foreground font-mono">{equipmentItem.id}</p>
                             </td>
                             <td className="p-2 text-muted-foreground truncate hidden md:table-cell">

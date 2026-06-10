@@ -76,7 +76,7 @@ import {
   cascadeCompleteSubtasks,
   convertTaskToServiceRequest,
   createMaintenanceFromServiceRequest,
-  createRemarkFromDailyInspection,
+  syncRemarkFromDailyInspection,
   countIssuesFromCheckResults,
   deriveWorkingStatus,
   getServiceRequestWorkProgress,
@@ -109,6 +109,7 @@ import { isSubdivisionAdminRole } from "@shared/subdivision-admin-roles";
 import {
   canManageSubdivisionId,
   isSystemAdmin,
+  normalizeExtraSubdivisionIds,
   normalizeManagedSubdivisionIds,
 } from "@shared/subdivision-scope";
 import { initSubdivisionSystem, resolveSubdivisionFields } from "./subdivision-service";
@@ -1548,7 +1549,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       if (!isSystemAdmin(actor.role)) {
         userData.managedSubdivisionIds = [];
-        if (!userData.subdivisionId || !canManageSubdivisionId(actor, userData.subdivisionId)) {
+        const workSubIds = [
+          userData.subdivisionId,
+          ...normalizeExtraSubdivisionIds(userData.extraSubdivisionIds),
+        ].filter((id): id is number => typeof id === "number" && id > 0);
+        if (
+          workSubIds.length === 0 ||
+          workSubIds.some((id) => !canManageSubdivisionId(actor, id))
+        ) {
           return res.status(403).json({ message: "Укажите подразделение из вашей зоны управления" });
         }
       } else if (userData.role === "admin") {
@@ -2398,24 +2406,38 @@ app.delete("/api/maintenance/:id", authenticate, requireRole(writeRoles), async 
       const workingStatus =
         req.body.workingStatus ?? deriveWorkingStatus(checkResults);
 
+      const equipmentId = String(req.body.equipmentId ?? "");
+      const inspectionDate = new Date(req.body.inspectionDate);
+      const todayList = await storage.getDailyInspectionsByDate(inspectionDate);
+      const existingToday = todayList.find((row) => row.equipmentId === equipmentId);
+
       const inspectionData = {
         ...req.body,
         inspectedBy: req.user.name,
-        inspectionDate: new Date(req.body.inspectionDate),
+        inspectionDate,
         issuesCount,
         workingStatus,
+        status: "completed",
       };
-      const inspection = await storage.createDailyInspection(inspectionData);
 
-      if (issuesCount > 0 || (Array.isArray(inspection.comments) && inspection.comments.length > 0)) {
-        try {
-          await createRemarkFromDailyInspection(inspection, req.user);
-        } catch (taskErr) {
-          console.error("Auto-remark from inspection failed:", taskErr);
-        }
+      const inspection = existingToday
+        ? await storage.updateDailyInspection(existingToday.id, {
+            ...inspectionData,
+            updatedAt: new Date(),
+          })
+        : await storage.createDailyInspection(inspectionData);
+
+      if (!inspection) {
+        return res.status(500).json({ message: "Не удалось сохранить осмотр" });
       }
 
-      return res.status(201).json(inspection);
+      try {
+        await syncRemarkFromDailyInspection(inspection, req.user);
+      } catch (taskErr) {
+        console.error("Sync remark from inspection failed:", taskErr);
+      }
+
+      return res.status(existingToday ? 200 : 201).json(inspection);
     } catch (error: any) {
       return res.status(500).json({ message: error.message });
     }
@@ -2423,14 +2445,34 @@ app.delete("/api/maintenance/:id", authenticate, requireRole(writeRoles), async 
 
   app.put("/api/daily-inspections/:id", authenticate, requireRole(writeRoles), async (req, res) => {
     try {
+      if (!req.user) return res.status(401).json({ message: "Authentication required" });
       const id = parseInt(req.params.id);
-      const inspectionData = {
+      const checkResults = req.body.checkResults as string[] | undefined;
+      const issuesCount =
+        req.body.issuesCount != null
+          ? Number(req.body.issuesCount)
+          : checkResults
+            ? countIssuesFromCheckResults(checkResults)
+            : undefined;
+      const inspectionData: Record<string, unknown> = {
         ...req.body,
         inspectionDate: req.body.inspectionDate ? new Date(req.body.inspectionDate) : undefined,
+        inspectedBy: req.user.name,
+        updatedAt: new Date(),
       };
+      if (issuesCount != null) inspectionData.issuesCount = issuesCount;
+      if (checkResults) {
+        inspectionData.workingStatus =
+          req.body.workingStatus ?? deriveWorkingStatus(checkResults);
+      }
       const inspection = await storage.updateDailyInspection(id, inspectionData);
       if (!inspection) {
         return res.status(404).json({ message: "Осмотр не найден" });
+      }
+      try {
+        await syncRemarkFromDailyInspection(inspection, req.user);
+      } catch (taskErr) {
+        console.error("Sync remark from inspection failed:", taskErr);
       }
       return res.status(200).json(inspection);
     } catch (error: any) {

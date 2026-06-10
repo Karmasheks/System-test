@@ -8,7 +8,6 @@ import Equipment from "@/pages/equipment";
 import Users from "@/pages/users";
 import Reports from "@/pages/reports";
 import DailyInspection from "@/pages/daily-inspection-new";
-import Remarks from "@/pages/remarks";
 import Profile from "@/pages/profile";
 import Tasks from "@/pages/tasks";
 import ServiceRequests from "@/pages/service-requests";
@@ -92,9 +91,7 @@ function Router() {
         </ProtectedLayout>
       </Route>
       <Route path="/remarks">
-        <ProtectedLayout>
-          <Remarks />
-        </ProtectedLayout>
+        <LegacyRouteRedirect to="/tasks?section=remarks" />
       </Route>
       <Route path="/reports">
         <ProtectedLayout>

@@ -581,6 +581,7 @@ export const suppliers = pgTable("suppliers", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   contactPerson: text("contact_person"),
+  position: text("position"),
   phone: text("phone"),
   email: text("email"),
   address: text("address"),
@@ -590,6 +591,12 @@ export const suppliers = pgTable("suppliers", {
   equipmentName: text("equipment_name"),
   equipmentIds: jsonb("equipment_ids").$type<string[]>().default([]),
   subdivisionIds: jsonb("subdivision_ids").$type<number[]>().default([]),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const budgetCategories = pgTable("budget_categories", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull().unique(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -779,6 +786,10 @@ export const insertSupplierSchema = createInsertSchema(suppliers)
     equipmentIds: z.array(z.string()).optional(),
     subdivisionIds: z.array(z.number()).optional(),
   });
+export const insertBudgetCategorySchema = createInsertSchema(budgetCategories).omit({
+  id: true,
+  createdAt: true,
+});
 export const insertBudgetEntrySchema = createInsertSchema(budgetEntries).omit({ id: true, createdAt: true });
 
 export const createBudgetEntryRequestSchema = insertBudgetEntrySchema.extend({
@@ -1020,6 +1031,8 @@ export type Contact = typeof contacts.$inferSelect;
 export type InsertContact = z.infer<typeof insertContactSchema>;
 export type Supplier = typeof suppliers.$inferSelect;
 export type InsertSupplier = z.infer<typeof insertSupplierSchema>;
+export type BudgetCategory = typeof budgetCategories.$inferSelect;
+export type InsertBudgetCategory = z.infer<typeof insertBudgetCategorySchema>;
 export type BudgetEntry = typeof budgetEntries.$inferSelect;
 export type InsertBudgetEntry = z.infer<typeof insertBudgetEntrySchema>;
 export type Document = typeof documents.$inferSelect;

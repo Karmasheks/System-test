@@ -23,6 +23,8 @@ import {
   createSupplier,
   updateSupplier,
   deleteSupplier,
+  listBudgetCategories,
+  createBudgetCategory,
   listBudgetEntries,
   getBudgetEntryById,
   createBudgetEntry,
@@ -206,6 +208,26 @@ export function registerAssetManagementRoutes(
     const ok = await deleteSupplier(Number(req.params.id));
     if (!ok) return res.status(404).json({ message: "Не найдено" });
     res.json({ ok: true });
+  });
+
+  // Budget categories
+  app.get("/api/budget/categories", authenticate, async (_req, res) => {
+    try {
+      res.json(await listBudgetCategories());
+    } catch {
+      res.status(500).json({ message: "Ошибка загрузки категорий" });
+    }
+  });
+
+  app.post("/api/budget/categories", authenticate, requireRole(writeRoles), async (req, res) => {
+    try {
+      const name = String(req.body.name ?? "").trim();
+      if (!name) return res.status(400).json({ message: "Укажите название категории" });
+      res.status(201).json(await createBudgetCategory(name));
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Ошибка";
+      res.status(400).json({ message });
+    }
   });
 
   // Budget
