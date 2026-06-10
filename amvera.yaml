@@ -1,14 +1,12 @@
-# https://docs.amvera.ru/applications/environments/nodejs-server.html
 meta:
   environment: node
   toolchain:
     name: npm
-    version: "20"
+    version: 20
 
 build:
   additionalCommands: npm run build
 
 run:
-  # Amvera читает amvera.yml (не .yaml). scriptName: index.js → dist/index.js
   scriptName: index.js
   containerPort: 80
