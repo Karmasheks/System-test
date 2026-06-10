@@ -4,8 +4,12 @@ import * as schema from "../shared/schema";
 
 const connectionString = process.env.DATABASE_URL!;
 
-// Create the connection
-const client = postgres(connectionString);
+const client = postgres(connectionString, {
+  max: 10,
+  connect_timeout: 15,
+  idle_timeout: 20,
+  max_lifetime: 60 * 30,
+});
 export const db = drizzle(client, { schema });
 
 // Initialize database using Drizzle ORM
@@ -35,8 +39,7 @@ export async function initializeDatabase() {
     // Seeding disabled - real data restored manually
     // await seedInitialData();
   } catch (error) {
-    console.error("Database initialization error:", error);
-    throw error;
+    console.error("Database initialization warning (server will still start):", error);
   }
 }
 

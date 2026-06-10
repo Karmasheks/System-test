@@ -2,10 +2,12 @@ import { createContext, useContext, useEffect, useState } from "react";
 import { getToken, logout } from "@/lib/auth";
 import { useQuery } from "@tanstack/react-query";
 import { User } from "@shared/schema";
+import { isTransientServerError, isUnauthorizedError } from "@/lib/api-errors";
 
 interface AuthContextType {
   user: User | null;
   isLoading: boolean;
+  authError: string | null;
   logout: () => Promise<void>;
   isAuthenticated: () => boolean;
   refreshAuth: () => void;
@@ -14,6 +16,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType>({
   user: null,
   isLoading: true,
+  authError: null,
   logout: async () => {},
   isAuthenticated: () => false,
   refreshAuth: () => {},
@@ -21,25 +24,27 @@ const AuthContext = createContext<AuthContextType>({
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isInitializing, setIsInitializing] = useState(true);
-  const [token, setToken] = useState<string | null>(getToken());
+  const [token, setToken] = useState<string | null>(() => getToken());
+  const [authError, setAuthError] = useState<string | null>(null);
 
-  const { 
-    data: user, 
+  const {
+    data: user,
     isLoading: isLoadingUser,
+    isFetching,
     refetch,
-    error
+    error,
   } = useQuery<User>({
     queryKey: ["/api/auth/me"],
     enabled: !!token,
-    retry: false,
-    staleTime: 5 * 60 * 1000, // 5 минут
-    gcTime: 10 * 60 * 1000, // 10 минут
+    retry: (failureCount, err) =>
+      isTransientServerError(err) && failureCount < 2,
+    retryDelay: 2000,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
     refetchOnWindowFocus: false,
-    refetchOnMount: false,
-    refetchOnReconnect: false
+    refetchOnReconnect: true,
   });
 
-  // Убираем все автоматические проверки - только при изменении storage
   useEffect(() => {
     const handleStorageChange = () => {
       const newToken = getToken();
@@ -48,32 +53,51 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     };
 
-    window.addEventListener('storage', handleStorageChange);
-    
-    return () => {
-      window.removeEventListener('storage', handleStorageChange);
-    };
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
   }, [token]);
 
-  // Handle authentication errors
   useEffect(() => {
-    if (error && token) {
-      // Если ошибка аутентификации, очищаем токен
-      localStorage.removeItem('token');
-      setToken(null);
-      window.location.href = '/login';
+    if (!error || !token) {
+      if (!error) setAuthError(null);
+      return;
     }
+
+    if (isUnauthorizedError(error)) {
+      localStorage.removeItem("token");
+      setToken(null);
+      setAuthError(null);
+      window.location.href = "/login";
+      return;
+    }
+
+    if (isTransientServerError(error)) {
+      setAuthError(
+        "Сервер временно недоступен. Токен сохранён — попробуйте обновить страницу."
+      );
+      return;
+    }
+
+    setAuthError(error instanceof Error ? error.message : "Ошибка проверки сессии");
   }, [error, token]);
 
-  // Initial auth check on page load
   useEffect(() => {
-    if (token) {
-      refetch();
+    if (!token) {
+      setIsInitializing(false);
+      return;
     }
-    setIsInitializing(false);
+
+    let cancelled = false;
+    void refetch().finally(() => {
+      if (!cancelled) setIsInitializing(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [token, refetch]);
 
-  const isLoading = isInitializing || isLoadingUser;
+  const isLoading = isInitializing || (!!token && (isLoadingUser || isFetching) && !user);
 
   const handleLogout = async () => {
     await logout();
@@ -87,8 +111,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const refreshAuth = () => {
     const newToken = getToken();
     setToken(newToken);
+    setAuthError(null);
     if (newToken) {
-      refetch();
+      setIsInitializing(true);
+      void refetch().finally(() => setIsInitializing(false));
     }
   };
 
@@ -97,6 +123,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       value={{
         user: user || null,
         isLoading,
+        authError,
         logout: handleLogout,
         isAuthenticated: checkIsAuthenticated,
         refreshAuth,

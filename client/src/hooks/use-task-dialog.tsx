@@ -10,7 +10,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useAccessControl } from "@/hooks/use-access-control";
 import { useToast } from "@/hooks/use-toast";
 import { useTeamUsers } from "@/hooks/use-warehouse";
-import { TASK_TYPES, type TaskTypeCode } from "@shared/task-constants";
+import { TASK_TYPES, taskPriorityLabel, taskTypeLabel, type TaskTypeCode } from "@shared/task-constants";
 import { TASK_STATUS_LABELS, taskStatusLabel } from "@shared/task-status-constants";
 import {
   isServiceRequestVoidStatus,
@@ -38,8 +38,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
 import { ServiceRequestWorkProgressBar } from "@/components/service-requests/service-request-work-progress";
+import { LinkedTaskTree } from "@/components/tasks/linked-task-tree";
 import {
   Select,
   SelectContent,
@@ -51,13 +51,15 @@ import type { TaskComment, PartReservation, Task } from "@shared/schema";
 import { useLocation, useSearch } from "wouter";
 import { format } from "date-fns";
 import { ru } from "date-fns/locale";
-import { X, ExternalLink, History, ArrowLeft, CircleDot } from "lucide-react";
+import { X, ExternalLink, History, ArrowLeft, CircleDot, MessageSquare } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { taskStatusColors } from "@/lib/badge-colors";
 import { SubdivisionPicker } from "@/components/subdivision-picker";
 import { useSubdivisions } from "@/hooks/use-subdivisions";
 import { canAccessSubdivision } from "@shared/subdivision-scope";
 import { equipmentOptionLabel } from "@/lib/equipment-label";
+import { buildUrlAttachment } from "@/lib/comment-attachment";
 
 const taskTypeCodes = TASK_TYPES.map((t) => t.code) as [
   (typeof TASK_TYPES)[number]["code"],
@@ -208,6 +210,7 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
+  const [dialogTab, setDialogTab] = useState<"details" | "subtasks" | "comments" | "history">("details");
   const [editingTask, setEditingTask] = useState<TaskRecord | null>(null);
   const [taskNavStack, setTaskNavStack] = useState<TaskRecord[]>([]);
   const [commentText, setCommentText] = useState("");
@@ -481,6 +484,7 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
     (options?: OpenCreateOptions) => {
       setEditingTask(null);
       setTaskNavStack([]);
+      setDialogTab("details");
       setCommentText("");
       setCompletionWorkComment("");
       setCompletionDurationHours("");
@@ -505,6 +509,8 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
 
   const openEdit = useCallback(
     (task: TaskRecord) => {
+      setTaskNavStack([]);
+      setDialogTab("details");
       setEditingTask(task);
       setCommentText("");
       setCompletionWorkComment("");
@@ -514,6 +520,22 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
       setOpen(true);
     },
     [applyTaskToForm]
+  );
+
+  const navigateAway = useCallback(
+    (path: string) => {
+      setOpen(false);
+      setEditingTask(null);
+      setTaskNavStack([]);
+      setCommentText("");
+      setCompletionWorkComment("");
+      setCompletionDurationHours("");
+      setCompletionDurationMinutes("");
+      setSubdivisionId("");
+      form.reset(defaultFormValues());
+      setLocation(path);
+    },
+    [form, setLocation]
   );
 
   const navigateToSubtask = useCallback(
@@ -539,8 +561,17 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
     }
   }, [taskNavStack, loadTaskIntoDialog, editingTask, taskTree]);
 
+  const navigateToParentTask = useCallback(() => {
+    if (!editingTask?.parentTaskId || !taskTree?.tasks) return;
+    const parent = taskTree.tasks.find((t) => t.id === editingTask.parentTaskId);
+    if (!parent) return;
+    setTaskNavStack((stack) => [...stack, editingTask]);
+    void loadTaskIntoDialog(toTaskRecord(parent));
+  }, [editingTask, taskTree, loadTaskIntoDialog]);
+
   const close = useCallback(() => {
     setOpen(false);
+    setDialogTab("details");
     setEditingTask(null);
     setTaskNavStack([]);
     setCommentText("");
@@ -688,8 +719,9 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
             attachmentName.trim() || attachmentFile.name
           ),
         ];
-      } else if (attachmentName.trim() && attachmentUrl.trim()) {
-        attachments = [{ name: attachmentName.trim(), url: attachmentUrl.trim() }];
+      } else {
+        const urlAttachment = buildUrlAttachment(attachmentName, attachmentUrl);
+        if (urlAttachment) attachments = [urlAttachment];
       }
       if (!commentText.trim() && attachments.length === 0) return;
       const res = await apiRequest("POST", `/api/tasks/${editingTask.id}/comments`, {
@@ -920,261 +952,243 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
       {children}
       <Dialog open={open} onOpenChange={(v) => !v && close()}>
         {open ? (
-        <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col gap-0 p-0 overflow-hidden">
-          <DialogHeader className="px-6 pt-6 pb-2 shrink-0 space-y-2">
-            <DialogTitle>
-              {editingTask?.parentTaskId
-                ? `Подзадача #${editingTask.id}`
-                : editingTask
-                  ? isRootTask && taskTree?.summary?.total
-                    ? `Главная задача #${editingTask.id}`
-                    : `Редактировать задачу #${editingTask.id}`
-                  : "Создать новую задачу"}
-            </DialogTitle>
-            <p className="text-sm text-muted-foreground">
-              Поля с <span className="text-red-500">*</span> обязательны.
-              {!editingTask && (
-                <span className="block mt-1">
-                  Исполнитель и сроки назначаются администратором при обработке задачи.
-                </span>
+        <DialogContent className="max-w-4xl max-h-[92vh] flex flex-col gap-0 p-0 overflow-hidden sm:max-w-4xl">
+          <div className="shrink-0 border-b bg-muted/30 pl-3 pr-12 py-2 space-y-1">
+            <div className="flex items-start gap-2 min-w-0">
+              {(taskNavStack.length > 0 || editingTask?.parentTaskId) && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-1.5 shrink-0 -ml-1"
+                  onClick={goBackToParentTask}
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                </Button>
               )}
-            </p>
-            {editingTask && (
-              <div className="space-y-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge
-                    className={cn(
-                      "text-sm px-3 py-1",
-                      taskStatusColors[watchedStatus] ?? taskStatusColors.pending
-                    )}
-                  >
-                    {taskStatusLabel(watchedStatus)}
-                  </Badge>
-                  {canModify && (
-                    <Select
-                      value={watchedStatus}
-                      onValueChange={(value) =>
-                        form.setValue("status", value as TaskFormData["status"], {
-                          shouldDirty: true,
-                        })
-                      }
-                    >
-                      <SelectTrigger className="w-[200px] h-9">
-                        <SelectValue placeholder="Сменить статус…" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="pending">{TASK_STATUS_LABELS.pending}</SelectItem>
-                        <SelectItem value="in_progress">{TASK_STATUS_LABELS.in_progress}</SelectItem>
-                        {!taskManagedViaServiceRequest && (
-                          <SelectItem value="completed">{TASK_STATUS_LABELS.completed}</SelectItem>
+              <div className="min-w-0 flex-1">
+                <DialogTitle className="text-base font-bold leading-snug truncate">
+                  {editingTask
+                    ? `#${editingTask.id} · ${form.watch("title") || editingTask.title}`
+                    : "Новая задача"}
+                </DialogTitle>
+                {editingTask && (
+                  <div className="flex flex-wrap items-center gap-1 mt-1">
+                    {canModify ? (
+                      <Select
+                        value={watchedStatus}
+                        onValueChange={(value) =>
+                          form.setValue("status", value as TaskFormData["status"], {
+                            shouldDirty: true,
+                          })
+                        }
+                      >
+                        <SelectTrigger
+                          className={cn(
+                            "h-6 w-[132px] text-[10px] border-0 shadow-none",
+                            taskStatusColors[watchedStatus] ?? taskStatusColors.pending
+                          )}
+                        >
+                          <SelectValue placeholder="Статус" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="pending">{TASK_STATUS_LABELS.pending}</SelectItem>
+                          <SelectItem value="in_progress">{TASK_STATUS_LABELS.in_progress}</SelectItem>
+                          {!taskManagedViaServiceRequest && (
+                            <SelectItem value="completed">{TASK_STATUS_LABELS.completed}</SelectItem>
+                          )}
+                          <SelectItem value="overdue">{TASK_STATUS_LABELS.overdue}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <Badge
+                        className={cn(
+                          "text-[10px] h-5",
+                          taskStatusColors[watchedStatus] ?? taskStatusColors.pending
                         )}
-                        <SelectItem value="overdue">{TASK_STATUS_LABELS.overdue}</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  )}
-                  {taskManagedViaServiceRequest && (
-                    <span className="text-xs text-muted-foreground">
-                      Завершение — через сервисную заявку
-                    </span>
-                  )}
-                  {srIsVoid && isRootTask && (
-                    <span className="text-xs text-muted-foreground">
-                      Заявка закрыта без выполнения — задачу можно завершить вручную
-                    </span>
-                  )}
-                </div>
-                {isCompletingTask && canModify && (
-                  <div className="rounded-md border border-green-200 bg-green-50/50 dark:bg-green-950/20 p-3 max-w-2xl">
-                    <p className="text-xs font-medium text-muted-foreground mb-2">Итог при закрытии</p>
-                    <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
-                      <div>
-                        <Label className="text-xs">
-                          Описание работ <span className="text-red-500">*</span>
-                        </Label>
-                        <Textarea
-                          className="mt-1"
-                          placeholder="Что было сделано"
-                          value={completionWorkComment}
-                          onChange={(e) => setCompletionWorkComment(e.target.value)}
-                          rows={3}
-                        />
-                      </div>
-                      <div className="space-y-2 shrink-0">
-                        <Label className="text-xs">
-                          Затрачено <span className="text-red-500">*</span>
-                        </Label>
-                        <div className="flex gap-2">
-                          <div className="w-16">
-                            <Label className="text-[10px] text-muted-foreground">Часы</Label>
-                            <Input
-                              className="mt-0.5"
-                              type="number"
-                              min={0}
-                              step={1}
-                              placeholder="0"
-                              value={completionDurationHours}
-                              onChange={(e) => setCompletionDurationHours(e.target.value)}
-                            />
-                          </div>
-                          <div className="w-16">
-                            <Label className="text-[10px] text-muted-foreground">Мин</Label>
-                            <Input
-                              className="mt-0.5"
-                              type="number"
-                              min={0}
-                              max={59}
-                              step={1}
-                              placeholder="45"
-                              value={completionDurationMinutes}
-                              onChange={(e) => setCompletionDurationMinutes(e.target.value)}
-                            />
-                          </div>
-                        </div>
-                        <p className="text-[10px] text-muted-foreground max-w-[140px]">
-                          Например: 0 ч 45 мин или 1 ч 15 мин
-                        </p>
-                      </div>
-                    </div>
+                      >
+                        {taskStatusLabel(watchedStatus)}
+                      </Badge>
+                    )}
+                    <Badge variant="outline" className="text-[10px] h-5">
+                      {taskPriorityLabel(form.watch("priority"))}
+                    </Badge>
+                    <Badge variant="secondary" className="text-[10px] h-5 max-w-[140px] truncate">
+                      {taskTypeLabel(form.watch("taskType"), form.watch("taskTypeCustom"))}
+                    </Badge>
+                    {linkedServiceRequestId && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-6 text-[10px] px-2 border-indigo-300/60 bg-indigo-50/80 dark:bg-indigo-950/30"
+                        onClick={() => navigateAway(`/service-requests/${linkedServiceRequestId}`)}
+                      >
+                        <ExternalLink className="w-3 h-3 mr-1" />
+                        Заявка #{linkedServiceRequestId}
+                      </Button>
+                    )}
                   </div>
                 )}
-                {editingTask.status === "completed" &&
-                  !isCompletingTask &&
-                  (editingTask.completionComment || editingTask.actualHours != null) && (
-                    <div className="rounded-md border bg-muted/30 p-3 max-w-2xl">
-                      <p className="text-xs font-medium text-muted-foreground mb-2">Итог работ</p>
-                      <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
-                        {editingTask.completionComment && (
-                          <p className="text-sm whitespace-pre-wrap">{editingTask.completionComment}</p>
-                        )}
-                        {editingTask.actualHours != null && (
-                          <div className="sm:text-right shrink-0">
-                            <p className="text-xs text-muted-foreground">Затрачено</p>
-                            <p className="text-sm font-semibold">{formatActualHours(editingTask.actualHours)}</p>
+                {!editingTask && (
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    Поля с * обязательны. Исполнитель назначается при обработке.
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <Form {...form}>
+            <form
+              onSubmit={form.handleSubmit(onSubmit)}
+              className="flex flex-col flex-1 min-h-0 overflow-hidden"
+            >
+              <Tabs
+                value={editingTask ? dialogTab : "details"}
+                onValueChange={(v) => {
+                  if (editingTask) {
+                    setDialogTab(v as "details" | "subtasks" | "comments" | "history");
+                  }
+                }}
+                className="flex flex-col flex-1 min-h-0"
+              >
+                {editingTask && (
+                  <TabsList className="shrink-0 mx-4 mt-2 h-9 grid w-full max-w-xl grid-cols-4 bg-muted/60">
+                    <TabsTrigger value="details" className="text-xs">Детали</TabsTrigger>
+                    <TabsTrigger
+                      value="subtasks"
+                      className="text-xs"
+                      disabled={
+                        !(
+                          (taskTree?.summary?.total ?? 0) > 0 ||
+                          (linkedServiceRequestId &&
+                            (taskManagedViaServiceRequest ||
+                              (srWorkProgress?.subtasksTotal ?? 0) > 0))
+                        )
+                      }
+                    >
+                      Подзадачи (
+                      {linkedServiceRequestId
+                        ? srWorkProgress?.subtasksTotal ?? 0
+                        : taskTree?.summary?.total ?? 0}
+                      )
+                    </TabsTrigger>
+                    <TabsTrigger value="comments" className="text-xs">
+                      Коммент. ({taskComments.length})
+                    </TabsTrigger>
+                    <TabsTrigger value="history" className="text-xs">История</TabsTrigger>
+                  </TabsList>
+                )}
+                <div className="flex-1 overflow-y-auto px-4 py-3 min-h-0">
+                  <TabsContent value="details" className="mt-0 space-y-3">
+                    {editingTask && isCompletingTask && canModify && (
+                      <div className="rounded-md border border-green-200 bg-green-50/50 dark:bg-green-950/20 p-3">
+                        <p className="text-xs font-medium text-muted-foreground mb-2">Итог при закрытии</p>
+                        <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+                          <div>
+                            <Label className="text-xs">
+                              Описание работ <span className="text-red-500">*</span>
+                            </Label>
+                            <Textarea
+                              className="mt-1"
+                              placeholder="Что было сделано"
+                              value={completionWorkComment}
+                              onChange={(e) => setCompletionWorkComment(e.target.value)}
+                              rows={3}
+                            />
                           </div>
-                        )}
+                          <div className="space-y-2 shrink-0">
+                            <Label className="text-xs">
+                              Затрачено <span className="text-red-500">*</span>
+                            </Label>
+                            <div className="flex gap-2">
+                              <div className="w-16">
+                                <Label className="text-[10px] text-muted-foreground">Часы</Label>
+                                <Input
+                                  className="mt-0.5"
+                                  type="number"
+                                  min={0}
+                                  step={1}
+                                  placeholder="0"
+                                  value={completionDurationHours}
+                                  onChange={(e) => setCompletionDurationHours(e.target.value)}
+                                />
+                              </div>
+                              <div className="w-16">
+                                <Label className="text-[10px] text-muted-foreground">Мин</Label>
+                                <Input
+                                  className="mt-0.5"
+                                  type="number"
+                                  min={0}
+                                  max={59}
+                                  step={1}
+                                  placeholder="45"
+                                  value={completionDurationMinutes}
+                                  onChange={(e) => setCompletionDurationMinutes(e.target.value)}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        </div>
                       </div>
-                      {(editingTask.completedBy || editingTask.completedAt) && (
-                        <p className="text-xs text-muted-foreground mt-2">
-                          {editingTask.completedBy ? `Закрыл: ${editingTask.completedBy}` : ""}
-                          {editingTask.completedAt
-                            ? `${editingTask.completedBy ? " · " : ""}${format(new Date(editingTask.completedAt), "dd.MM.yyyy HH:mm", { locale: ru })}`
+                    )}
+                    {editingTask &&
+                      editingTask.status === "completed" &&
+                      !isCompletingTask &&
+                      (editingTask.completionComment || editingTask.actualHours != null) && (
+                        <div className="rounded-md border bg-muted/30 p-3">
+                          <p className="text-xs font-medium text-muted-foreground mb-2">Итог работ</p>
+                          <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+                            {editingTask.completionComment && (
+                              <p className="text-sm whitespace-pre-wrap">{editingTask.completionComment}</p>
+                            )}
+                            {editingTask.actualHours != null && (
+                              <div className="sm:text-right shrink-0">
+                                <p className="text-xs text-muted-foreground">Затрачено</p>
+                                <p className="text-sm font-semibold">{formatActualHours(editingTask.actualHours)}</p>
+                              </div>
+                            )}
+                          </div>
+                          {(editingTask.completedBy || editingTask.completedAt) && (
+                            <p className="text-xs text-muted-foreground mt-2">
+                              {editingTask.completedBy ? `Закрыл: ${editingTask.completedBy}` : ""}
+                              {editingTask.completedAt
+                                ? `${editingTask.completedBy ? " · " : ""}${format(new Date(editingTask.completedAt), "dd.MM.yyyy HH:mm", { locale: ru })}`
+                                : ""}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    {!editingTask && !canModify && (
+                      <p className="text-sm text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 p-2 rounded-md">
+                        Только просмотр — нет прав на изменение.
+                      </p>
+                    )}
+                    {editingTask && !canModify && (
+                        <p className="text-sm text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 p-2 rounded-md">
+                          Только просмотр — нет прав на изменение.
+                        </p>
+                      )}
+                      {editingTask?.parentTaskId && taskTree?.tasks && !taskNavStack.length && (
+                        <button
+                          type="button"
+                          className="text-xs text-primary hover:underline"
+                          onClick={navigateToParentTask}
+                        >
+                          ↑ Родитель: #{editingTask.parentTaskId}{" "}
+                          {taskTree.tasks.find((t) => t.id === editingTask.parentTaskId)?.title ?? ""}
+                        </button>
+                      )}
+                      {editingTask?.openedByName && (
+                        <p className="text-xs text-muted-foreground">
+                          В работе: {editingTask.openedByName}
+                          {editingTask.openedAt
+                            ? ` · ${format(new Date(editingTask.openedAt), "dd.MM.yyyy HH:mm", { locale: ru })}`
                             : ""}
                         </p>
                       )}
-                    </div>
-                  )}
-              </div>
-            )}
-            {(taskNavStack.length > 0 || editingTask?.parentTaskId) && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="w-fit"
-                onClick={goBackToParentTask}
-              >
-                <ArrowLeft className="w-3.5 h-3.5 mr-1" />
-                К родительской задаче
-                {taskNavStack.length > 0 ? ` #${taskNavStack[taskNavStack.length - 1].id}` : ""}
-              </Button>
-            )}
-            {editingTask?.parentTaskId && taskTree?.tasks && !taskNavStack.length && (
-              <Button
-                type="button"
-                variant="link"
-                className="h-auto p-0 text-sm justify-start"
-                onClick={() => {
-                  const parent = taskTree.tasks.find((t) => t.id === editingTask.parentTaskId);
-                  if (parent) void loadTaskIntoDialog(toTaskRecord(parent));
-                }}
-              >
-                Родительская задача: #{editingTask.parentTaskId}{" "}
-                {taskTree.tasks.find((t) => t.id === editingTask.parentTaskId)?.title ?? ""}
-              </Button>
-            )}
-            {editingTask && linkedServiceRequestId && (
-              <div className="rounded-lg border border-indigo-200 bg-indigo-50 dark:bg-indigo-950/30 p-3 space-y-3">
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-medium">Сервисная заявка #{linkedServiceRequestId}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {srIsVoid
-                        ? `Статус заявки: ${STATUS_LABELS[srWorkProgress!.requestStatus as ServiceRequestStatus] ?? srWorkProgress!.requestStatus}. Связанные задачи можно завершить вручную.`
-                        : taskManagedViaServiceRequest
-                          ? "Подзадачи и дальнейшая работа ведутся в заявке. Родительская задача закроется после закрытия заявки."
-                          : "Задача связана с сервисной заявкой"}
-                    </p>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setLocation(`/service-requests/${linkedServiceRequestId}`)}
-                  >
-                    <ExternalLink className="w-3.5 h-3.5 mr-1" />
-                    Открыть
-                  </Button>
-                </div>
-                {srWorkProgress && (
-                  <ServiceRequestWorkProgressBar progress={srWorkProgress} compact />
-                )}
-              </div>
-            )}
-            {editingTask && taskTree?.summary && taskTree.summary.total > 0 && !linkedServiceRequestId && (
-              <div className="rounded-lg border p-3 space-y-2 bg-muted/30">
-                <div className="flex justify-between text-sm font-medium">
-                  <span>Прогресс подзадач</span>
-                  <span>
-                    {taskTree.summary.completed}/{taskTree.summary.total} · {taskTree.summary.progress}%
-                  </span>
-                </div>
-                <Progress value={taskTree.summary.progress} className="h-2" />
-                {activeSubtasks.length > 0 && (
-                  <div className="rounded-md border border-amber-300/60 bg-amber-50/80 dark:bg-amber-950/20 px-3 py-2 space-y-1">
-                    <p className="text-xs font-medium text-amber-800 dark:text-amber-200 flex items-center gap-1">
-                      <CircleDot className="w-3.5 h-3.5" />
-                      Сейчас в работе
-                    </p>
-                    {activeSubtasks.map((t) => (
-                      <button
-                        key={t.id}
-                        type="button"
-                        className="block w-full text-left text-sm text-amber-900 dark:text-amber-100 hover:underline"
-                        onClick={() => navigateToSubtask(toTaskRecord(t))}
-                      >
-                        #{t.id} {t.title}
-                      </button>
-                    ))}
-                  </div>
-                )}
-                <div className="flex flex-wrap gap-2">
-                  {Object.entries(taskTree.summary.byStatus).map(([status, count]) => (
-                    <Badge key={status} variant="outline">
-                      {taskStatusLabel(status)}: {count}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-            )}
-          </DialogHeader>
-
-          <div className="overflow-y-auto px-6 flex-1 min-h-0">
-          <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 pb-4">
-              {!canModify && (
-                <p className="text-sm text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 p-3 rounded-md">
-                  У вас нет прав на изменение задач — доступен только просмотр.
-                </p>
-              )}
-              {editingTask?.openedByName && (
-                <p className="text-sm text-muted-foreground">
-                  Взял в работу: {editingTask.openedByName}
-                  {editingTask.openedAt
-                    ? ` · ${format(new Date(editingTask.openedAt), "dd.MM.yyyy HH:mm", { locale: ru })}`
-                    : ""}
-                </p>
-              )}
-              <fieldset disabled={!canModify} className="space-y-4 border-0 p-0 m-0 min-w-0">
+                      <fieldset disabled={!canModify} className="space-y-3 border-0 p-0 m-0 min-w-0">
               <SubdivisionPicker
                 value={subdivisionId}
                 onChange={handleSubdivisionChange}
@@ -1511,82 +1525,87 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
               )}
 
               </fieldset>
+                    </TabsContent>
 
-              {editingTask && canViewTaskDetails && (
-                <div className="rounded-lg border p-4 space-y-3">
-                  <div className="flex items-center gap-2">
-                    <History className="w-4 h-4" />
-                    <h4 className="font-medium">История изменений</h4>
-                  </div>
-
-                  <div className="space-y-2">
-                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                      Задача
-                    </p>
-                    {taskHistory.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">Записей пока нет</p>
-                    ) : (
-                      <div className="max-h-40 overflow-y-auto space-y-2">
-                        {taskHistory.map((entry) => (
-                          <div key={entry.id} className="text-sm rounded-md bg-muted/50 px-3 py-2">
-                            <div className="flex justify-between gap-2 text-xs text-muted-foreground mb-1">
-                              <span>{entry.changedByName}</span>
-                              <span>
-                                {format(new Date(entry.createdAt), "dd.MM.yyyy HH:mm", { locale: ru })}
-                              </span>
-                            </div>
-                            <p>
-                              {entry.fromStatus
-                                ? `${taskStatusLabel(entry.fromStatus)} → ${taskStatusLabel(entry.toStatus)}`
-                                : taskStatusLabel(entry.toStatus)}
-                              {entry.comment ? ` — ${entry.comment}` : ""}
-                            </p>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {linkedServiceRequestId && (
-                    <div className="space-y-2 border-t pt-3">
-                      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                        Сервисная заявка #{linkedServiceRequestId}
-                      </p>
-                      {(serviceRequestHistoryPayload?.history ?? []).length === 0 ? (
-                        <p className="text-sm text-muted-foreground">История заявки пуста</p>
-                      ) : (
-                        <div className="max-h-40 overflow-y-auto space-y-2">
-                          {(serviceRequestHistoryPayload?.history ?? []).map((entry) => (
-                            <div key={entry.id} className="text-sm rounded-md bg-muted/50 px-3 py-2">
-                              <div className="flex justify-between gap-2 text-xs text-muted-foreground mb-1">
-                                <span>{entry.changedByName}</span>
-                                <span>
-                                  {format(new Date(entry.createdAt), "dd.MM.yyyy HH:mm", { locale: ru })}
-                                </span>
-                              </div>
-                              <p>
-                                {entry.fromStatus
-                                  ? `${STATUS_LABELS[entry.fromStatus as ServiceRequestStatus] ?? entry.fromStatus} → ${STATUS_LABELS[entry.toStatus as ServiceRequestStatus] ?? entry.toStatus}`
-                                  : STATUS_LABELS[entry.toStatus as ServiceRequestStatus] ?? entry.toStatus}
-                                {entry.comment ? ` — ${entry.comment}` : ""}
-                              </p>
-                            </div>
-                          ))}
+                    <TabsContent value="subtasks" className="mt-0 space-y-2">
+                      {taskTree?.summary && taskTree.summary.total > 0 ? (
+                        <>
+                          {linkedServiceRequestId && srWorkProgress && (
+                            <ServiceRequestWorkProgressBar progress={srWorkProgress} compact />
+                          )}
+                          <LinkedTaskTree
+                            groupLabel={
+                              linkedServiceRequestId
+                                ? `Заявка #${linkedServiceRequestId}`
+                                : `Задача #${taskTree.root.id}`
+                            }
+                            groupHint={
+                              linkedServiceRequestId
+                                ? "Все этапы связаны одной заявкой"
+                                : "Подзадачи одной родительской задачи"
+                            }
+                            rootTask={{
+                              id: taskTree.root.id,
+                              title: taskTree.root.title,
+                              status: taskTree.root.status,
+                              taskType: taskTree.root.taskType,
+                            }}
+                            childTasks={sortedTreeSubtasks
+                              .filter((t) => t.id !== editingTask?.id)
+                              .map((t) => ({
+                                id: t.id,
+                                title: t.title,
+                                status: t.status,
+                                taskType: t.taskType,
+                              }))}
+                            highlightTaskId={editingTask?.id}
+                            onOpenTask={(taskId) => {
+                              const t = taskTree.tasks.find((x) => x.id === taskId);
+                              if (t) navigateToSubtask(toTaskRecord(t));
+                            }}
+                          />
+                          {linkedServiceRequestId && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-7 text-xs"
+                              onClick={() => navigateAway(`/service-requests/${linkedServiceRequestId}`)}
+                            >
+                              <ExternalLink className="w-3 h-3 mr-1" />
+                              Управление на странице заявки
+                            </Button>
+                          )}
+                        </>
+                      ) : linkedServiceRequestId &&
+                        (taskManagedViaServiceRequest || workViaServiceRequest) ? (
+                        <div className="rounded-lg border border-primary/25 bg-card p-3 space-y-2">
+                          {srWorkProgress && (
+                            <ServiceRequestWorkProgressBar progress={srWorkProgress} compact />
+                          )}
+                          <p className="text-xs text-muted-foreground">
+                            Этапы работ на странице заявки #{linkedServiceRequestId}.
+                          </p>
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="h-7 text-xs"
+                            onClick={() => navigateAway(`/service-requests/${linkedServiceRequestId}`)}
+                          >
+                            <ExternalLink className="w-3 h-3 mr-1" />
+                            Открыть заявку
+                          </Button>
                         </div>
+                      ) : (
+                        <p className="text-sm text-muted-foreground py-4 text-center">
+                          Подзадач нет
+                        </p>
                       )}
-                    </div>
-                  )}
-                </div>
-              )}
+                    </TabsContent>
 
-              {editingTask && canViewTaskDetails && (
-                <div className="rounded-lg border p-4 space-y-3">
-                  <div>
-                    <h4 className="font-medium">Комментарии</h4>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Переписка между создателем задачи и исполнителем
-                    </p>
-                  </div>
+                    <TabsContent value="comments" className="mt-0 space-y-3">
+              {canViewTaskDetails && (
+                <div className="space-y-3">
                   {taskReservations.filter((r) => r.status === "reserved").length > 0 && (
                     <div className="text-sm bg-amber-50 dark:bg-amber-950/30 rounded p-2">
                       <p className="font-medium text-amber-900 dark:text-amber-100">Зарезервировано:</p>
@@ -1649,12 +1668,12 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
                       />
                       <div className="grid grid-cols-2 gap-2">
                         <Input
-                          placeholder="Название файла"
+                          placeholder="Название ссылки (необяз.)"
                           value={attachmentName}
                           onChange={(e) => setAttachmentName(e.target.value)}
                         />
                         <Input
-                          placeholder="Ссылка (URL)"
+                          placeholder="URL"
                           value={attachmentUrl}
                           onChange={(e) => setAttachmentUrl(e.target.value)}
                           disabled={!!attachmentFile}
@@ -1676,7 +1695,7 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
                         disabled={
                           (!commentText.trim() &&
                             !attachmentFile &&
-                            !(attachmentName.trim() && attachmentUrl.trim())) ||
+                            !buildUrlAttachment(attachmentName, attachmentUrl)) ||
                           addComment.isPending
                         }
                         onClick={() => addComment.mutate()}
@@ -1691,47 +1710,80 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
                   )}
                 </div>
               )}
+                    </TabsContent>
 
-              {editingTask && canViewTaskDetails && taskManagedViaServiceRequest && (
-                <div className="rounded-lg border p-4 space-y-2 bg-muted/20">
-                  <h4 className="font-medium text-sm">Подзадачи</h4>
-                  <p className="text-sm text-muted-foreground">
-                    Подзадачи (закупки, модернизации и др.) перенесены в сервисную заявку #
-                    {linkedServiceRequestId}. Управляйте ими на странице заявки.
-                  </p>
-                  {srWorkProgress && srWorkProgress.subtasksTotal > 0 && (
-                    <ServiceRequestWorkProgressBar progress={srWorkProgress} />
-                  )}
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => setLocation(`/service-requests/${linkedServiceRequestId}`)}
-                  >
-                    <ExternalLink className="w-3.5 h-3.5 mr-1" />
-                    Перейти к подзадачам в заявке
-                  </Button>
+                    <TabsContent value="history" className="mt-0 space-y-3">
+                      {canViewTaskDetails ? (
+                        <>
+                          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                            История задачи
+                          </p>
+                          {taskHistory.length === 0 ? (
+                            <p className="text-sm text-muted-foreground">Записей нет</p>
+                          ) : (
+                            <div className="space-y-2 max-h-72 overflow-y-auto">
+                              {taskHistory.map((entry) => (
+                                <div key={entry.id} className="text-sm rounded-md border bg-muted/30 px-3 py-2">
+                                  <div className="flex justify-between gap-2 text-xs text-muted-foreground mb-1">
+                                    <span>{entry.changedByName}</span>
+                                    <span>
+                                      {format(new Date(entry.createdAt), "dd.MM.yyyy HH:mm", { locale: ru })}
+                                    </span>
+                                  </div>
+                                  <p>
+                                    {entry.fromStatus
+                                      ? `${taskStatusLabel(entry.fromStatus)} → ${taskStatusLabel(entry.toStatus)}`
+                                      : taskStatusLabel(entry.toStatus)}
+                                    {entry.comment ? ` — ${entry.comment}` : ""}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {linkedServiceRequestId && (
+                            <div className="border-t pt-3 space-y-2">
+                              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                                Заявка #{linkedServiceRequestId}
+                              </p>
+                              {(serviceRequestHistoryPayload?.history ?? []).length === 0 ? (
+                                <p className="text-sm text-muted-foreground">История заявки пуста</p>
+                              ) : (
+                                <div className="space-y-2 max-h-48 overflow-y-auto">
+                                  {(serviceRequestHistoryPayload?.history ?? []).map((entry) => (
+                                    <div
+                                      key={entry.id}
+                                      className="text-sm rounded-md border bg-muted/30 px-3 py-2"
+                                    >
+                                      <div className="flex justify-between gap-2 text-xs text-muted-foreground mb-1">
+                                        <span>{entry.changedByName}</span>
+                                        <span>
+                                          {format(new Date(entry.createdAt), "dd.MM.yyyy HH:mm", {
+                                            locale: ru,
+                                          })}
+                                        </span>
+                                      </div>
+                                      <p>
+                                        {entry.fromStatus
+                                          ? `${STATUS_LABELS[entry.fromStatus as ServiceRequestStatus] ?? entry.fromStatus} → ${STATUS_LABELS[entry.toStatus as ServiceRequestStatus] ?? entry.toStatus}`
+                                          : STATUS_LABELS[entry.toStatus as ServiceRequestStatus] ??
+                                            entry.toStatus}
+                                        {entry.comment ? ` — ${entry.comment}` : ""}
+                                      </p>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">История недоступна</p>
+                      )}
+                    </TabsContent>
                 </div>
-              )}
+              </Tabs>
 
-              {editingTask && canViewTaskDetails && workViaServiceRequest && !isRootTask && (
-                <div className="rounded-lg border p-3 text-sm bg-muted/20 space-y-2">
-                  <p className="text-muted-foreground">
-                    Подзадача сервисной заявки #{linkedServiceRequestId}. Создание новых этапов — на
-                    странице заявки.
-                  </p>
-                  <Button
-                    type="button"
-                    variant="link"
-                    className="h-auto p-0"
-                    onClick={() => setLocation(`/service-requests/${linkedServiceRequestId}`)}
-                  >
-                    Открыть заявку
-                  </Button>
-                </div>
-              )}
-
-              <div className="flex justify-end gap-3 pt-2 flex-wrap">
+              <div className="shrink-0 border-t bg-muted/20 px-4 py-3 flex justify-end gap-2 flex-wrap">
                 {editingTask && canConvertTaskToServiceRequest() && !linkedServiceRequestId && (
                   <>
                     <Select value={convertRequestType} onValueChange={setConvertRequestType}>
@@ -1767,7 +1819,6 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
               </div>
             </form>
           </Form>
-          </div>
         </DialogContent>
         ) : null}
       </Dialog>

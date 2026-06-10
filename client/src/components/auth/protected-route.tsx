@@ -8,15 +8,15 @@ interface ProtectedRouteProps {
 }
 
 export function ProtectedRoute({ children }: ProtectedRouteProps) {
-  const { user, isLoading } = useAuth();
+  const { user, isLoading, authError } = useAuth();
   const [, setLocation] = useLocation();
   const token = getToken();
 
   useEffect(() => {
-    if (!isLoading && (!token || !user)) {
+    if (!isLoading && !authError && (!token || !user)) {
       setLocation("/login");
     }
-  }, [token, user, isLoading, setLocation]);
+  }, [token, user, isLoading, authError, setLocation]);
 
   if (isLoading) {
     return (
@@ -24,6 +24,23 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
         <div className="text-center">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
           <p className="text-gray-600 dark:text-gray-400">Загрузка...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (authError && token) {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-4">
+        <div className="text-center max-w-md space-y-3">
+          <p className="text-gray-700 dark:text-gray-300">{authError}</p>
+          <button
+            type="button"
+            className="text-sm text-primary underline"
+            onClick={() => window.location.reload()}
+          >
+            Обновить страницу
+          </button>
         </div>
       </div>
     );

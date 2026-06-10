@@ -33,6 +33,7 @@ type Props = {
     options?: { successTitle?: string }
   ) => Promise<void>;
   isPending?: boolean;
+  compact?: boolean;
 };
 
 export function ServiceRequestStatusBar({
@@ -41,6 +42,7 @@ export function ServiceRequestStatusBar({
   partsCount,
   onTransition,
   isPending,
+  compact = false,
 }: Props) {
   const { toast } = useToast();
   const rawStatus = request.status as ServiceRequestStatus;
@@ -140,10 +142,10 @@ export function ServiceRequestStatusBar({
   };
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
+    <div className={compact ? "space-y-1.5" : "space-y-3"}>
+      <div className="flex flex-wrap items-center gap-1.5">
         <Badge
-          className={`text-sm px-3 py-1 ${serviceRequestStatusColors[status] ?? serviceRequestStatusColors[rawStatus] ?? ""}`}
+          className={`${compact ? "text-xs px-2 py-0.5" : "text-sm px-3 py-1"} ${serviceRequestStatusColors[status] ?? serviceRequestStatusColors[rawStatus] ?? ""}`}
         >
           {STATUS_LABELS[status] ?? STATUS_LABELS[rawStatus] ?? status}
         </Badge>
@@ -151,7 +153,7 @@ export function ServiceRequestStatusBar({
         {!terminal && availableStatuses.length > 0 && (
           <>
             <Select value={selectedStatus} onValueChange={setSelectedStatus}>
-              <SelectTrigger className="w-[200px] h-9">
+              <SelectTrigger className={compact ? "w-[150px] h-7 text-xs" : "w-[200px] h-9"}>
                 <SelectValue placeholder="Сменить статус…" />
               </SelectTrigger>
               <SelectContent>
@@ -164,52 +166,61 @@ export function ServiceRequestStatusBar({
             </Select>
             <Input
               placeholder="Комментарий"
-              className="h-9 w-40 sm:w-52"
+              className={compact ? "h-7 w-28 sm:w-36 text-xs" : "h-9 w-40 sm:w-52"}
               value={statusComment}
               onChange={(e) => setStatusComment(e.target.value)}
             />
-            <Button size="sm" onClick={applyStatus} disabled={isPending || !selectedStatus}>
+            <Button
+              size="sm"
+              className={compact ? "h-7 text-xs" : ""}
+              onClick={applyStatus}
+              disabled={isPending || !selectedStatus}
+            >
               Применить
             </Button>
           </>
         )}
 
         {terminal && (
-          <span className="text-sm text-muted-foreground">Заявка закрыта</span>
+          <span className={compact ? "text-xs text-muted-foreground" : "text-sm text-muted-foreground"}>
+            Заявка закрыта
+          </span>
         )}
       </div>
 
       {selectedStatus === "done" && (
-        <div className="rounded-md border bg-background p-3 max-w-xl">
+        <div className={compact ? "rounded border bg-background p-2 max-w-xl" : "rounded-md border bg-background p-3 max-w-xl"}>
           <Label className="text-xs">Итоговый комментарий *</Label>
           <Textarea
             className="mt-1"
             placeholder="Опишите выполненные работы"
             value={completionComment}
             onChange={(e) => setCompletionComment(e.target.value)}
-            rows={2}
+            rows={compact ? 2 : 2}
           />
         </div>
       )}
 
       {awaitingUserConfirm && (
-        <p className="text-sm text-amber-700 dark:text-amber-300">
+        <p className={compact ? "text-xs text-amber-700 dark:text-amber-300" : "text-sm text-amber-700 dark:text-amber-300"}>
           Ожидает подтверждения заявителя ({request.requesterName})
         </p>
       )}
 
       {awaitingUserConfirm && isAdmin && (
-        <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/30 p-3 space-y-2 max-w-xl">
-          <p className="text-sm font-medium">Закрыть без подтверждения заявителя</p>
+        <div className={compact ? "rounded border border-amber-300 bg-amber-50 dark:bg-amber-950/30 p-2 space-y-1.5 max-w-xl" : "rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/30 p-3 space-y-2 max-w-xl"}>
+          <p className={compact ? "text-xs font-medium" : "text-sm font-medium"}>Закрыть без подтверждения заявителя</p>
           <Textarea
             placeholder="Причина закрытия…"
             value={adminForceCloseComment}
             onChange={(e) => setAdminForceCloseComment(e.target.value)}
             rows={2}
+            className={compact ? "text-xs" : ""}
           />
           <Button
             size="sm"
             variant="destructive"
+            className={compact ? "h-7 text-xs" : ""}
             onClick={adminForceClose}
             disabled={isPending || !adminForceCloseComment.trim()}
           >

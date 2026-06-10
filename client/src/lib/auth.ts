@@ -20,6 +20,9 @@ export async function login(email: string, password: string): Promise<AuthRespon
     const data = await response.json();
 
     if (!response.ok) {
+      if (response.status === 503) {
+        throw new Error(data.message || "Сервер временно недоступен. Попробуйте через минуту.");
+      }
       throw new Error(data.message || "Неверные учетные данные");
     }
 

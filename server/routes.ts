@@ -84,6 +84,7 @@ import {
   tryCompleteParentTaskForServiceRequest,
 } from "./task-orchestration-service";
 import { getEffectivePermissionsForUser, ensureDefaultRoleProfiles } from "./permissions-service";
+import { DB_UNAVAILABLE_MESSAGE, isDatabaseConnectivityError } from "./db-errors";
 import { canCreateTasks, canViewCreatedTasks } from "@shared/permissions-constants";
 import { normalizeActualHours } from "@shared/task-hours";
 import {
@@ -180,7 +181,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   );
   
   // Auth middleware
-   const authenticate = async (req: Request, res: Response, next: Function) => {
+  const authenticate = async (req: Request, res: Response, next: Function) => {
     const authHeader = req.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -193,13 +194,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(401).json({ message: "Authentication required" });
     }
 
+    let decoded: { id?: number; email?: string; role?: string };
     try {
-      const decoded = jwt.verify(token, jwtSecret) as { id?: number; email?: string; role?: string };
+      decoded = jwt.verify(token, jwtSecret) as { id?: number; email?: string; role?: string };
+    } catch {
+      return res.status(401).json({ message: "Invalid or expired token" });
+    }
 
-      if (!decoded?.id || !decoded?.email || !decoded?.role) {
-        return res.status(401).json({ message: "Invalid token payload" });
-      }
+    if (!decoded?.id || !decoded?.email || !decoded?.role) {
+      return res.status(401).json({ message: "Invalid token payload" });
+    }
 
+    try {
       const user = await storage.getUser(decoded.id);
 
       if (!user || !user.isActive) {
@@ -208,8 +214,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       req.user = { id: user.id, email: user.email, role: user.role, name: user.name };
       next();
-    } catch (_error) {
-      return res.status(401).json({ message: "Invalid or expired token" });
+    } catch (error) {
+      if (isDatabaseConnectivityError(error)) {
+        return res.status(503).json({ message: DB_UNAVAILABLE_MESSAGE });
+      }
+      console.error("Auth middleware error:", error);
+      return res.status(500).json({ message: "Internal server error" });
     }
   };
   
@@ -329,8 +339,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         user: userWithoutPassword,
         token,
       });
-    } catch (error: any) {
-      return res.status(400).json({ message: error.message });
+    } catch (error: unknown) {
+      if (isDatabaseConnectivityError(error)) {
+        return res.status(503).json({ message: DB_UNAVAILABLE_MESSAGE });
+      }
+      const message = error instanceof Error ? error.message : "Ошибка входа";
+      return res.status(400).json({ message });
     }
   });
   
@@ -2566,8 +2580,12 @@ app.delete("/api/maintenance/:id", authenticate, requireRole(writeRoles), async 
   registerPermissionsRoutes(app, authenticate, requireRole);
   registerSubdivisionRoutes(app, authenticate, requireRole);
 
-  await ensureDefaultRoleProfiles();
-  await initSubdivisionSystem();
+  try {
+    await ensureDefaultRoleProfiles();
+    await initSubdivisionSystem();
+  } catch (error) {
+    console.error("Startup DB setup warning (server will still start):", error);
+  }
   initTelegramBot();
 
   const presenceSweepMs = 5 * 60 * 1000;

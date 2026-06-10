@@ -14,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ArrowLeft, X, Plus, ExternalLink, MessageSquare, Link2, ListTodo } from "lucide-react";
+import { ArrowLeft, X, Plus, ExternalLink, MessageSquare, Link2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { uploadCommentAttachment } from "@/lib/upload-attachment";
 import { useAuth } from "@/hooks/use-auth";
@@ -39,9 +39,15 @@ import { useEquipmentApi } from "@/hooks/use-equipment-api";
 import { budgetCategoryLabel } from "@shared/asset-constants";
 import {
   STATUS_LABELS,
+  PRIORITY_LABELS,
+  ENGINEER_ROLES,
+  MANAGER_ROLES,
   isToRequestType,
   type ServiceRequestStatus,
 } from "@shared/service-request-constants";
+import { ServiceRequestSubtasksPanel } from "@/components/service-requests/service-request-subtasks-panel";
+import { buildUrlAttachment, deriveLinkTitleFromUrl } from "@/lib/comment-attachment";
+import { useTaskDialog } from "@/hooks/use-task-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RequestChecklistPanel } from "@/components/service-requests/request-checklist-panel";
 import {
@@ -58,6 +64,7 @@ export default function ServiceRequestDetailPage() {
   const [, setLocation] = useLocation();
   const id = params?.id ? Number(params.id) : null;
   const { toast } = useToast();
+  const { openEdit } = useTaskDialog();
   const { user } = useAuth();
   const { data, isLoading, refetch } = useServiceRequestDetail(id);
   const { data: assignees = [] } = useAssignees();
@@ -124,6 +131,25 @@ export default function ServiceRequestDetailPage() {
     }
   }, [data?.request?.budgetEntryId, data?.request?.id]);
 
+  const openTaskById = async (taskId: number) => {
+    try {
+      const res = await fetch(`/api/tasks/${taskId}`, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("token")}`,
+        },
+      });
+      if (!res.ok) throw new Error("Не удалось загрузить задачу");
+      const task = await res.json();
+      openEdit(task);
+    } catch (e) {
+      toast({
+        title: "Ошибка",
+        description: e instanceof Error ? e.message : "Не удалось открыть задачу",
+        variant: "destructive",
+      });
+    }
+  };
+
   if (!id || isLoading || !data) {
     return (
       <>
@@ -158,11 +184,10 @@ export default function ServiceRequestDetailPage() {
   const isTo = isToRequestType(request.requestType);
   const checklistReadOnly = !["assigned", "in_progress", "returned", "waiting_parts"].includes(status);
   const canEditParts = !["closed", "cancelled", "duplicate", "not_needed"].includes(status);
-  const mainLinkedTask =
-    linkedTasks.find((t: { parentTaskId?: number | null }) => t.parentTaskId == null) ??
-    linkedTasks[0] ??
-    null;
-
+  const isTerminal = ["closed", "cancelled", "duplicate", "not_needed"].includes(status);
+  const canPlanRequest =
+    (MANAGER_ROLES as readonly string[]).includes(user?.role ?? "") ||
+    (ENGINEER_ROLES as readonly string[]).includes(user?.role ?? "");
   const runTransition = async (body: Record<string, unknown>) => {
     await transition.mutateAsync({ id: request.id, ...body });
     refetch();
@@ -213,137 +238,186 @@ export default function ServiceRequestDetailPage() {
             </Button>
           </Link>
 
-          <div className="mb-6 space-y-4">
-            <div>
-              <h1 className="text-2xl font-bold">Заявка #{request.id}</h1>
-              <p className="text-muted-foreground">{request.equipmentName}</p>
-              {mainLinkedTask && (
-                <Link href={`/tasks?task=${mainLinkedTask.id}`}>
-                  <Button
-                    variant="link"
-                    className="h-auto p-0 mt-1 text-sm font-normal text-blue-600"
-                  >
-                    <ListTodo className="h-4 w-4 mr-1.5 shrink-0" />
-                    Задача #{mainLinkedTask.id}: {mainLinkedTask.title}
-                    <ExternalLink className="h-3 w-3 ml-1 opacity-70" />
-                  </Button>
-                </Link>
-              )}
-            </div>
-            <ServiceRequestStatusBar
-              request={request}
-              user={user ?? null}
-              partsCount={parts.length}
-              onTransition={handleTransition}
-              isPending={transition.isPending}
-            />
-            {workProgress && (
-              <div className="rounded-lg border p-3 bg-muted/20 max-w-xl">
-                <ServiceRequestWorkProgressBar progress={workProgress} compact />
-              </div>
-            )}
-          </div>
-
-          <Card className="mb-4">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Основное</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-x-8 gap-y-2 sm:grid-cols-2 lg:grid-cols-3 text-sm">
-                <p>
-                  <span className="text-muted-foreground">Тип:</span> {typeLabel}
-                </p>
-                <p>
-                  <span className="text-muted-foreground">Срочность:</span> {request.urgency}/5
-                </p>
-                <p>
-                  <span className="text-muted-foreground">Приоритет:</span> {request.priority}
-                </p>
-                <p>
-                  <span className="text-muted-foreground">Заявитель:</span> {request.requesterName}
-                </p>
-                <p>
-                  <span className="text-muted-foreground">Исполнитель:</span>{" "}
-                  {request.assigneeName ?? "—"}
-                </p>
-                <p>
-                  <span className="text-muted-foreground">План:</span>{" "}
-                  {request.plannedDate
-                    ? format(new Date(request.plannedDate), "dd.MM.yyyy", { locale: ru })
-                    : "—"}
-                  {request.plannedWeek ? ` · ${request.plannedWeek}` : ""}
-                </p>
-                {mainLinkedTask && (
-                  <p className="sm:col-span-2 lg:col-span-3">
-                    <span className="text-muted-foreground">Исходная задача:</span>{" "}
-                    <Link
-                      href={`/tasks?task=${mainLinkedTask.id}`}
-                      className="text-blue-600 hover:underline inline-flex items-center gap-1"
-                    >
-                      #{mainLinkedTask.id} {mainLinkedTask.title}
-                      <ExternalLink className="h-3 w-3" />
-                    </Link>
-                  </p>
-                )}
-              </div>
-              <p className="mt-3 text-sm border-t pt-3">{request.problemDescription}</p>
-              {eqInfo && (
-                <div className="mt-3 grid gap-1 sm:grid-cols-2 text-sm border-t pt-3">
-                  {eqInfo.model && <p>Модель: {eqInfo.model}</p>}
-                  {eqInfo.serialNumber && <p>С/Н: {eqInfo.serialNumber}</p>}
-                  {eqInfo.inventoryNumber && <p>Инв. №: {eqInfo.inventoryNumber}</p>}
-                  {eqInfo.location && <p>Место: {eqInfo.location}</p>}
-                  {eqInfo.confluenceUrl && (
-                    <a
-                      href={eqInfo.confluenceUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-blue-600 hover:underline sm:col-span-2"
-                    >
-                      Инструкция Confluence
-                    </a>
-                  )}
+          <div className="mb-3 rounded-lg border bg-card shadow-sm overflow-hidden">
+            <div className="px-3 py-2 sm:px-4 bg-muted/30 border-b flex flex-wrap items-center gap-x-2 gap-y-1">
+              <h1 className="text-lg font-bold tracking-tight shrink-0">#{request.id}</h1>
+              <Badge variant="outline" className="text-[10px] h-5">{typeLabel}</Badge>
+              <Badge variant="secondary" className="text-[10px] h-5">
+                {PRIORITY_LABELS[request.priority] ?? request.priority}
+              </Badge>
+              <span className="text-xs text-muted-foreground truncate min-w-0 flex-1">
+                {request.equipmentName}
+              </span>
+              {workProgress && workProgress.subtasksTotal > 0 && (
+                <div className="w-28 sm:w-36 shrink-0">
+                  <ServiceRequestWorkProgressBar progress={workProgress} compact />
                 </div>
               )}
-              {request.completionComment && (
-                <p className="mt-3 text-sm border-t pt-3">
-                  <span className="font-medium">Итог работ:</span> {request.completionComment}
-                </p>
-              )}
-            </CardContent>
-          </Card>
+            </div>
+            <div className="px-3 py-1.5 sm:px-4 border-b">
+              <ServiceRequestStatusBar
+                compact
+                request={request}
+                user={user ?? null}
+                partsCount={parts.length}
+                onTransition={handleTransition}
+                isPending={transition.isPending}
+              />
+            </div>
+            <ServiceRequestWorkflowPanel
+              variant="inline"
+              request={request}
+              user={user ?? null}
+              assignees={assignees}
+              equipmentOptions={equipmentOptions}
+              requestTypes={meta?.types ?? []}
+              coexecutors={coexecutors}
+              onTransition={handleTransition}
+              onUpdateDetails={async (body) => {
+                await updateDetails.mutateAsync({ id: request.id, ...body });
+                refetch();
+              }}
+              onAddCoexecutor={async (userId, userName) => {
+                await addCoexecutor.mutateAsync({ id: request.id, userId, userName });
+                refetch();
+              }}
+              onRemoveCoexecutor={async (coId) => {
+                await removeCoexecutor.mutateAsync({ id: request.id, coId });
+                refetch();
+              }}
+              isPending={transition.isPending}
+              isDetailsPending={updateDetails.isPending}
+            />
+          </div>
 
-          <ServiceRequestWorkflowPanel
-            request={request}
-            user={user ?? null}
-            assignees={assignees}
-            equipmentOptions={equipmentOptions}
-            requestTypes={meta?.types ?? []}
-            coexecutors={coexecutors}
-            linkedTasks={linkedTasks}
-            workProgress={workProgress}
-            onTransition={handleTransition}
-            onUpdateDetails={async (body) => {
-              await updateDetails.mutateAsync({ id: request.id, ...body });
-              refetch();
-            }}
-            onCreateSubtask={async (body) => {
-              await createSubtask.mutateAsync({ id: request.id, ...body });
-              refetch();
-            }}
-            onAddCoexecutor={async (userId, userName) => {
-              await addCoexecutor.mutateAsync({ id: request.id, userId, userName });
-              refetch();
-            }}
-            onRemoveCoexecutor={async (coId) => {
-              await removeCoexecutor.mutateAsync({ id: request.id, coId });
-              refetch();
-            }}
-            onOpenTask={(taskId) => setLocation(`/tasks?task=${taskId}`)}
-            isPending={transition.isPending}
-            isDetailsPending={updateDetails.isPending}
-            isSubtaskPending={createSubtask.isPending}
-          />
+          <div className="grid gap-4 lg:grid-cols-12 lg:items-stretch">
+            <div className="lg:col-span-4 space-y-4">
+              <Card>
+                <CardHeader className="py-2 px-3 border-b bg-muted/10">
+                  <CardTitle className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Описание
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="px-3 pt-2 pb-3 space-y-2">
+                  <p className="text-sm leading-relaxed">{request.problemDescription}</p>
+                  {eqInfo && (
+                    <dl className="grid gap-2 sm:grid-cols-2 text-sm border-t pt-3">
+                      {eqInfo.model && (
+                        <div>
+                          <dt className="text-muted-foreground text-xs">Модель</dt>
+                          <dd>{eqInfo.model}</dd>
+                        </div>
+                      )}
+                      {eqInfo.serialNumber && (
+                        <div>
+                          <dt className="text-muted-foreground text-xs">Серийный номер</dt>
+                          <dd>{eqInfo.serialNumber}</dd>
+                        </div>
+                      )}
+                      {eqInfo.inventoryNumber && (
+                        <div>
+                          <dt className="text-muted-foreground text-xs">Инв. №</dt>
+                          <dd>{eqInfo.inventoryNumber}</dd>
+                        </div>
+                      )}
+                      {eqInfo.location && (
+                        <div>
+                          <dt className="text-muted-foreground text-xs">Место</dt>
+                          <dd>{eqInfo.location}</dd>
+                        </div>
+                      )}
+                      {eqInfo.confluenceUrl && (
+                        <div className="sm:col-span-2">
+                          <a
+                            href={eqInfo.confluenceUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-primary hover:underline text-sm inline-flex items-center gap-1"
+                          >
+                            <ExternalLink className="h-3.5 w-3.5" />
+                            Инструкция Confluence
+                          </a>
+                        </div>
+                      )}
+                    </dl>
+                  )}
+                  {request.completionComment && (
+                    <p className="text-sm border-t pt-3 bg-green-50/50 dark:bg-green-950/20 rounded-md p-3">
+                      <span className="font-medium">Итог работ:</span> {request.completionComment}
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="py-2 px-3 border-b">
+                  <CardTitle className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Участники
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="px-3 pt-2 pb-3 space-y-1.5 text-sm">
+                  <div className="flex justify-between gap-2">
+                    <span className="text-muted-foreground">Заявитель</span>
+                    <span className="font-medium text-right">{request.requesterName}</span>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <span className="text-muted-foreground">Исполнитель</span>
+                    <span className="font-medium text-right">{request.assigneeName ?? "—"}</span>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <span className="text-muted-foreground">Срочность</span>
+                    <span className="font-medium">{request.urgency}/5</span>
+                  </div>
+                  {coexecutors.length > 0 && (
+                    <div className="border-t pt-2">
+                      <p className="text-xs text-muted-foreground mb-1">Соисполнители</p>
+                      <div className="flex flex-wrap gap-1">
+                        {coexecutors.map((c: { id: number; userName: string }) => (
+                          <Badge key={c.id} variant="secondary" className="text-xs">
+                            {c.userName}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {isTo && checklist.length > 0 && (
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-semibold">Чек-лист ТО</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <RequestChecklistPanel
+                      requestId={request.id}
+                      items={checklist}
+                      onUpdated={() => refetch()}
+                      readOnly={checklistReadOnly}
+                    />
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+
+            <div className="lg:col-span-8 flex flex-col min-h-0">
+              <ServiceRequestSubtasksPanel
+                fillHeight
+                serviceRequestId={request.id}
+                linkedTasks={linkedTasks}
+                workProgress={workProgress}
+                onOpenTask={openTaskById}
+                onCreateSubtask={async (body) => {
+                  await createSubtask.mutateAsync({ id: request.id, ...body });
+                  refetch();
+                  toast({ title: "Подзадача создана" });
+                }}
+                canCreate={!isTerminal && canPlanRequest}
+                isPending={createSubtask.isPending}
+                className="flex-1"
+              />
+            </div>
+          </div>
 
           <div className="grid gap-4 md:grid-cols-2 mt-4">
             <Card>
@@ -670,22 +744,6 @@ export default function ServiceRequestDetailPage() {
             </Card>
           </div>
 
-          {isTo && checklist.length > 0 && (
-            <Card className="mt-4">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">Чек-лист ТО</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <RequestChecklistPanel
-                  requestId={request.id}
-                  items={checklist}
-                  onUpdated={() => refetch()}
-                  readOnly={checklistReadOnly}
-                />
-              </CardContent>
-            </Card>
-          )}
-
           <Card className="mt-4">
             <CardHeader className="pb-2">
               <CardTitle className="text-base flex items-center gap-2">
@@ -724,18 +782,24 @@ export default function ServiceRequestDetailPage() {
                             {format(new Date(c.createdAt), "d MMM HH:mm", { locale: ru })}
                           </span>
                         </div>
-                        {c.body && <p className="mt-1">{c.body}</p>}
-                        {(c.attachments ?? []).map((a, i) => (
-                          <a
-                            key={i}
-                            href={a.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-blue-600 hover:underline text-xs block mt-1"
-                          >
-                            📎 {a.name}
-                          </a>
-                        ))}
+                        {c.body ? <p className="mt-1">{c.body}</p> : null}
+                        {(c.attachments ?? []).length > 0 && (
+                          <ul className="mt-1.5 space-y-0.5">
+                            {(c.attachments ?? []).map((a, i) => (
+                              <li key={i}>
+                                <a
+                                  href={a.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-blue-600 hover:underline text-xs inline-flex items-center gap-1"
+                                >
+                                  <ExternalLink className="h-3 w-3 shrink-0" />
+                                  {a.name}
+                                </a>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
                       </div>
                     )
                   )}
@@ -748,12 +812,12 @@ export default function ServiceRequestDetailPage() {
                     />
                     <div className="grid grid-cols-2 gap-2">
                       <Input
-                        placeholder="Название файла"
+                        placeholder="Название ссылки (необяз.)"
                         value={commentAttachmentName}
                         onChange={(e) => setCommentAttachmentName(e.target.value)}
                       />
                       <Input
-                        placeholder="Ссылка (URL)"
+                        placeholder="URL — можно без названия"
                         value={commentAttachmentUrl}
                         onChange={(e) => setCommentAttachmentUrl(e.target.value)}
                         disabled={!!commentAttachmentFile}
@@ -776,13 +840,12 @@ export default function ServiceRequestDetailPage() {
                                 commentAttachmentName.trim() || commentAttachmentFile.name
                               ),
                             ];
-                          } else if (commentAttachmentName.trim() && commentAttachmentUrl.trim()) {
-                            attachments = [
-                              {
-                                name: commentAttachmentName.trim(),
-                                url: commentAttachmentUrl.trim(),
-                              },
-                            ];
+                          } else {
+                            const urlAttachment = buildUrlAttachment(
+                              commentAttachmentName,
+                              commentAttachmentUrl
+                            );
+                            if (urlAttachment) attachments = [urlAttachment];
                           }
                         } catch (err) {
                           toast({
@@ -874,19 +937,29 @@ export default function ServiceRequestDetailPage() {
                     <Button
                       size="sm"
                       variant="secondary"
-                      disabled={!linkTitle.trim() || !linkUrl.trim() || addLink.isPending}
+                      disabled={!linkUrl.trim() || addLink.isPending}
                       onClick={async () => {
-                        await addLink.mutateAsync({
-                          id: request.id,
-                          title: linkTitle.trim(),
-                          description: linkDescription.trim() || undefined,
-                          url: linkUrl.trim(),
-                        });
-                        setLinkTitle("");
-                        setLinkDescription("");
-                        setLinkUrl("");
-                        refetch();
-                        toast({ title: "Ссылка добавлена" });
+                        const url = linkUrl.trim();
+                        const title = linkTitle.trim() || deriveLinkTitleFromUrl(url);
+                        try {
+                          await addLink.mutateAsync({
+                            id: request.id,
+                            title,
+                            description: linkDescription.trim() || undefined,
+                            url: buildUrlAttachment("", url)?.url ?? url,
+                          });
+                          setLinkTitle("");
+                          setLinkDescription("");
+                          setLinkUrl("");
+                          refetch();
+                          toast({ title: "Ссылка добавлена" });
+                        } catch (e) {
+                          toast({
+                            title: "Ошибка",
+                            description: e instanceof Error ? e.message : "Не удалось добавить ссылку",
+                            variant: "destructive",
+                          });
+                        }
                       }}
                     >
                       Добавить ссылку

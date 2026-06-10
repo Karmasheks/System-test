@@ -12,10 +12,8 @@ import { format } from "date-fns";
 import { ru } from "date-fns/locale";
 import { 
   Clock, 
-  AlertTriangle, 
   Plus,
   Filter,
-  Bell,
   Wrench,
   User,
   FileText,
@@ -30,15 +28,16 @@ import { SubdivisionFilterSelect } from "@/components/subdivision-filter-select"
 import { useToast } from "@/hooks/use-toast";
 import { useRemarksData } from "@/hooks/use-remarks-data";
 import { useTaskDialog, type TaskRecord } from "@/hooks/use-task-dialog";
-import { useMyWorkParams, myWorkPageSubtitle, type MyWorkSection, type MyWorkScope } from "@/hooks/use-my-work-params";
+import { useMyWorkParams, type MyWorkSection, type MyWorkScope } from "@/hooks/use-my-work-params";
 import { useServiceRequests, useServiceRequestMeta } from "@/hooks/use-service-requests";
 import { STATUS_LABELS, type ServiceRequestStatus } from "@shared/service-request-constants";
 import { serviceRequestStatusColors } from "@/lib/badge-colors";
 import { taskPriorityColors, taskStatusColors, badgeGreen, badgeBlue, badgeYellow, badgeRed } from "@/lib/badge-colors";
-import { taskTypeLabel } from "@shared/task-constants";
-import { TASK_SOURCE_LABELS, type TaskSourceType } from "@shared/task-source-constants";
-import { TASK_STATUS_LABELS, taskStatusLabel } from "@shared/task-status-constants";
+import { TASK_STATUS_LABELS } from "@shared/task-status-constants";
+import type { TaskSourceType } from "@shared/task-source-constants";
 import type { Equipment } from "@shared/schema";
+import { buildTaskListGroups } from "@/lib/task-list-groups";
+import { TaskListGroupCard } from "@/components/tasks/task-list-group-card";
 
 type Task = TaskRecord & {
   lastModifiedBy?: string;
@@ -54,6 +53,7 @@ type Task = TaskRecord & {
   serviceRequestId?: number | null;
   maintenanceId?: number | null;
   parentTaskId?: number | null;
+  rootTaskId?: number | null;
   subdivisionId?: number | null;
 };
 
@@ -164,13 +164,6 @@ export default function TasksPage() {
 
   const requestStatusColors: Partial<Record<ServiceRequestStatus, string>> = serviceRequestStatusColors;
 
-  const scopeTitle =
-    scope === "created"
-      ? "Создано мной"
-      : scope === "all"
-        ? "Все"
-        : "Назначено мне";
-
   const sectionTitle =
     section === "tasks"
       ? "Задачи"
@@ -277,13 +270,11 @@ export default function TasksPage() {
   };
 
   // Фильтрация задач
-  const isOverdue = (task: Task) => {
-    return task.dueDate && new Date(task.dueDate) < new Date() && task.status !== 'completed';
-  };
+  const isOverdue = (task: Task) =>
+    Boolean(task.dueDate && new Date(task.dueDate) < new Date() && task.status !== "completed");
 
-  const hasReminder = (task: Task) => {
-    return task.reminderDate && new Date(task.reminderDate) <= new Date();
-  };
+  const hasReminder = (task: Task) =>
+    Boolean(task.reminderDate && new Date(task.reminderDate) <= new Date());
 
 
   const categoryTasks = useMemo(() => {
@@ -306,6 +297,17 @@ export default function TasksPage() {
     const priorityMatch = filterPriority === "all" || task.priority === filterPriority;
     return statusMatch && priorityMatch;
   });
+
+  const taskDisplayGroups = useMemo(
+    () => buildTaskListGroups(filteredTasks),
+    [filteredTasks]
+  );
+
+  const equipmentName = (id: string | null | undefined) => {
+    if (!id) return "—";
+    const eq = equipment.find((e) => e.id === id);
+    return eq ? eq.name : id;
+  };
 
   const filteredRemarks = remarks.filter((remark) => {
     return remarksFilter === "all" || remark.status === remarksFilter;
@@ -347,44 +349,27 @@ export default function TasksPage() {
       <PageHelmet title="Задачи и заявки — StarLine" />
       <div className="p-4 lg:p-6 w-full min-w-0">
         <div className="w-full min-w-0 space-y-6">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-                Задачи и заявки
-              </h1>
-              <p className="text-sm text-muted-foreground mt-1">
-                {myWorkPageSubtitle(scope, section)}
-              </p>
-            </div>
-
-            {canCreateTasks() && section !== "remarks" && (
-              <Button onClick={() => openCreate()}>
-                <Plus className="w-4 h-4 mr-2" />
-                Создать задачу
-              </Button>
-            )}
-          </div>
-
-          <Card>
-            <CardContent className="p-4 space-y-5">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-white shrink-0">
+              Задачи и заявки
+            </h1>
+            <div className="flex flex-wrap items-center gap-2 min-w-0">
+              <div className="flex items-center gap-1 rounded-md border bg-muted/40 px-1 py-0.5">
+                <span className="text-[9px] uppercase tracking-wide text-muted-foreground px-1 hidden sm:inline">
                   Область
-                </p>
+                </span>
                 <Tabs
                   value={scope}
-                  onValueChange={(value) =>
-                    setMyWork({ scope: value as MyWorkScope })
-                  }
+                  onValueChange={(value) => setMyWork({ scope: value as MyWorkScope })}
                 >
-                  <TabsList className="flex flex-wrap h-auto gap-1 bg-muted/50 p-1">
+                  <TabsList className="h-7 gap-0.5 bg-transparent p-0">
                     {scopeOptions
                       .filter((o) => !o.hidden)
                       .map((o) => (
                         <TabsTrigger
                           key={o.value}
                           value={o.value}
-                          className="text-xs sm:text-sm data-[state=active]:bg-background"
+                          className="h-6 px-2 text-[11px] data-[state=active]:bg-background data-[state=active]:shadow-sm"
                         >
                           {o.label}
                         </TabsTrigger>
@@ -392,25 +377,22 @@ export default function TasksPage() {
                   </TabsList>
                 </Tabs>
               </div>
-
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+              <div className="flex items-center gap-1 rounded-md border bg-muted/40 px-1 py-0.5">
+                <span className="text-[9px] uppercase tracking-wide text-muted-foreground px-1 hidden sm:inline">
                   Раздел
-                </p>
+                </span>
                 <Tabs
                   value={section}
-                  onValueChange={(value) =>
-                    setMyWork({ section: value as MyWorkSection })
-                  }
+                  onValueChange={(value) => setMyWork({ section: value as MyWorkSection })}
                 >
-                  <TabsList className="flex flex-wrap h-auto gap-1 bg-muted/50 p-1">
+                  <TabsList className="h-7 gap-0.5 bg-transparent p-0">
                     {sectionOptions
                       .filter((o) => !o.hidden)
                       .map((o) => (
                         <TabsTrigger
                           key={o.value}
                           value={o.value}
-                          className="text-xs sm:text-sm data-[state=active]:bg-background"
+                          className="h-6 px-2 text-[11px] data-[state=active]:bg-background data-[state=active]:shadow-sm"
                         >
                           {o.label}
                         </TabsTrigger>
@@ -418,18 +400,14 @@ export default function TasksPage() {
                   </TabsList>
                 </Tabs>
               </div>
-
-              <p className="text-xs text-muted-foreground border-t pt-3">
-                Сейчас: <span className="font-medium text-foreground">{sectionTitle}</span>
-                {section !== "remarks" && (
-                  <>
-                    {" · "}
-                    <span className="font-medium text-foreground">{scopeTitle}</span>
-                  </>
-                )}
-              </p>
-            </CardContent>
-          </Card>
+              {canCreateTasks() && section !== "remarks" && (
+                <Button size="sm" className="h-7 text-xs shrink-0" onClick={() => openCreate()}>
+                  <Plus className="w-3.5 h-3.5 mr-1" />
+                  Создать
+                </Button>
+              )}
+            </div>
+          </div>
 
           {showTasksContent && showTasksSection && (
             <>
@@ -450,7 +428,7 @@ export default function TasksPage() {
                 )}
               </div>
 
-              <div className="flex flex-col sm:flex-row gap-3">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3">
                 <Select
                   value={tasksFilter}
                   onValueChange={(value: "all" | "pending" | "in_progress" | "completed") =>
@@ -485,6 +463,7 @@ export default function TasksPage() {
 
                 {showFilter && (
                   <SubdivisionFilterSelect
+                    inline
                     value={filterValue}
                     onChange={setFilterValue}
                     subdivisions={availableSubdivisions}
@@ -493,139 +472,29 @@ export default function TasksPage() {
                 )}
               </div>
 
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              <div className="grid gap-4 sm:grid-cols-2">
                       {isLoading ? (
                         <div className="col-span-full text-center py-8">
                           <p className="text-gray-500 dark:text-gray-400">Загрузка задач...</p>
                         </div>
-                      ) : filteredTasks.length === 0 ? (
+                      ) : taskDisplayGroups.length === 0 ? (
                         <div className="col-span-full text-center py-8">
                           <p className="text-gray-500 dark:text-gray-400">Задач не найдено</p>
                         </div>
                       ) : (
-                        filteredTasks.map((task: Task) => (
-                          <Card
-                            key={task.id}
-                            className="relative cursor-pointer hover:shadow-md transition-shadow"
-                            onClick={() => canOpenTask(task) && handleEdit(task)}
-                          >
-                            <CardHeader className="pb-3">
-                              <div className="flex items-start justify-between">
-                                <CardTitle className="text-lg">{task.title}</CardTitle>
-                                <div className="flex gap-1">
-                                  {hasReminder(task) && (
-                                    <Bell className="w-4 h-4 text-yellow-500" />
-                                  )}
-                                  {isOverdue(task) && (
-                                    <AlertTriangle className="w-4 h-4 text-red-500" />
-                                  )}
-                                </div>
-                              </div>
-                              <div className="flex flex-wrap gap-2">
-                                {task.sourceType && (
-                                  <Badge variant="secondary">
-                                    {TASK_SOURCE_LABELS[task.sourceType as TaskSourceType] ?? task.sourceType}
-                                  </Badge>
-                                )}
-                                <Badge variant="outline" className="border-gray-300 dark:border-gray-600">
-                                  {taskTypeLabel(task.taskType, task.maintenanceType)}
-                                </Badge>
-                                <Badge className={getPriorityColor(task.priority)}>
-                                  {task.priority === "low" && "Низкий"}
-                                  {task.priority === "medium" && "Средний"}
-                                  {task.priority === "high" && "Высокий"}
-                                  {task.priority === "urgent" && "Срочный"}
-                                </Badge>
-                                <Badge className={getStatusColor(task.status)}>
-                                  {taskStatusLabel(task.status)}
-                                </Badge>
-                              </div>
-                            </CardHeader>
-                            <CardContent>
-                              {task.description && (
-                                <p className="text-sm text-gray-600 dark:text-gray-300 mb-3">
-                                  {task.description}
-                                </p>
-                              )}
-                              
-                              <div className="space-y-2 text-sm">
-                                {task.dueDate && (
-                                  <div className="flex items-center gap-2">
-                                    <Clock className="w-4 h-4" />
-                                    <span>Срок: {format(new Date(task.dueDate), "dd.MM.yyyy", { locale: ru })}</span>
-                                  </div>
-                                )}
-                                
-                                {task.equipmentId && (
-                                  <div className="flex items-center gap-2">
-                                    <Wrench className="w-4 h-4" />
-                                    <span>Оборудование: {(() => {
-                                      const eq = equipment.find((e: any) => e.id === task.equipmentId);
-                                      return eq ? eq.name : task.equipmentId;
-                                    })()}</span>
-                                  </div>
-                                )}
-
-                                {task.subdivisionId && (
-                                  <div className="flex items-center gap-2">
-                                    <ClipboardList className="w-4 h-4" />
-                                    <span>Подразделение: {subdivisionName(task.subdivisionId)}</span>
-                                  </div>
-                                )}
-                                
-                                <div className="flex items-center gap-2">
-                                  <User className="w-4 h-4" />
-                                  <span>Создал: {(task as Task).createdBy ?? "—"} · {task.createdAt ? format(new Date(task.createdAt), "dd.MM.yyyy HH:mm", { locale: ru }) : ""}</span>
-                                </div>
-
-                                <div className="flex items-center gap-2">
-                                  <User className="w-4 h-4" />
-                                  <span>
-                                    Исполнитель: {(task as Task).assigneeName ?? "не назначен"}
-                                  </span>
-                                </div>
-
-                                {(task as Task).openedByName && (
-                                  <div className="flex items-center gap-2">
-                                    <User className="w-4 h-4" />
-                                    <span>В работу: {(task as Task).openedByName} · {(task as Task).openedAt ? format(new Date((task as Task).openedAt!), "dd.MM.yyyy HH:mm", { locale: ru }) : ""}</span>
-                                  </div>
-                                )}
-                                
-                                {task.lastModifiedBy && (
-                                  <div className="flex items-center gap-2">
-                                    <User className="w-4 h-4" />
-                                    <span>Изменил: {task.lastModifiedBy}</span>
-                                  </div>
-                                )}
-                                
-                                {task.completedBy && task.status === 'completed' && (
-                                  <div className="flex items-center gap-2">
-                                    <User className="w-4 h-4" />
-                                    <span>Завершил: {task.completedBy}</span>
-                                  </div>
-                                )}
-                              </div>
-                              
-                              <div className="flex gap-2 mt-4">
-                                <Button 
-                                  size="sm" 
-                                  variant="outline"
-                                  onClick={() => handleEdit(task)}
-                                >
-                                  Изменить
-                                </Button>
-                                
-                                <Button 
-                                  size="sm" 
-                                  variant="outline"
-                                  onClick={() => handleDelete(task.id)}
-                                >
-                                  Удалить
-                                </Button>
-                              </div>
-                            </CardContent>
-                          </Card>
+                        taskDisplayGroups.map((group) => (
+                          <TaskListGroupCard<Task>
+                            key={group.key}
+                            group={group}
+                            equipmentName={equipmentName}
+                            subdivisionName={subdivisionName}
+                            getPriorityColor={getPriorityColor}
+                            getStatusColor={getStatusColor}
+                            isOverdue={isOverdue}
+                            hasReminder={hasReminder}
+                            canOpenTask={canOpenTask}
+                            onOpen={handleEdit}
+                          />
                         ))
                       )}
                     </div>

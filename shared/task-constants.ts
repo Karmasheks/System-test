@@ -27,3 +27,16 @@ export function taskTypeLabel(
   if (code === "other" && customLabel?.trim()) return customLabel.trim();
   return TASK_TYPES.find((t) => t.code === code)?.label ?? code;
 }
+
+export const TASK_PRIORITY_LABELS: Record<string, string> = {
+  low: "Низкий",
+  medium: "Средний",
+  high: "Высокий",
+  urgent: "Срочный",
+  critical: "Критический",
+};
+
+export function taskPriorityLabel(code: string | null | undefined): string {
+  if (!code) return "—";
+  return TASK_PRIORITY_LABELS[code] ?? code;
+}

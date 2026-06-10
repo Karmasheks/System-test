@@ -13,31 +13,16 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { ENGINEER_ROLES, MANAGER_ROLES } from "@shared/service-request-constants";
-import { SUBTASK_QUICK_TYPES, taskTypeLabel, type TaskTypeCode } from "@shared/task-constants";
-import { taskStatusLabel } from "@shared/task-status-constants";
 import { getIsoWeek } from "@shared/iso-week";
 import type { ServiceRequest } from "@shared/schema";
 import { X } from "lucide-react";
 import type { ServiceRequestStatus } from "@shared/service-request-constants";
-import {
-  ServiceRequestWorkProgressBar,
-  type ServiceRequestWorkProgress,
-} from "@/components/service-requests/service-request-work-progress";
-import { CircleDot } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type Assignee = { id: number; name: string; role: string };
 type RequestTypeOption = { code: string; label: string };
 type EquipmentOption = { id: string; name: string };
 type Coexecutor = { id: number; userId: number; userName: string };
-
-type LinkedTask = {
-  id: number;
-  title: string;
-  status: string;
-  taskType?: string | null;
-  parentTaskId?: number | null;
-};
 
 type Props = {
   request: ServiceRequest;
@@ -46,20 +31,17 @@ type Props = {
   equipmentOptions: EquipmentOption[];
   requestTypes: RequestTypeOption[];
   coexecutors?: Coexecutor[];
-  linkedTasks?: LinkedTask[];
-  workProgress?: ServiceRequestWorkProgress | null;
   onTransition: (
     body: Record<string, unknown>,
     options?: { successTitle?: string }
   ) => Promise<void>;
   onUpdateDetails?: (body: { equipmentId?: string; requestType?: string }) => Promise<void>;
-  onCreateSubtask?: (body: { title: string; description?: string; taskType?: string }) => Promise<void>;
   onAddCoexecutor?: (userId: number, userName: string) => Promise<void>;
   onRemoveCoexecutor?: (coId: number) => Promise<void>;
-  onOpenTask?: (taskId: number) => void;
   isPending?: boolean;
   isDetailsPending?: boolean;
-  isSubtaskPending?: boolean;
+  /** Компактная строка в шапке заявки */
+  variant?: "card" | "inline";
 };
 
 export function ServiceRequestWorkflowPanel({
@@ -69,17 +51,13 @@ export function ServiceRequestWorkflowPanel({
   equipmentOptions,
   requestTypes,
   coexecutors = [],
-  linkedTasks = [],
-  workProgress = null,
   onTransition,
   onUpdateDetails,
-  onCreateSubtask,
   onAddCoexecutor,
   onRemoveCoexecutor,
-  onOpenTask,
   isPending,
   isDetailsPending,
-  isSubtaskPending,
+  variant = "card",
 }: Props) {
   const { toast } = useToast();
   const rawStatus = request.status as ServiceRequestStatus;
@@ -89,14 +67,13 @@ export function ServiceRequestWorkflowPanel({
   const canPlan = isManager || isEngineer;
   const terminal = ["closed", "cancelled", "duplicate", "not_needed"].includes(status);
   const canEditCoexec = !terminal && status !== "cancelled";
+  const inline = variant === "inline";
 
   const [assigneeId, setAssigneeId] = useState("");
   const [equipmentId, setEquipmentId] = useState("");
   const [requestType, setRequestType] = useState("");
   const [plannedDate, setPlannedDate] = useState("");
   const [plannedHours, setPlannedHours] = useState("");
-  const [subtaskTitle, setSubtaskTitle] = useState("");
-  const [subtaskType, setSubtaskType] = useState<TaskTypeCode>("task");
   const [coexecId, setCoexecId] = useState("");
 
   useEffect(() => {
@@ -130,18 +107,6 @@ export function ServiceRequestWorkflowPanel({
     }
     return equipmentOptions;
   }, [equipmentOptions, request.equipmentId, request.equipmentName]);
-
-  const subtasksOnly = linkedTasks.filter((t) => t.parentTaskId != null);
-  const sortedSubtasks = useMemo(
-    () =>
-      [...subtasksOnly].sort((a, b) => {
-        const order = (s: string) =>
-          s === "in_progress" ? 0 : s === "pending" ? 1 : s === "completed" ? 2 : 3;
-        const d = order(a.status) - order(b.status);
-        return d !== 0 ? d : a.id - b.id;
-      }),
-    [subtasksOnly]
-  );
 
   const resolveAssignee = () => {
     const a = assignees.find((x) => String(x.id) === assigneeId);
@@ -198,265 +163,287 @@ export function ServiceRequestWorkflowPanel({
     toast({ title: "Данные заявки сохранены" });
   };
 
-  const addSubtask = async () => {
-    if (!onCreateSubtask || !subtaskTitle.trim()) return;
-    await onCreateSubtask({ title: subtaskTitle.trim(), taskType: subtaskType });
-    setSubtaskTitle("");
-    toast({ title: "Подзадача создана" });
-  };
-
   if (terminal && !canPlan) {
     return null;
   }
 
-  return (
-    <Card className="border-primary/20">
-      <CardHeader className="pb-3">
-        <CardTitle className="text-base">Обработка и планирование</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {workProgress && (
-          <div className="rounded-lg border p-3 bg-muted/20">
-            <ServiceRequestWorkProgressBar progress={workProgress} />
+  const showPlanBlock =
+    !terminal && canPlan && ["new", "assigned", "returned"].includes(status);
+  const showDetailsBlock = !terminal && canPlan;
+
+  const compactTrigger = inline ? "h-8 text-xs" : "";
+  const compactLabel = inline ? "text-[10px] text-muted-foreground mb-0.5" : "text-xs";
+
+  const detailsFields = showDetailsBlock && (
+    <div
+      className={cn(
+        inline
+          ? "flex flex-wrap items-end gap-2"
+          : "rounded-lg border bg-background p-3 space-y-3"
+      )}
+    >
+      {!inline && (
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Оборудование и тип
+        </p>
+      )}
+      <div className={cn(inline ? "flex flex-wrap items-end gap-2" : "grid gap-3 sm:grid-cols-2")}>
+        <div className={inline ? "min-w-[140px] max-w-[200px]" : ""}>
+          {inline ? null : <Label className={compactLabel}>Оборудование</Label>}
+          <Select value={equipmentId} onValueChange={setEquipmentId}>
+            <SelectTrigger className={compactTrigger}>
+              <SelectValue placeholder="Оборудование" />
+            </SelectTrigger>
+            <SelectContent>
+              {equipmentSelectOptions.map((eq) => (
+                <SelectItem key={eq.id} value={eq.id}>
+                  {eq.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className={inline ? "w-[120px]" : ""}>
+          {inline ? null : <Label className={compactLabel}>Тип</Label>}
+          <Select value={requestType} onValueChange={setRequestType}>
+            <SelectTrigger className={compactTrigger}>
+              <SelectValue placeholder="Тип" />
+            </SelectTrigger>
+            <SelectContent>
+              {requestTypes.map((t) => (
+                <SelectItem key={t.code} value={t.code}>
+                  {t.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <Button
+          variant="secondary"
+          size="sm"
+          className={inline ? "h-8" : ""}
+          onClick={saveDetails}
+          disabled={isDetailsPending}
+        >
+          {inline ? "Сохранить" : "Сохранить привязку"}
+        </Button>
+      </div>
+    </div>
+  );
+
+  const planFields = showPlanBlock && (
+    <div
+      className={cn(
+        inline ? "space-y-2" : "rounded-lg border bg-background p-3 space-y-3"
+      )}
+    >
+      {!inline && (
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          План работ
+        </p>
+      )}
+      <div
+        className={cn(
+          inline
+            ? "flex flex-wrap items-end gap-x-2 gap-y-2"
+            : "grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
+        )}
+      >
+        <div className={inline ? "min-w-[130px]" : ""}>
+          {inline ? null : <Label className={compactLabel}>Исполнитель</Label>}
+          <Select value={assigneeId} onValueChange={setAssigneeId}>
+            <SelectTrigger className={compactTrigger}>
+              <SelectValue placeholder="Исполнитель" />
+            </SelectTrigger>
+            <SelectContent>
+              {assignees.map((a) => (
+                <SelectItem key={a.id} value={String(a.id)}>
+                  {a.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className={inline ? "w-[130px]" : ""}>
+          {inline ? null : <Label className={compactLabel}>Дата</Label>}
+          <Input
+            type="date"
+            className={compactTrigger}
+            value={plannedDate}
+            onChange={(e) => setPlannedDate(e.target.value)}
+          />
+        </div>
+        <div className={inline ? "w-[72px]" : ""}>
+          {inline ? null : <Label className={compactLabel}>Часы</Label>}
+          <Input
+            type="number"
+            step="0.5"
+            min="0"
+            className={compactTrigger}
+            value={plannedHours}
+            onChange={(e) => setPlannedHours(e.target.value)}
+          />
+        </div>
+        <div className={inline ? "w-[72px]" : ""}>
+          {inline ? null : <Label className={compactLabel}>Неделя</Label>}
+          <Input value={plannedWeekPreview} readOnly className={cn(compactTrigger, "bg-muted")} />
+        </div>
+        {inline && onAddCoexecutor && (
+          <div className="flex items-center gap-1 flex-wrap min-w-[140px]">
+            {coexecutors.map((c) => (
+              <Badge key={c.id} variant="secondary" className="text-[10px] gap-0.5 pr-0.5 h-6">
+                {c.userName}
+                {canEditCoexec && onRemoveCoexecutor && (
+                  <button
+                    type="button"
+                    className="rounded hover:bg-muted p-0.5"
+                    onClick={() => onRemoveCoexecutor(c.id)}
+                  >
+                    <X className="h-2.5 w-2.5" />
+                  </button>
+                )}
+              </Badge>
+            ))}
+            {canEditCoexec && (
+              <>
+                <Select value={coexecId} onValueChange={setCoexecId}>
+                  <SelectTrigger className="h-7 w-[100px] text-[10px]">
+                    <SelectValue placeholder="+ соисп." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {assignees
+                      .filter(
+                        (a) =>
+                          a.id !== request.assigneeId &&
+                          !coexecutors.some((c) => c.userId === a.id)
+                      )
+                      .map((a) => (
+                        <SelectItem key={a.id} value={String(a.id)}>
+                          {a.name}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-2 text-xs"
+                  disabled={!coexecId}
+                  onClick={async () => {
+                    const a = assignees.find((x) => String(x.id) === coexecId);
+                    if (!a) return;
+                    await onAddCoexecutor(a.id, a.name);
+                    setCoexecId("");
+                  }}
+                >
+                  +
+                </Button>
+              </>
+            )}
           </div>
         )}
-
-        {!terminal && canPlan && (
-          <div className="rounded-lg border bg-muted/20 p-4 space-y-3">
-            <p className="text-sm font-medium">Оборудование и тип</p>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div>
-                <Label className="text-xs">Оборудование</Label>
-                <Select value={equipmentId} onValueChange={setEquipmentId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Выберите оборудование" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {equipmentSelectOptions.map((eq) => (
-                      <SelectItem key={eq.id} value={eq.id}>
-                        {eq.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label className="text-xs">Тип заявки</Label>
-                <Select value={requestType} onValueChange={setRequestType}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Тип" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {requestTypes.map((t) => (
-                      <SelectItem key={t.code} value={t.code}>
-                        {t.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <Button variant="secondary" size="sm" onClick={saveDetails} disabled={isDetailsPending}>
-              Сохранить привязку
+        <div className={cn("flex flex-wrap gap-1.5", inline && "shrink-0")}>
+          <Button size="sm" className={inline ? "h-8" : ""} onClick={() => savePlan(false)} disabled={isPending}>
+            {status === "new" ? "Назначить" : "Сохранить"}
+          </Button>
+          {!inline && (
+            <Button size="sm" variant="secondary" onClick={() => savePlan(true)} disabled={isPending}>
+              Сохранить и продолжить
             </Button>
-          </div>
-        )}
+          )}
+        </div>
+      </div>
 
-        {!terminal && canPlan && ["new", "assigned", "returned"].includes(status) && (
-          <div className="rounded-lg border bg-muted/20 p-4 space-y-3">
-            <p className="text-sm font-medium">Планирование</p>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <div>
-                <Label className="text-xs">Исполнитель</Label>
-                <Select value={assigneeId} onValueChange={setAssigneeId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Исполнитель" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {assignees.map((a) => (
+      {!inline && onAddCoexecutor && (
+        <div className="border-t pt-3 space-y-2">
+          <p className="text-xs font-medium text-muted-foreground">Соисполнители</p>
+          {coexecutors.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {coexecutors.map((c) => (
+                <Badge key={c.id} variant="secondary" className="gap-1 pr-1">
+                  {c.userName}
+                  {canEditCoexec && onRemoveCoexecutor && (
+                    <button
+                      type="button"
+                      className="ml-1 rounded hover:bg-muted p-0.5"
+                      onClick={() => onRemoveCoexecutor(c.id)}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  )}
+                </Badge>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">Не назначены</p>
+          )}
+          {canEditCoexec && (
+            <div className="flex gap-2">
+              <Select value={coexecId} onValueChange={setCoexecId}>
+                <SelectTrigger className="h-8">
+                  <SelectValue placeholder="Добавить соисполнителя" />
+                </SelectTrigger>
+                <SelectContent>
+                  {assignees
+                    .filter(
+                      (a) =>
+                        a.id !== request.assigneeId &&
+                        !coexecutors.some((c) => c.userId === a.id)
+                    )
+                    .map((a) => (
                       <SelectItem key={a.id} value={String(a.id)}>
                         {a.name}
                       </SelectItem>
                     ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label className="text-xs">Плановая дата</Label>
-                <Input type="date" value={plannedDate} onChange={(e) => setPlannedDate(e.target.value)} />
-              </div>
-              <div>
-                <Label className="text-xs">План, ч</Label>
-                <Input
-                  type="number"
-                  step="0.5"
-                  min="0"
-                  value={plannedHours}
-                  onChange={(e) => setPlannedHours(e.target.value)}
-                />
-              </div>
-              <div>
-                <Label className="text-xs">Неделя (ISO)</Label>
-                <Input value={plannedWeekPreview} readOnly className="bg-muted" />
-              </div>
-            </div>
-
-            {onAddCoexecutor && (
-              <div className="border-t pt-3 space-y-2">
-                <p className="text-xs font-medium text-muted-foreground">Соисполнители</p>
-                {coexecutors.length > 0 ? (
-                  <div className="flex flex-wrap gap-2">
-                    {coexecutors.map((c) => (
-                      <Badge key={c.id} variant="secondary" className="gap-1 pr-1">
-                        {c.userName}
-                        {canEditCoexec && onRemoveCoexecutor && (
-                          <button
-                            type="button"
-                            className="ml-1 rounded hover:bg-muted p-0.5"
-                            onClick={() => onRemoveCoexecutor(c.id)}
-                          >
-                            <X className="h-3 w-3" />
-                          </button>
-                        )}
-                      </Badge>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground">Не назначены</p>
-                )}
-                {canEditCoexec && (
-                  <div className="flex gap-2">
-                    <Select value={coexecId} onValueChange={setCoexecId}>
-                      <SelectTrigger className="h-8">
-                        <SelectValue placeholder="Добавить соисполнителя" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {assignees
-                          .filter(
-                            (a) =>
-                              a.id !== request.assigneeId &&
-                              !coexecutors.some((c) => c.userId === a.id)
-                          )
-                          .map((a) => (
-                            <SelectItem key={a.id} value={String(a.id)}>
-                              {a.name}
-                            </SelectItem>
-                          ))}
-                      </SelectContent>
-                    </Select>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={!coexecId}
-                      onClick={async () => {
-                        const a = assignees.find((x) => String(x.id) === coexecId);
-                        if (!a) return;
-                        await onAddCoexecutor(a.id, a.name);
-                        setCoexecId("");
-                      }}
-                    >
-                      Добавить
-                    </Button>
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div className="flex flex-wrap gap-2">
-              <Button size="sm" onClick={() => savePlan(false)} disabled={isPending}>
-                {status === "new" ? "Назначить" : "Сохранить план"}
-              </Button>
-              <Button size="sm" variant="secondary" onClick={() => savePlan(true)} disabled={isPending}>
-                Сохранить и продолжить
+                </SelectContent>
+              </Select>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!coexecId}
+                onClick={async () => {
+                  const a = assignees.find((x) => String(x.id) === coexecId);
+                  if (!a) return;
+                  await onAddCoexecutor(a.id, a.name);
+                  setCoexecId("");
+                }}
+              >
+                Добавить
               </Button>
             </div>
-          </div>
-        )}
+          )}
+        </div>
+      )}
+    </div>
+  );
 
-        {(onCreateSubtask || sortedSubtasks.length > 0) && (
-          <div className="rounded-lg border bg-muted/20 p-4 space-y-3">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-sm font-medium">Подзадачи</p>
-              {workProgress && workProgress.subtasksTotal > 0 && (
-                <span className="text-xs text-muted-foreground tabular-nums">
-                  {workProgress.subtasksCompleted}/{workProgress.subtasksTotal}
-                </span>
-              )}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Закупки, модернизации и другие этапы работ — здесь, в рамках заявки.
-            </p>
-            {sortedSubtasks.length > 0 && (
-              <div className="space-y-1 max-h-48 overflow-y-auto">
-                {sortedSubtasks.map((task) => (
-                  <button
-                    key={task.id}
-                    type="button"
-                    className={cn(
-                      "w-full flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm hover:bg-muted text-left transition-colors",
-                      task.status === "in_progress" &&
-                        "border-amber-400/70 bg-amber-50/60 dark:bg-amber-950/20",
-                      task.status === "completed" && "opacity-75"
-                    )}
-                    onClick={() => onOpenTask?.(task.id)}
-                  >
-                    <span className="min-w-0">
-                      <span className="font-medium">#{task.id}</span> {task.title}
-                      <span className="text-muted-foreground ml-2">{taskTypeLabel(task.taskType)}</span>
-                    </span>
-                    <Badge variant="outline" className="text-[10px] shrink-0">
-                      {task.status === "in_progress" && (
-                        <CircleDot className="w-2.5 h-2.5 mr-1" />
-                      )}
-                      {taskStatusLabel(task.status)}
-                    </Badge>
-                  </button>
-                ))}
-              </div>
-            )}
-            {!terminal && canPlan && onCreateSubtask && (
-              <>
-                <div className="flex flex-wrap gap-1">
-                  {SUBTASK_QUICK_TYPES.map((t) => (
-                    <Button
-                      key={t.code}
-                      type="button"
-                      size="sm"
-                      variant={subtaskType === t.code ? "default" : "outline"}
-                      onClick={() => setSubtaskType(t.code)}
-                    >
-                      {t.label}
-                    </Button>
-                  ))}
-                </div>
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="Название подзадачи…"
-                    value={subtaskTitle}
-                    onChange={(e) => setSubtaskTitle(e.target.value)}
-                  />
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    disabled={!subtaskTitle.trim() || isSubtaskPending}
-                    onClick={addSubtask}
-                  >
-                    Создать
-                  </Button>
-                </div>
-              </>
-            )}
-            {sortedSubtasks.length === 0 && (terminal || !canPlan || !onCreateSubtask) && (
-              <p className="text-sm text-muted-foreground">Подзадач пока нет</p>
-            )}
-          </div>
-        )}
+  const noAccessHint = !terminal && !canPlan && status === "new" && (
+    <p className="text-xs text-muted-foreground">Назначение — для руководителя или инженера.</p>
+  );
 
-        {!terminal && !canPlan && status === "new" && (
-          <p className="text-sm text-muted-foreground">
-            Назначение доступно руководителю или сервисному инженеру.
-          </p>
-        )}
+  if (inline) {
+    if (!showDetailsBlock && !showPlanBlock && !noAccessHint) return null;
+    return (
+      <div className="border-t bg-background/80 px-3 py-1.5 sm:px-4 space-y-1">
+        <p className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Планирование
+        </p>
+        {detailsFields}
+        {planFields}
+        {noAccessHint}
+      </div>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-3 border-b bg-muted/20">
+        <CardTitle className="text-base">Планирование и назначение</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4 pt-4">
+        {detailsFields}
+        {planFields}
+        {noAccessHint}
       </CardContent>
     </Card>
   );
