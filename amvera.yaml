@@ -5,8 +5,8 @@ meta:
     version: 20
 
 build:
-  # Amvera клонирует git в /git, а сборка идёт в /source (там часто нет client/)
-  additionalCommands: sh -c "set -e && rsync -a /git/ /source/ --exclude node_modules --exclude dist && cd /source && test -f client/index.html && rm -rf node_modules dist project-source.tar.gz && npm install && npm run build"
+  # Собираем в /git (полный clone), затем копируем всё в /source для деплоя
+  additionalCommands: sh -c "set -e && cd /git && rm -rf node_modules dist project-source.tar.gz && npm install && npm run build && test -f dist/index.js && rsync -a /git/ /source/ --exclude .git"
 
 run:
   scriptName: index.js
