@@ -12,6 +12,11 @@ const isProductionBundle =
 const isProduction = process.env.NODE_ENV === "production" || isProductionBundle;
 
 const app = express();
+
+app.get("/api/health", (_req, res) => {
+  res.json({ ok: true });
+});
+
 app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
@@ -69,10 +74,16 @@ res.status(status).json({ message });
     await setupVite(app, server);
   }
 
-  // PORT: Amvera по умолчанию 80; локально в .env обычно 5000.
-  const port = Number(process.env.PORT) || 5000;
-  // Всегда 0.0.0.0 — Amvera требует все интерфейсы; локально открывается как http://127.0.0.1:PORT
+  // Amvera: containerPort 80, PORT не задавать (или 80). Локально: PORT=5000 в .env.
+  const defaultPort = isProduction ? 80 : 5000;
+  const port = Number(process.env.PORT) || defaultPort;
   const host = process.env.HOST ?? "0.0.0.0";
+
+  if (isProduction && port !== 80) {
+    log(
+      `warning: production listens on port ${port}, Amvera containerPort обычно 80 — проверьте настройки`
+    );
+  }
 
   server.listen(port, host, () => {
     log(`serving on http://${host}:${port} (local: http://127.0.0.1:${port})`);

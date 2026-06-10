@@ -270,7 +270,7 @@ async function initTelegramBotAsync(): Promise<void> {
   if (shouldUseTelegramPolling()) {
     startTelegramPolling();
   } else {
-    await registerTelegramWebhook();
+    void registerTelegramWebhook();
   }
 }
 
