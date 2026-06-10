@@ -5,7 +5,7 @@ meta:
     version: 20
 
 build:
-  additionalCommands: sh -c "git reset --hard HEAD && rm -rf node_modules dist project-source.tar.gz && npm install && npm run build"
+  additionalCommands: sh -c "set -e && git fetch origin main && git reset --hard origin/main && git archive origin/main client shared | tar -xf - && test -f client/index.html && rm -rf node_modules dist project-source.tar.gz && npm install && npm run build"
 
 run:
   scriptName: index.js
