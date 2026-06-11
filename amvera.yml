@@ -7,12 +7,12 @@ meta:
 build:
   additionalCommands: sh /source/scripts/amvera-build.sh
   artifacts:
-    "dist/**": /
-    "node_modules/**": /
+    "dist": /
+    "node_modules": /
     "index.js": /
     "package.json": /
     "package-lock.json": /
-    "uploads/**": /
+    "uploads": /
 
 run:
   scriptName: index.js
