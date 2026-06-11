@@ -60,17 +60,30 @@ export const getQueryFn: <T>(options: {
     return await res.json();
   };
 
+function isTransientNetworkError(error: unknown): boolean {
+  if (error instanceof TypeError) return true;
+  if (error instanceof Error) {
+    const msg = error.message.toLowerCase();
+    return msg.includes("failed to fetch") || msg.includes("network");
+  }
+  return false;
+}
+
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       queryFn: getQueryFn({ on401: "throw" }),
       refetchInterval: false,
-      refetchOnWindowFocus: false,
+      refetchOnWindowFocus: true,
       staleTime: Infinity,
-      retry: false,
+      retry: (failureCount, error) =>
+        isTransientNetworkError(error) && failureCount < 4,
+      retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 8000),
     },
     mutations: {
-      retry: false,
+      retry: (failureCount, error) =>
+        isTransientNetworkError(error) && failureCount < 2,
+      retryDelay: 1500,
     },
   },
 });

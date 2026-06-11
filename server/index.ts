@@ -49,6 +49,14 @@ function resolveListenPort(isProd: boolean): number {
 const isProductionBundle = detectProductionBundle();
 const isProduction = process.env.NODE_ENV === "production" || isProductionBundle;
 
+process.on("uncaughtException", (error) => {
+  console.error("[server] uncaughtException:", error);
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.error("[server] unhandledRejection:", reason);
+});
+
 const app = express();
 
 function readBuildMeta(): { commit?: string; builtAt?: string } {

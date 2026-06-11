@@ -35,6 +35,24 @@ export function Providers({ children }: { children: React.ReactNode }) {
     }
   }, [theme]);
 
+  // Лёгкий keep-alive: снижает «Failed to fetch» после паузы / cold start на Amvera
+  useEffect(() => {
+    const ping = () => {
+      if (document.visibilityState !== "visible") return;
+      fetch("/api/health", { credentials: "include" }).catch(() => {});
+    };
+    ping();
+    const intervalId = window.setInterval(ping, 45_000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") ping();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, []);
+
   return (
     <ThemeContext.Provider value={{ theme, setTheme }}>
       <QueryClientProvider client={queryClient}>
