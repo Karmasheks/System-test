@@ -107,41 +107,42 @@ app.use((req, res, next) => {
 });
 
 (async () => {
-  // Initialize database
-  await initializeDatabase();
-  
-  const server = await registerRoutes(app);
+  try {
+    await initializeDatabase();
 
-  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
+    const server = await registerRoutes(app);
 
-    log(`Unhandled error (${status}): ${message}`);
-res.status(status).json({ message });
-  });
+    app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+      const status = err.status || err.statusCode || 500;
+      const message = err.message || "Internal Server Error";
 
-  // importantly only setup vite in development and after
-  // setting up all the other routes so the catch-all route
-  // doesn't interfere with the other routes
-  if (isProduction) {
-    serveStatic(app);
-  } else {
-    await setupVite(app, server);
+      log(`Unhandled error (${status}): ${message}`);
+      res.status(status).json({ message });
+    });
+
+    if (isProduction) {
+      serveStatic(app);
+    } else {
+      await setupVite(app, server);
+    }
+
+    const port = resolveListenPort(isProduction);
+    const host = process.env.HOST ?? "0.0.0.0";
+
+    if (isProduction && port !== 80) {
+      log(
+        `warning: production listens on port ${port}, Amvera containerPort обычно 80 — проверьте настройки`,
+      );
+    }
+
+    server.listen(port, host, () => {
+      log(`serving on http://${host}:${port} (local: http://127.0.0.1:${port})`);
+      log(
+        `mode: ${isProduction ? "production" : "development"}, bundle: ${isProductionBundle}, entry: ${normalizePath(process.argv[1] ?? "")}`,
+      );
+    });
+  } catch (error) {
+    console.error("[server] FATAL startup error:", error);
+    process.exit(1);
   }
-
-  const port = resolveListenPort(isProduction);
-  const host = process.env.HOST ?? "0.0.0.0";
-
-  if (isProduction && port !== 80) {
-    log(
-      `warning: production listens on port ${port}, Amvera containerPort обычно 80 — проверьте настройки`
-    );
-  }
-
-  server.listen(port, host, () => {
-    log(`serving on http://${host}:${port} (local: http://127.0.0.1:${port})`);
-    log(
-      `mode: ${isProduction ? "production" : "development"}, bundle: ${isProductionBundle}, entry: ${normalizePath(process.argv[1] ?? "")}`
-    );
-  });
 })();

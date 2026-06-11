@@ -7,6 +7,35 @@ import path from "path";
 import { pathToFileURL } from "url";
 import { execSync } from "child_process";
 
+function requireEnv(name, minLength = 1) {
+  const value = process.env[name]?.trim();
+  if (!value || value.length < minLength) {
+    console.error(
+      `[index.js] FATAL: переменная ${name} не задана или слишком короткая (мин. ${minLength} символов).`,
+    );
+    console.error(
+      "[index.js] Amvera → Переменные окружения. Нужны: DATABASE_URL, JWT_SECRET, SESSION_SECRET (≥32), NODE_ENV=production.",
+    );
+    process.exit(1);
+  }
+  return value;
+}
+
+requireEnv("DATABASE_URL", 10);
+requireEnv("JWT_SECRET", 32);
+requireEnv("SESSION_SECRET", 32);
+
+if (!process.env.NODE_ENV) {
+  process.env.NODE_ENV = "production";
+}
+
+const port = process.env.PORT?.trim();
+if (port && port !== "80" && port !== "5000") {
+  console.warn(
+    `[index.js] PORT=${port} — на Amvera containerPort обычно 80; удалите PORT или задайте PORT=80.`,
+  );
+}
+
 const distIndex = path.join(process.cwd(), "dist", "index.js");
 const clientIndex = path.join(process.cwd(), "client", "index.html");
 
