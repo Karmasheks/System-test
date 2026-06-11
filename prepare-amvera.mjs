@@ -37,21 +37,36 @@ function restoreFromGit(target) {
   console.log(`[prepare-amvera] git restore: ${target}`);
   try {
     execSync(`git checkout HEAD -- ${target}`, { cwd, stdio: "inherit" });
-    return true;
+    if (target === "client" && fs.existsSync(clientIndex)) return true;
+    if (target === "shared") return true;
   } catch (err) {
     console.warn(`[prepare-amvera] git checkout failed for ${target}:`, err.message);
   }
   try {
     execSync(`git archive HEAD ${target} | tar -x`, { cwd, stdio: "inherit", shell: true });
-    return true;
+    if (target === "client" && fs.existsSync(clientIndex)) return true;
+    if (target === "shared") return true;
   } catch (err) {
     console.warn(`[prepare-amvera] git archive failed for ${target}:`, err.message);
-    return false;
   }
+  return false;
+}
+
+try {
+  fs.rmSync(path.join(cwd, "project-source.tar.gz"), { force: true });
+} catch {
+  /* ignore */
 }
 
 if (!fs.existsSync(clientIndex)) {
   console.warn("[prepare-amvera] client/index.html missing");
+  if (hasGit) {
+    tryRun("git fetch --all --prune");
+    tryRun("git reset --hard HEAD");
+    tryRun("git clean -fd");
+    const tree = tryRun("git ls-tree HEAD client");
+    if (tree) console.log("[prepare-amvera] git tree client:", tree);
+  }
   restoreFromGit("client");
   restoreFromGit("shared");
 }
@@ -59,6 +74,10 @@ if (!fs.existsSync(clientIndex)) {
 if (!fs.existsSync(clientIndex)) {
   console.error("[prepare-amvera] FATAL: client/index.html still missing after git restore.");
   listDir("client", path.join(cwd, "client"));
+  if (hasGit) {
+    console.log("[prepare-amvera] git ls-files client (first 20):");
+    console.log(tryRun("git ls-files client | head -20") ?? "(none)");
+  }
   process.exit(1);
 }
 

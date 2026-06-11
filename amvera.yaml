@@ -5,7 +5,7 @@ meta:
     version: 20
 
 build:
-  additionalCommands: sh /git/scripts/amvera-build.sh
+  additionalCommands: sh /source/scripts/amvera-build.sh
   artifacts:
     "dist/**": /
     "node_modules/**": /
