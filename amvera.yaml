@@ -6,7 +6,6 @@ meta:
 
 build:
   additionalCommands: sh /source/scripts/amvera-build.sh
-  # Папки целиком, без /** — маска ** копирует каждый файл в корень / и ломает tar (resolve и т.д.)
   artifacts:
     "dist": /
     "node_modules": /
