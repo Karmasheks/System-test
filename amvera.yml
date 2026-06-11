@@ -5,7 +5,7 @@ meta:
     version: 20
 
 build:
-  additionalCommands: sh -c 'cd /source && rm -rf dist && npm run build && test -f dist/index.js'
+  additionalCommands: sh -c 'if [ -d /git/client ]; then cp -a /git/client /source/; [ -d /git/shared ] && cp -a /git/shared /source/; fi; cd /source && rm -rf dist && npm run build && test -f dist/index.js'
   artifacts:
     "dist/**": /
     "node_modules/**": /
