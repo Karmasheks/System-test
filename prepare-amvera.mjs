@@ -38,61 +38,44 @@ function listDir(label, dir) {
 
 listDir("root", cwd);
 
-const clientIndex = path.join(cwd, "client", "index.html");
+const clientDir = path.join(cwd, "client");
+const clientIndex = path.join(clientDir, "index.html");
+const clientMain = path.join(clientDir, "src", "main.tsx");
 const hasGit = fs.existsSync(path.join(cwd, ".git"));
-const fallbackIndex = path.join(cwd, "scripts", "amvera-client-index.html");
 
-function writeClientIndex(content) {
-  fs.mkdirSync(path.join(cwd, "client"), { recursive: true });
-  fs.writeFileSync(clientIndex, content);
+function isClientComplete() {
+  return fs.existsSync(clientIndex) && fs.existsSync(clientMain);
 }
 
-function restoreFromGitRef(ref, target) {
+function restoreTreeFromRef(ref, treePath) {
   if (!hasGit) return false;
-  console.log(`[prepare-amvera] git restore ${target} from ${ref}`);
-  if (tryExec(`git checkout ${ref} -- ${target}`)) {
-    return true;
-  }
+  console.log(`[prepare-amvera] restore ${treePath}/ from ${ref}`);
   try {
-    const content = execSync(`git show ${ref}:${target}`, { encoding: "utf8", cwd });
-    const dest = path.join(cwd, target);
-    fs.mkdirSync(path.dirname(dest), { recursive: true });
-    fs.writeFileSync(dest, content);
-    return true;
+    fs.rmSync(path.join(cwd, treePath), { recursive: true, force: true });
   } catch {
-    return false;
+    /* ignore */
   }
+  if (tryExec(`git archive ${ref} ${treePath} | tar -x -C .`)) {
+    return true;
+  }
+  return tryExec(`git checkout ${ref} -- ${treePath}`);
 }
 
-function restoreClientTree() {
+function restoreClientAndShared() {
   if (!hasGit) return false;
   tryRun("git fetch --all --prune");
-  tryRun("git reset --hard HEAD");
 
-  if (restoreFromGitRef("HEAD", "client/index.html")) {
-    return fs.existsSync(clientIndex);
-  }
-
-  restoreFromGitRef("HEAD", "client");
-  restoreFromGitRef("HEAD", "shared");
-
-  if (fs.existsSync(clientIndex)) return true;
-
-  const refs = ["origin/main", "origin/HEAD", "main"];
+  const refs = ["origin/main", "origin/HEAD", "main", "HEAD"];
   for (const ref of refs) {
-    if (tryRun(`git rev-parse ${ref}`)) {
-      restoreFromGitRef(ref, "client/index.html");
-      if (fs.existsSync(clientIndex)) {
-        console.log(`[prepare-amvera] restored client/index.html from ${ref}`);
-        return true;
-      }
-      restoreFromGitRef(ref, "client");
-      restoreFromGitRef(ref, "shared");
-      if (fs.existsSync(clientIndex)) return true;
+    if (!tryRun(`git rev-parse ${ref}`)) continue;
+    restoreTreeFromRef(ref, "client");
+    restoreTreeFromRef(ref, "shared");
+    if (isClientComplete()) {
+      console.log(`[prepare-amvera] client/ OK from ${ref}`);
+      return true;
     }
   }
-
-  return fs.existsSync(clientIndex);
+  return isClientComplete();
 }
 
 try {
@@ -101,31 +84,29 @@ try {
   /* ignore */
 }
 
-if (!fs.existsSync(clientIndex)) {
-  console.warn("[prepare-amvera] client/index.html missing");
+if (!isClientComplete()) {
+  console.warn("[prepare-amvera] incomplete client/ (need index.html + src/main.tsx)");
   if (hasGit) {
     const tree = tryRun("git ls-tree HEAD client");
     if (tree) console.log("[prepare-amvera] git tree client:", tree);
   }
-  restoreClientTree();
+  restoreClientAndShared();
 }
 
-if (!fs.existsSync(clientIndex) && fs.existsSync(fallbackIndex)) {
-  console.log("[prepare-amvera] copy scripts/amvera-client-index.html -> client/index.html");
-  writeClientIndex(fs.readFileSync(fallbackIndex, "utf8"));
-}
-
-if (!fs.existsSync(clientIndex)) {
-  console.error("[prepare-amvera] FATAL: client/index.html still missing after restore.");
-  listDir("client", path.join(cwd, "client"));
+if (!isClientComplete()) {
+  console.error("[prepare-amvera] FATAL: client/ still incomplete after restore.");
+  listDir("client", clientDir);
+  listDir("client/src", path.join(clientDir, "src"));
   if (hasGit) {
     console.log("[prepare-amvera] git ls-files client/index.html:");
     console.log(tryRun("git ls-files client/index.html") ?? "(none)");
+    console.log("[prepare-amvera] git ls-files client/src/main.tsx:");
+    console.log(tryRun("git ls-files client/src/main.tsx") ?? "(none)");
   }
   process.exit(1);
 }
 
-console.log("[prepare-amvera] client/index.html OK");
+console.log("[prepare-amvera] client/ OK");
 
 try {
   fs.rmSync(path.join(cwd, "dist"), { recursive: true, force: true });
