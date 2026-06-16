@@ -26,9 +26,9 @@ export function SubdivisionFilterSelect({
 }: Props) {
   const select = (
     <Select value={value} onValueChange={onChange}>
-      <SelectTrigger className={cn("h-10", inline ? className : "w-full")}>
+      <SelectTrigger className={cn("h-10 min-w-0", inline ? className : "w-full")}>
         {inline && <Filter className="w-4 h-4 mr-2 shrink-0" />}
-        <SelectValue placeholder="Подразделение" />
+        <SelectValue placeholder="Подразделение" className="min-w-0" />
       </SelectTrigger>
       <SelectContent>
         {showAll && <SelectItem value="all">Все подразделения</SelectItem>}

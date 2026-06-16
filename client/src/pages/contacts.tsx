@@ -159,12 +159,12 @@ export default function ContactsPage() {
     <>
       <Helmet><title>Контакты — StarLine</title></Helmet>
       <main className="p-4 lg:p-6 w-full min-w-0">
-        <div className="flex justify-between items-center mb-6">
-          <div className="flex items-center gap-3">
-            <UserCircle className="h-8 w-8 text-blue-600" />
+        <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center mb-6">
+          <div className="flex items-center gap-3 min-w-0">
+            <UserCircle className="h-8 w-8 shrink-0 text-blue-600" />
             <h1 className="text-2xl font-bold">Контакты</h1>
           </div>
-          <Button onClick={() => { reset(); setOpen(true); }}>
+          <Button className="w-full sm:w-auto shrink-0" onClick={() => { reset(); setOpen(true); }}>
             <Plus className="h-4 w-4 mr-2" />Добавить
           </Button>
         </div>
@@ -184,7 +184,7 @@ export default function ContactsPage() {
                   onChange={setFilterValue}
                   subdivisions={availableSubdivisions}
                   showAll={allowAllOption}
-                  className="w-56"
+                  className="w-full sm:w-56"
                 />
               )}
             </div>
@@ -199,7 +199,55 @@ export default function ContactsPage() {
                     Показано: {filteredContacts.length} из {contacts.length}
                   </p>
                 )}
-              <Table>
+                <div className="md:hidden space-y-3">
+                  {filteredContacts.map((c) => (
+                    <div key={c.id} className="rounded-lg border p-3 space-y-2 bg-card">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="font-medium">{c.name}</p>
+                          {c.company && (
+                            <p className="text-sm text-muted-foreground">{c.company}</p>
+                          )}
+                        </div>
+                        <div className="flex shrink-0 gap-1">
+                          <Button size="sm" variant="outline" onClick={() => openEdit(c)}>Изм.</Button>
+                          <Button size="sm" variant="ghost" onClick={() => remove.mutate(c.id)}>
+                            <Trash2 className="h-4 w-4 text-red-500" />
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="text-sm space-y-1 text-muted-foreground">
+                        <p>
+                          <span className="text-foreground font-medium">Подразделения: </span>
+                          {subdivisionLabels(normalizeSubdivisionIds(c), subdivisions)}
+                        </p>
+                        <p>
+                          <span className="text-foreground font-medium">Оборудование: </span>
+                          {equipmentLabels(normalizeEquipmentIds(c), allEquipment)}
+                        </p>
+                        {c.notes?.trim() && (
+                          <p>
+                            <span className="text-foreground font-medium">Комментарий: </span>
+                            {c.notes.trim()}
+                          </p>
+                        )}
+                        {showPhones && c.phone && (
+                          <p>
+                            <span className="text-foreground font-medium">Телефон: </span>
+                            {maskSensitiveValue(showPhones, c.phone)}
+                          </p>
+                        )}
+                        {showEmails && c.email && (
+                          <p>
+                            <span className="text-foreground font-medium">Email: </span>
+                            {maskSensitiveValue(showEmails, c.email)}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              <Table className="hidden md:table">
                 <TableHeader>
                   <TableRow>
                     <TableHead>Имя</TableHead>

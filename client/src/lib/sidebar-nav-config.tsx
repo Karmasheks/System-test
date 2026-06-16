@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { LucideIcon } from "lucide-react";
 import {
   BarChart2,
   Users,
@@ -22,7 +22,7 @@ export type SidebarNavItemDef = {
   alsoModule?: string;
   name: string;
   href: string;
-  icon: ReactNode;
+  icon: LucideIcon;
   section: "main" | "admin";
 };
 
@@ -32,7 +32,7 @@ export const SIDEBAR_NAV_ITEMS: SidebarNavItemDef[] = [
     module: "dashboard",
     name: "Панель управления",
     href: "/dashboard",
-    icon: <BarChart2 className="w-5 h-5" />,
+    icon: BarChart2,
     section: "main",
   },
   {
@@ -40,7 +40,7 @@ export const SIDEBAR_NAV_ITEMS: SidebarNavItemDef[] = [
     module: "schedule",
     name: "План ТО и задач",
     href: "/schedule",
-    icon: <Calendar className="w-5 h-5" />,
+    icon: Calendar,
     section: "main",
   },
   {
@@ -48,7 +48,7 @@ export const SIDEBAR_NAV_ITEMS: SidebarNavItemDef[] = [
     module: "equipment",
     name: "Оборудование",
     href: "/equipment",
-    icon: <Wrench className="w-5 h-5" />,
+    icon: Wrench,
     section: "main",
   },
   {
@@ -56,7 +56,7 @@ export const SIDEBAR_NAV_ITEMS: SidebarNavItemDef[] = [
     module: "daily_inspection",
     name: "Ежедневные осмотры",
     href: "/daily-inspection",
-    icon: <ClipboardCheck className="w-5 h-5" />,
+    icon: ClipboardCheck,
     section: "main",
   },
   {
@@ -65,7 +65,7 @@ export const SIDEBAR_NAV_ITEMS: SidebarNavItemDef[] = [
     alsoModule: "service_requests",
     name: "Задачи и заявки",
     href: "/tasks",
-    icon: <CheckSquare className="w-5 h-5" />,
+    icon: CheckSquare,
     section: "main",
   },
   {
@@ -73,7 +73,7 @@ export const SIDEBAR_NAV_ITEMS: SidebarNavItemDef[] = [
     module: "contacts",
     name: "Контакты",
     href: "/contacts",
-    icon: <UserCircle className="w-5 h-5" />,
+    icon: UserCircle,
     section: "main",
   },
   {
@@ -81,7 +81,7 @@ export const SIDEBAR_NAV_ITEMS: SidebarNavItemDef[] = [
     module: "suppliers",
     name: "Поставщики",
     href: "/suppliers",
-    icon: <Building2 className="w-5 h-5" />,
+    icon: Building2,
     section: "main",
   },
   {
@@ -89,7 +89,7 @@ export const SIDEBAR_NAV_ITEMS: SidebarNavItemDef[] = [
     module: "warehouse",
     name: "Склад",
     href: "/warehouse",
-    icon: <Package className="w-5 h-5" />,
+    icon: Package,
     section: "main",
   },
   {
@@ -97,7 +97,7 @@ export const SIDEBAR_NAV_ITEMS: SidebarNavItemDef[] = [
     module: "production_planning",
     name: "Планирование",
     href: "/planning",
-    icon: <Factory className="w-5 h-5" />,
+    icon: Factory,
     section: "main",
   },
   {
@@ -105,7 +105,7 @@ export const SIDEBAR_NAV_ITEMS: SidebarNavItemDef[] = [
     module: "budget",
     name: "Затраты и бюджет",
     href: "/budget",
-    icon: <Wallet className="w-5 h-5" />,
+    icon: Wallet,
     section: "main",
   },
   {
@@ -113,7 +113,7 @@ export const SIDEBAR_NAV_ITEMS: SidebarNavItemDef[] = [
     module: "documents",
     name: "Документы",
     href: "/documents",
-    icon: <FolderOpen className="w-5 h-5" />,
+    icon: FolderOpen,
     section: "main",
   },
   {
@@ -121,7 +121,7 @@ export const SIDEBAR_NAV_ITEMS: SidebarNavItemDef[] = [
     module: "users",
     name: "Пользователи",
     href: "/users",
-    icon: <Users className="w-5 h-5" />,
+    icon: Users,
     section: "admin",
   },
   {
@@ -129,7 +129,7 @@ export const SIDEBAR_NAV_ITEMS: SidebarNavItemDef[] = [
     module: "reports",
     name: "Отчеты",
     href: "/reports",
-    icon: <ChartBar className="w-5 h-5" />,
+    icon: ChartBar,
     section: "admin",
   },
 ];
@@ -147,3 +147,5 @@ export function isNavItemActive(href: string, location: string): boolean {
   }
   return location === href;
 }
+
+export const SIDEBAR_NAV_ICON_CLASS = "w-5 h-5 shrink-0";

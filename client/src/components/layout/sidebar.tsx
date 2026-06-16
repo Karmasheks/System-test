@@ -12,6 +12,8 @@ import { UserAvatar } from "@/components/user-avatar";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { BarChart2, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { SIDEBAR_NAV_ICON_CLASS } from "@/lib/sidebar-nav-config";
+import { useMediaQuery } from "@/hooks/use-media-query";
 
 export function Sidebar() {
   const { user } = useAuth();
@@ -21,6 +23,7 @@ export function Sidebar() {
   const { sections } = useSidebarNavigation();
 
   const showEmployeePresence = canViewEmployeePresence();
+  const isDesktop = useMediaQuery("(min-width: 1024px)");
   const navRef = useRef<HTMLElement>(null);
   const SIDEBAR_SCROLL_KEY = "sidebar-nav-scroll";
 
@@ -41,10 +44,12 @@ export function Sidebar() {
     return () => nav.removeEventListener("scroll", saveScroll);
   }, []);
 
+  if (!isDesktop) return null;
+
   return (
     <aside
       className={cn(
-        "sidebar fixed left-0 top-0 z-40 hidden lg:flex flex-col h-full bg-gray-900 border-r border-gray-700 shadow-sm transition-all duration-300",
+        "sidebar fixed left-0 top-0 z-40 flex flex-col h-full bg-gray-900 border-r border-gray-700 shadow-sm transition-all duration-300",
         isCollapsed ? "w-16" : "w-64"
       )}
     >
@@ -110,9 +115,9 @@ export function Sidebar() {
                           : "text-gray-300 hover:bg-gray-800 hover:text-white"
                       )}
                     >
-                      <span className="shrink-0">{item.icon}</span>
+                      <item.icon className={SIDEBAR_NAV_ICON_CLASS} />
                       {!isCollapsed && (
-                        <span className="ml-3 truncate text-sm">{item.name}</span>
+                        <span className="ml-3 min-w-0 text-sm leading-snug">{item.name}</span>
                       )}
                     </div>
                   </Link>

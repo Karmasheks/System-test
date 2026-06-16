@@ -10,6 +10,7 @@ import { UserStatusSelector } from "@/components/layout/user-status";
 import { EmployeePresencePanel } from "@/components/layout/employee-presence-panel";
 import { SidebarCustomizeButton } from "@/components/layout/sidebar-customize-dialog";
 import { BarChart2, X } from "lucide-react";
+import { SIDEBAR_NAV_ICON_CLASS } from "@/lib/sidebar-nav-config";
 import { Button } from "@/components/ui/button";
 
 export function MobileSidebar() {
@@ -71,17 +72,17 @@ export function MobileSidebar() {
                 </p>
                 <div className="space-y-1">
                   {section.items.map((item) => (
-                    <Link key={item.id} href={item.href}>
+                    <Link key={item.id} href={item.href} className="block">
                       <div
-                        className={`group flex items-center px-3 py-3 text-sm font-medium rounded-md cursor-pointer ${
+                        className={`group flex items-center gap-3 px-3 py-3 text-sm font-medium rounded-md cursor-pointer min-w-0 ${
                           item.active
                             ? "bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
                             : "text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800"
                         }`}
                         onClick={() => setOpen(false)}
                       >
-                        {item.icon}
-                        <span className="ml-3 leading-snug break-words">{item.name}</span>
+                        <item.icon className={SIDEBAR_NAV_ICON_CLASS} />
+                        <span className="min-w-0 flex-1 leading-snug">{item.name}</span>
                       </div>
                     </Link>
                   ))}

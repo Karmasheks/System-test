@@ -132,12 +132,12 @@ function DashKpi({
         className
       )}
     >
-      <div className="flex items-center gap-1.5 mb-1">
+      <div className="flex items-center gap-1.5 mb-1 min-w-0">
         <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        <span className="text-[11px] font-medium text-muted-foreground truncate">{label}</span>
+        <span className="text-[11px] font-medium text-muted-foreground leading-snug line-clamp-2">{label}</span>
       </div>
       <p className={cn("text-lg font-bold tabular-nums leading-tight", valueClassName)}>{value}</p>
-      {hint && <p className="text-[10px] text-muted-foreground mt-0.5 truncate">{hint}</p>}
+      {hint && <p className="text-[10px] text-muted-foreground mt-0.5 leading-snug line-clamp-2">{hint}</p>}
     </Wrapper>
   );
 }
@@ -593,7 +593,7 @@ export default function Dashboard() {
                 onChange={setFilterValue}
                 subdivisions={availableSubdivisions}
                 showAll={allowAllOption}
-                className="w-48 sm:w-56"
+                className="w-full sm:w-48 md:w-56"
               />
             )}
           </div>
@@ -663,7 +663,7 @@ export default function Dashboard() {
                     <Calendar className="h-4 w-4" />
                     <span className="font-medium text-foreground">План {monthLabel}</span>
                   </div>
-                  <div className="flex gap-4 text-sm tabular-nums">
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm tabular-nums">
                     <span>
                       <span className="text-muted-foreground">план </span>
                       <strong>{scopedCalStats?.planned ?? 0}</strong>

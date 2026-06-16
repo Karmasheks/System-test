@@ -19,7 +19,8 @@ import {
   type SidebarNavKey,
   type UserUiPreferences,
 } from "@shared/user-ui-preferences";
-import { SIDEBAR_NAV_ITEMS } from "@/lib/sidebar-nav-config";
+import { SIDEBAR_NAV_ITEMS, SIDEBAR_NAV_ICON_CLASS } from "@/lib/sidebar-nav-config";
+import { cn } from "@/lib/utils";
 import { ChevronDown, ChevronUp, Settings2 } from "lucide-react";
 
 type Props = {
@@ -110,8 +111,8 @@ export function SidebarCustomizeDialog({ open, onOpenChange }: Props) {
               className="flex items-center justify-between gap-2 px-3 py-2 text-sm bg-card"
             >
               <span className="flex items-center gap-2 min-w-0">
-                <span className="shrink-0 text-muted-foreground">{item.icon}</span>
-                <span className="truncate">{item.name}</span>
+                <item.icon className={cn(SIDEBAR_NAV_ICON_CLASS, "text-muted-foreground")} />
+                <span className="min-w-0 leading-snug">{item.name}</span>
               </span>
               <div className="flex shrink-0 gap-0.5">
                 <Button

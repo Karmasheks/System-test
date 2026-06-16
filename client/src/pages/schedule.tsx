@@ -553,7 +553,7 @@ export default function Schedule() {
                     onChange={setFilterValue}
                     subdivisions={availableSubdivisions}
                     showAll={allowAllOption}
-                    className="w-52"
+                    className="w-full sm:w-52"
                   />
                 )}
               </div>
@@ -562,20 +562,22 @@ export default function Schedule() {
                 {/* Календарь */}
                 <div className="lg:col-span-2">
                   <Card>
-                    <CardHeader className="flex flex-row items-center justify-between">
-                      <div>
-                        <CardTitle className="flex items-center gap-2">
-                          <Calendar className="w-5 h-5" />
-                          {viewType === 'month' 
-                            ? format(currentDate, 'LLLL yyyy', { locale: ru })
-                            : format(currentDate, 'yyyy', { locale: ru }) + ' год'
-                          }
+                    <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0">
+                        <CardTitle className="flex items-center gap-2 text-xl sm:text-2xl">
+                          <Calendar className="w-5 h-5 shrink-0" />
+                          <span className="min-w-0">
+                            {viewType === 'month' 
+                              ? format(currentDate, 'LLLL yyyy', { locale: ru })
+                              : format(currentDate, 'yyyy', { locale: ru }) + ' год'
+                            }
+                          </span>
                         </CardTitle>
-                        <CardDescription>
+                        <CardDescription className="mt-1">
                           {activeFilterLabel}
                         </CardDescription>
                       </div>
-                      <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
+                      <div className="flex flex-col gap-2 w-full sm:w-auto sm:items-end">
                         <Select
                           value={eventFilter}
                           onValueChange={(v) => setEventFilter(v as CalendarEventFilter)}
@@ -597,9 +599,9 @@ export default function Schedule() {
                             context="calendar"
                           />
                         )}
-                        <div className="flex gap-2">
+                        <div className="flex flex-wrap gap-2 items-center justify-between sm:justify-end">
                         {/* Кнопки переключения вида */}
-                        <div className="flex gap-1 mr-4">
+                        <div className="flex gap-1">
                           <Button
                             variant={viewType === 'month' ? 'default' : 'outline'}
                             size="sm"
@@ -644,10 +646,11 @@ export default function Schedule() {
                     <CardContent>
                       {viewType === 'month' ? (
                         // Месячный вид
-                        <>
+                        <div className="overflow-x-auto -mx-1 px-1 pb-1">
+                          <div className="min-w-[36rem] sm:min-w-0">
                           <div className="grid grid-cols-7 gap-1 mb-4">
                             {['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].map(day => (
-                              <div key={day} className="p-2 text-center text-sm font-medium text-gray-900">
+                              <div key={day} className="p-1 sm:p-2 text-center text-xs sm:text-sm font-medium text-gray-900">
                                 {day}
                               </div>
                             ))}
@@ -668,7 +671,7 @@ export default function Schedule() {
                                 <div
                                   key={day.toString()}
                                   onClick={() => handleDayClick(day)}
-                                  className={`min-h-[80px] p-1 border rounded-lg cursor-pointer hover:shadow-md transition-shadow ${
+                                  className={`min-h-[3.25rem] sm:min-h-[80px] p-1 border rounded-lg cursor-pointer hover:shadow-md transition-shadow min-w-0 ${
                                     isCurrentDay
                                       ? 'bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-700'
                                       : isCurrentMonth
@@ -697,7 +700,7 @@ export default function Schedule() {
 
                                       const chip = (
                                         <div
-                                          className={`text-xs p-1 rounded cursor-pointer hover:opacity-80 transition-opacity ${getCalendarTaskChipClass(task.taskType, isCompleted)}`}
+                                          className={`text-[10px] sm:text-xs p-0.5 sm:p-1 rounded cursor-pointer hover:opacity-80 transition-opacity truncate ${getCalendarTaskChipClass(task.taskType, isCompleted)}`}
                                           title={taskCalendarTitle(
                                             task.id,
                                             task.title,
@@ -819,7 +822,7 @@ export default function Schedule() {
                                       dayProduction.length === 0 &&
                                       dayOtherEvents.length === 0 &&
                                       eventFilter === "all" && (
-                                      <div className="text-xs text-gray-700 text-center py-2">
+                                      <div className="text-xs text-gray-700 text-center py-2 hidden sm:block">
                                         + Добавить ТО
                                       </div>
                                     )}
@@ -828,7 +831,8 @@ export default function Schedule() {
                               );
                             })}
                           </div>
-                        </>
+                          </div>
+                        </div>
                       ) : (
                         // Годовой вид
                         <div className="grid grid-cols-3 gap-4">
