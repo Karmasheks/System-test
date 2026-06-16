@@ -79,9 +79,12 @@ export function cleanupStaleModalLayers() {
     });
   }
 
-  if (window.matchMedia("(min-width: 1024px)").matches) {
-    document.querySelectorAll(".mobile-sidebar-overlay").forEach((el) => el.remove());
-  }
+  // Зависшие overlay мобильного меню после client-side navigation
+  document.querySelectorAll(".mobile-sidebar-overlay").forEach((el) => {
+    if (!el.isConnected || el.closest("#root") == null) {
+      el.remove();
+    }
+  });
 }
 
 /** Полный сброс блокирующих слоёв; доступен как window.unblockUI */
@@ -95,6 +98,7 @@ export function useModalBodyCleanup() {
 
   useEffect(() => {
     cleanupStaleModalLayers();
+    window.scrollTo(0, 0);
 
     const t1 = window.setTimeout(cleanupStaleModalLayers, 100);
     const t2 = window.setTimeout(cleanupStaleModalLayers, 500);

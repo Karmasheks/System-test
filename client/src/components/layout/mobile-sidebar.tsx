@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Link, useLocation } from "wouter";
+import { useLocation } from "wouter";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useMobileSidebar } from "@/hooks/use-mobile-sidebar";
 import { useAuth } from "@/hooks/use-auth";
@@ -15,13 +15,21 @@ import { Button } from "@/components/ui/button";
 
 export function MobileSidebar() {
   const { open, setOpen } = useMobileSidebar();
-  const [location] = useLocation();
+  const [location, setLocation] = useLocation();
   const isDesktop = useMediaQuery("(min-width: 1024px)");
   const { user } = useAuth();
   const { canViewEmployeePresence } = useAccessControl();
   const { users, getCurrentUserStatus, getCurrentUserActivityStatus, isCurrentUserOnVacation, getCurrentUserExpiresAt, setCurrentUserStatus } = useUserStatus();
   const { sections } = useSidebarNavigation();
   const showEmployeePresence = canViewEmployeePresence();
+
+  const navigateTo = (href: string) => {
+    setOpen(false);
+    if (location !== href) {
+      setLocation(href);
+    }
+    window.scrollTo(0, 0);
+  };
 
   useEffect(() => {
     setOpen(false);
@@ -72,19 +80,19 @@ export function MobileSidebar() {
                 </p>
                 <div className="space-y-1">
                   {section.items.map((item) => (
-                    <Link key={item.id} href={item.href} className="block">
-                      <div
-                        className={`group flex items-center gap-3 px-3 py-3 text-sm font-medium rounded-md cursor-pointer min-w-0 ${
-                          item.active
-                            ? "bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
-                            : "text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800"
-                        }`}
-                        onClick={() => setOpen(false)}
-                      >
-                        <item.icon className={SIDEBAR_NAV_ICON_CLASS} />
-                        <span className="min-w-0 flex-1 leading-snug">{item.name}</span>
-                      </div>
-                    </Link>
+                    <button
+                      key={item.id}
+                      type="button"
+                      className={`group flex w-full items-center gap-3 px-3 py-3 text-sm font-medium rounded-md cursor-pointer min-w-0 text-left ${
+                        item.active
+                          ? "bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
+                          : "text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800"
+                      }`}
+                      onClick={() => navigateTo(item.href)}
+                    >
+                      <item.icon className={SIDEBAR_NAV_ICON_CLASS} />
+                      <span className="min-w-0 flex-1 leading-snug">{item.name}</span>
+                    </button>
                   ))}
                 </div>
               </div>

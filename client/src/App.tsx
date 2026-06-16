@@ -1,4 +1,4 @@
-import { Switch, Route } from "wouter";
+import { Switch, Route, useLocation } from "wouter";
 import NotFound from "@/pages/not-found";
 import Login from "@/pages/login";
 import Register from "@/pages/register";
@@ -32,106 +32,52 @@ import { useModalBodyCleanup } from "@/hooks/use-modal-body-cleanup";
 import { BlockerRecovery } from "@/components/blocker-recovery";
 import { ProtectedLayout } from "@/components/layout/protected-layout";
 
+/** Один AppShell на все защищённые страницы — не пересоздаём шапку/сайдбар при каждом переходе. */
+function ProtectedAppRoutes() {
+  const [location] = useLocation();
+  const scrollable = !location.startsWith("/planning");
+
+  return (
+    <ProtectedLayout scrollable={scrollable}>
+      <Switch>
+        <Route path="/dashboard" component={Dashboard} />
+        <Route path="/schedule" component={Schedule} />
+        <Route path="/equipment" component={Equipment} />
+        <Route path="/daily-inspection" component={DailyInspection} />
+        <Route path="/daily-inspection-new" component={DailyInspection} />
+        <Route path="/users" component={Users} />
+        <Route path="/maintenance">
+          <LegacyRouteRedirect to="/schedule" />
+        </Route>
+        <Route path="/tasks" component={Tasks} />
+        <Route path="/service-requests" component={ServiceRequests} />
+        <Route path="/service-requests/templates" component={ChecklistTemplates} />
+        <Route path="/service-requests/:id" component={ServiceRequestDetail} />
+        <Route path="/remarks">
+          <LegacyRouteRedirect to="/tasks?section=remarks" />
+        </Route>
+        <Route path="/reports" component={Reports} />
+        <Route path="/contacts" component={Contacts} />
+        <Route path="/suppliers" component={Suppliers} />
+        <Route path="/budget" component={Budget} />
+        <Route path="/warehouse" component={Warehouse} />
+        <Route path="/documents" component={Documents} />
+        <Route path="/planning" component={Planning} />
+        <Route path="/profile" component={Profile} />
+        <Route path="/" component={Dashboard} />
+        <Route component={NotFound} />
+      </Switch>
+    </ProtectedLayout>
+  );
+}
+
 function Router() {
   useModalBodyCleanup();
   return (
     <Switch>
       <Route path="/login" component={Login} />
       <Route path="/register" component={Register} />
-      <Route path="/dashboard">
-        <ProtectedLayout>
-          <Dashboard />
-        </ProtectedLayout>
-      </Route>
-      <Route path="/schedule">
-        <ProtectedLayout>
-          <Schedule />
-        </ProtectedLayout>
-      </Route>
-      <Route path="/equipment">
-        <ProtectedLayout>
-          <Equipment />
-        </ProtectedLayout>
-      </Route>
-      <Route path="/daily-inspection">
-        <ProtectedLayout>
-          <DailyInspection />
-        </ProtectedLayout>
-      </Route>
-      <Route path="/daily-inspection-new">
-        <ProtectedLayout>
-          <DailyInspection />
-        </ProtectedLayout>
-      </Route>
-      <Route path="/users">
-        <ProtectedLayout>
-          <Users />
-        </ProtectedLayout>
-      </Route>
-      <Route path="/maintenance">
-        <LegacyRouteRedirect to="/schedule" />
-      </Route>
-      <Route path="/tasks">
-        <ProtectedLayout>
-          <Tasks />
-        </ProtectedLayout>
-      </Route>
-      <Route path="/service-requests">
-        <ProtectedLayout>
-          <ServiceRequests />
-        </ProtectedLayout>
-      </Route>
-      <Route path="/service-requests/templates">
-        <ProtectedLayout>
-          <ChecklistTemplates />
-        </ProtectedLayout>
-      </Route>
-      <Route path="/service-requests/:id">
-        <ProtectedLayout>
-          <ServiceRequestDetail />
-        </ProtectedLayout>
-      </Route>
-      <Route path="/remarks">
-        <LegacyRouteRedirect to="/tasks?section=remarks" />
-      </Route>
-      <Route path="/reports">
-        <ProtectedLayout>
-          <Reports />
-        </ProtectedLayout>
-      </Route>
-      <Route path="/contacts">
-        <ProtectedLayout><Contacts /></ProtectedLayout>
-      </Route>
-      <Route path="/suppliers">
-        <ProtectedLayout><Suppliers /></ProtectedLayout>
-      </Route>
-      <Route path="/budget">
-        <ProtectedLayout><Budget /></ProtectedLayout>
-      </Route>
-      <Route path="/warehouse">
-        <ProtectedLayout>
-          <Warehouse />
-        </ProtectedLayout>
-      </Route>
-      <Route path="/documents">
-        <ProtectedLayout><Documents /></ProtectedLayout>
-      </Route>
-      <Route path="/planning">
-        <ProtectedLayout scrollable>
-          <Planning />
-        </ProtectedLayout>
-      </Route>
-      <Route path="/profile">
-        <ProtectedLayout>
-          <Profile />
-        </ProtectedLayout>
-      </Route>
-      <Route path="/">
-        <ProtectedLayout>
-          <Dashboard />
-        </ProtectedLayout>
-      </Route>
-      <Route component={NotFound} />
+      <Route component={ProtectedAppRoutes} />
     </Switch>
   );
 }
