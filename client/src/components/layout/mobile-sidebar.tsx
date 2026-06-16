@@ -40,7 +40,7 @@ export function MobileSidebar() {
         onClick={() => setOpen(false)}
       />
 
-      <div className="relative flex-1 flex flex-col max-w-xs w-full bg-white dark:bg-gray-900">
+      <div className="relative flex-1 flex flex-col max-w-sm w-full bg-white dark:bg-gray-900">
         <div className="absolute top-0 right-0 -mr-12 pt-2">
           <Button
             variant="ghost"
@@ -73,7 +73,7 @@ export function MobileSidebar() {
                   {section.items.map((item) => (
                     <Link key={item.id} href={item.href}>
                       <div
-                        className={`group flex items-center px-3 py-2.5 text-sm font-medium rounded-md cursor-pointer ${
+                        className={`group flex items-center px-3 py-3 text-sm font-medium rounded-md cursor-pointer ${
                           item.active
                             ? "bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
                             : "text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-800"
@@ -81,7 +81,7 @@ export function MobileSidebar() {
                         onClick={() => setOpen(false)}
                       >
                         {item.icon}
-                        <span className="ml-3">{item.name}</span>
+                        <span className="ml-3 leading-snug break-words">{item.name}</span>
                       </div>
                     </Link>
                   ))}

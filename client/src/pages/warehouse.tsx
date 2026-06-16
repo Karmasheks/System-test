@@ -6,6 +6,7 @@ import { format } from "date-fns";
 import { ru } from "date-fns/locale";
 import { apiRequest } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
+import { mobileTabsGrid3Class, mobileTabsTriggerClass } from "@/lib/mobile-tabs";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -600,10 +601,10 @@ export default function WarehousePage() {
             </CardHeader>
             <CardContent className="space-y-2 max-h-72 overflow-y-auto">
               <Tabs value={activityFilter} onValueChange={(v) => setActivityFilter(v as typeof activityFilter)}>
-                <TabsList className="grid w-full grid-cols-3 h-8 mb-2">
-                  <TabsTrigger value="all" className="text-xs">Все</TabsTrigger>
-                  <TabsTrigger value="reserve" className="text-xs">Резерв</TabsTrigger>
-                  <TabsTrigger value="out" className="text-xs">Списание</TabsTrigger>
+                <TabsList className={cn(mobileTabsGrid3Class, "mb-2")}>
+                  <TabsTrigger value="all" className={mobileTabsTriggerClass}>Все</TabsTrigger>
+                  <TabsTrigger value="reserve" className={mobileTabsTriggerClass}>Резерв</TabsTrigger>
+                  <TabsTrigger value="out" className={mobileTabsTriggerClass}>Списание</TabsTrigger>
                 </TabsList>
               </Tabs>
               {renderMovementList(filteredActivity, {
@@ -835,10 +836,10 @@ export default function WarehousePage() {
                     value={detailMovementFilter}
                     onValueChange={(v) => setDetailMovementFilter(v as typeof detailMovementFilter)}
                   >
-                    <TabsList className="grid w-full grid-cols-3 h-8">
-                      <TabsTrigger value="all" className="text-xs">Все</TabsTrigger>
-                      <TabsTrigger value="reserve" className="text-xs">Резерв</TabsTrigger>
-                      <TabsTrigger value="out" className="text-xs">Списание</TabsTrigger>
+                    <TabsList className={cn(mobileTabsGrid3Class)}>
+                      <TabsTrigger value="all" className={mobileTabsTriggerClass}>Все</TabsTrigger>
+                      <TabsTrigger value="reserve" className={mobileTabsTriggerClass}>Резерв</TabsTrigger>
+                      <TabsTrigger value="out" className={mobileTabsTriggerClass}>Списание</TabsTrigger>
                     </TabsList>
                   </Tabs>
                   <div className="max-h-64 overflow-y-auto space-y-2">

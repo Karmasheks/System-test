@@ -12,7 +12,8 @@ export function useNotifications(enabled = true) {
       const res = await apiRequest("GET", "/api/notifications?sync=0");
       return res.json();
     },
-    refetchInterval: 10_000,
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
   });
 }

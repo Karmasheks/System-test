@@ -103,7 +103,7 @@ export const SIDEBAR_NAV_ITEMS: SidebarNavItemDef[] = [
   {
     id: "budget",
     module: "budget",
-    name: "Затраты (Бюджет)",
+    name: "Затраты и бюджет",
     href: "/budget",
     icon: <Wallet className="w-5 h-5" />,
     section: "main",

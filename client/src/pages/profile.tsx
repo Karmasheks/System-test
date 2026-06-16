@@ -18,6 +18,7 @@ import { UserAvatar } from "@/components/user-avatar";
 import { apiRequest } from "@/lib/queryClient";
 import { roleLabel } from "@shared/permissions-constants";
 import { TelegramLinkCard } from "@/components/profile/telegram-link-card";
+import { mobileTabsGrid5Class, mobileTabsTriggerClass } from "@/lib/mobile-tabs";
 
 function isValidAvatarUrl(url: string): boolean {
   if (!url.trim()) return true;
@@ -262,12 +263,12 @@ export default function Profile() {
           </Card>
 
           <Tabs defaultValue="general" className="space-y-6">
-            <TabsList className="grid w-full grid-cols-5">
-              <TabsTrigger value="general">Основное</TabsTrigger>
-              <TabsTrigger value="vacation">Отпуск</TabsTrigger>
-              <TabsTrigger value="security">Безопасность</TabsTrigger>
-              <TabsTrigger value="notifications">Уведомления</TabsTrigger>
-              <TabsTrigger value="privacy">Приватность</TabsTrigger>
+            <TabsList className={mobileTabsGrid5Class}>
+              <TabsTrigger value="general" className={mobileTabsTriggerClass}>Основное</TabsTrigger>
+              <TabsTrigger value="vacation" className={mobileTabsTriggerClass}>Отпуск</TabsTrigger>
+              <TabsTrigger value="security" className={mobileTabsTriggerClass}>Безопасность</TabsTrigger>
+              <TabsTrigger value="notifications" className={mobileTabsTriggerClass}>Уведомления</TabsTrigger>
+              <TabsTrigger value="privacy" className={mobileTabsTriggerClass}>Приватность</TabsTrigger>
             </TabsList>
 
             <TabsContent value="general">

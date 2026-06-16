@@ -48,6 +48,8 @@ import { matchesListSearch } from "@/lib/list-search";
 import { ListSearchInput } from "@/components/list-search-input";
 import { EquipmentCommentsPanel } from "@/components/equipment-comments-panel";
 import { EquipmentProductionPlanPanel } from "@/components/equipment-production-plan-panel";
+import { mobileTabsTriggerClass } from "@/lib/mobile-tabs";
+import { cn } from "@/lib/utils";
 
 const equipmentFormDialogClass =
   "max-w-3xl w-[min(100vw-2rem,48rem)] max-h-[90vh] overflow-y-auto overflow-x-hidden p-4 sm:p-6";
@@ -802,11 +804,20 @@ export default function Equipment() {
           {selectedEquipment && (
             <Tabs key={selectedEquipment.id} defaultValue="card" className="min-w-0">
               <TabsList
-                className={`w-full grid ${systemAdmin ? "grid-cols-3" : "grid-cols-2"}`}
+                className={cn(
+                  "w-full h-auto gap-1 p-1 grid",
+                  systemAdmin ? "grid-cols-1 sm:grid-cols-3" : "grid-cols-1 sm:grid-cols-2"
+                )}
               >
-                <TabsTrigger value="card">Карточка</TabsTrigger>
-                <TabsTrigger value="management">Связи и История</TabsTrigger>
-                {systemAdmin && <TabsTrigger value="subdivisions">Подразделения</TabsTrigger>}
+                <TabsTrigger value="card" className={mobileTabsTriggerClass}>Карточка</TabsTrigger>
+                <TabsTrigger value="management" className={mobileTabsTriggerClass}>
+                  Связи и история
+                </TabsTrigger>
+                {systemAdmin && (
+                  <TabsTrigger value="subdivisions" className={mobileTabsTriggerClass}>
+                    Подразделения
+                  </TabsTrigger>
+                )}
               </TabsList>
 
               <TabsContent value="card" className="space-y-4 min-w-0 mt-3">

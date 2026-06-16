@@ -35,6 +35,7 @@ import { equipmentLinkTypeLabel } from "@shared/equipment-link-constants";
 import { useToast } from "@/hooks/use-toast";
 import { ExternalLink, Plus, Wallet, Building2, UserCircle, Link2, History } from "lucide-react";
 import { format } from "date-fns";
+import { mobileTabsGrid5Class, mobileTabsTriggerClass } from "@/lib/mobile-tabs";
 
 interface Props {
   equipmentId: string;
@@ -104,25 +105,25 @@ export function EquipmentAssetPanel({
   return (
     <div className={embedded ? "min-w-0 overflow-hidden" : "border-t pt-4 mt-4 min-w-0 overflow-hidden"}>
       <Tabs defaultValue="history">
-        <TabsList className="grid w-full grid-cols-5">
-          <TabsTrigger value="history" className="text-xs sm:text-sm">
-            <History className="h-3 w-3 mr-1 hidden sm:inline" />
+        <TabsList className={mobileTabsGrid5Class}>
+          <TabsTrigger value="history" className={mobileTabsTriggerClass}>
+            <History className="h-3.5 w-3.5 mr-1 shrink-0" />
             История
           </TabsTrigger>
-          <TabsTrigger value="links" className="text-xs sm:text-sm">
-            <Link2 className="h-3 w-3 mr-1 hidden sm:inline" />
+          <TabsTrigger value="links" className={mobileTabsTriggerClass}>
+            <Link2 className="h-3.5 w-3.5 mr-1 shrink-0" />
             Связи
           </TabsTrigger>
-          <TabsTrigger value="contacts" className="text-xs sm:text-sm">
-            <UserCircle className="h-3 w-3 mr-1 hidden sm:inline" />
+          <TabsTrigger value="contacts" className={mobileTabsTriggerClass}>
+            <UserCircle className="h-3.5 w-3.5 mr-1 shrink-0" />
             Контакты
           </TabsTrigger>
-          <TabsTrigger value="suppliers" className="text-xs sm:text-sm">
-            <Building2 className="h-3 w-3 mr-1 hidden sm:inline" />
+          <TabsTrigger value="suppliers" className={mobileTabsTriggerClass}>
+            <Building2 className="h-3.5 w-3.5 mr-1 shrink-0" />
             Поставщики
           </TabsTrigger>
-          <TabsTrigger value="budget" className="text-xs sm:text-sm">
-            <Wallet className="h-3 w-3 mr-1 hidden sm:inline" />
+          <TabsTrigger value="budget" className={mobileTabsTriggerClass}>
+            <Wallet className="h-3.5 w-3.5 mr-1 shrink-0" />
             Затраты
           </TabsTrigger>
         </TabsList>

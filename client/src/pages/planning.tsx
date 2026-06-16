@@ -21,6 +21,8 @@ import { PlanningAnalyticsTab } from "@/components/planning/planning-analytics-t
 import { PlanningOeeTab } from "@/components/planning/planning-oee-tab";
 import { PlanningSettingsTab } from "@/components/planning/planning-settings-tab";
 import { Factory } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { mobileTabsListClass, mobileTabsTriggerClass } from "@/lib/mobile-tabs";
 import { ProductionExportMenu } from "@/components/planning/production-export-menu";
 
 export default function PlanningPage() {
@@ -110,18 +112,40 @@ export default function PlanningPage() {
           </p>
         ) : (
           <Tabs defaultValue="schedule" className="space-y-3">
-            <TabsList className="flex flex-wrap h-auto gap-1">
-              <TabsTrigger value="schedule">График планирования</TabsTrigger>
-              <TabsTrigger value="orders">Потребность / заказ</TabsTrigger>
-              <TabsTrigger value="facts">Факт выпуска</TabsTrigger>
-              <TabsTrigger value="warehouse">Внутр. склад</TabsTrigger>
-              <TabsTrigger value="tooling">ПФ / оснастка</TabsTrigger>
-              <TabsTrigger value="products">Изделия</TabsTrigger>
-              <TabsTrigger value="materials">Материалы</TabsTrigger>
-              <TabsTrigger value="conflicts">Конфликты</TabsTrigger>
-              <TabsTrigger value="analytics">Аналитика</TabsTrigger>
-              <TabsTrigger value="oee">OEE</TabsTrigger>
-              <TabsTrigger value="settings">Настройки</TabsTrigger>
+            <TabsList className={cn(mobileTabsListClass, "sm:grid sm:grid-cols-3 lg:grid-cols-6")}>
+              <TabsTrigger value="schedule" className={mobileTabsTriggerClass}>
+                График планирования
+              </TabsTrigger>
+              <TabsTrigger value="orders" className={mobileTabsTriggerClass}>
+                Потребность и заказ
+              </TabsTrigger>
+              <TabsTrigger value="facts" className={mobileTabsTriggerClass}>
+                Факт выпуска
+              </TabsTrigger>
+              <TabsTrigger value="warehouse" className={mobileTabsTriggerClass}>
+                Внутренний склад
+              </TabsTrigger>
+              <TabsTrigger value="tooling" className={mobileTabsTriggerClass}>
+                Оснастка
+              </TabsTrigger>
+              <TabsTrigger value="products" className={mobileTabsTriggerClass}>
+                Изделия
+              </TabsTrigger>
+              <TabsTrigger value="materials" className={mobileTabsTriggerClass}>
+                Материалы
+              </TabsTrigger>
+              <TabsTrigger value="conflicts" className={mobileTabsTriggerClass}>
+                Конфликты
+              </TabsTrigger>
+              <TabsTrigger value="analytics" className={mobileTabsTriggerClass}>
+                Аналитика
+              </TabsTrigger>
+              <TabsTrigger value="oee" className={mobileTabsTriggerClass}>
+                OEE
+              </TabsTrigger>
+              <TabsTrigger value="settings" className={mobileTabsTriggerClass}>
+                Настройки
+              </TabsTrigger>
             </TabsList>
 
             <TabsContent value="schedule">

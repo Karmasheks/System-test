@@ -8,6 +8,8 @@ import { useSubdivisionFilter } from "@/hooks/use-subdivision-filter";
 import { SubdivisionFilterSelect } from "@/components/subdivision-filter-select";
 import { SubdivisionsPanel } from "@/components/admin/subdivisions-panel";
 import { equipmentIdsInScope } from "@/lib/subdivision-filter";
+import { mobileTabsTriggerClass } from "@/lib/mobile-tabs";
+import { cn } from "@/lib/utils";
 import type { Task } from "@/types/api";
 import type { Equipment as EquipmentRecord } from "@shared/schema";
 import { useEquipmentData } from "@/hooks/use-equipment-data";
@@ -402,7 +404,7 @@ export default function Reports() {
                 {/* Панель фильтров */}
                 <Card className="mb-6">
                   <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
+                    <CardTitle className={cn("flex items-center gap-2", mobileTabsTriggerClass)}>
                       <Filter className="h-5 w-5" />
                       Фильтры отчета
                     </CardTitle>
@@ -613,45 +615,45 @@ export default function Reports() {
               {/* Табы с детальными отчетами */}
               <Tabs value={selectedTab} onValueChange={setSelectedTab} className="space-y-6">
                 <TabsList className="flex w-full flex-wrap h-auto gap-1">
-                  <TabsTrigger value="overview" className="flex items-center gap-2">
+                  <TabsTrigger value="overview" className={cn("flex items-center gap-2", mobileTabsTriggerClass)}>
                     <BarChart3 className="h-4 w-4" />
                     Обзор
                   </TabsTrigger>
-                  <TabsTrigger value="equipment" className="flex items-center gap-2">
+                  <TabsTrigger value="equipment" className={cn("flex items-center gap-2", mobileTabsTriggerClass)}>
                     <Settings className="h-4 w-4" />
                     Оборудование
                   </TabsTrigger>
-                  <TabsTrigger value="maintenance" className="flex items-center gap-2">
+                  <TabsTrigger value="maintenance" className={cn("flex items-center gap-2", mobileTabsTriggerClass)}>
                     <Calendar className="h-4 w-4" />
                     Техобслуживание
                   </TabsTrigger>
-                  <TabsTrigger value="inspections" className="flex items-center gap-2">
+                  <TabsTrigger value="inspections" className={cn("flex items-center gap-2", mobileTabsTriggerClass)}>
                     <Eye className="h-4 w-4" />
                     Осмотры
                   </TabsTrigger>
-                  <TabsTrigger value="tasks" className="flex items-center gap-2">
+                  <TabsTrigger value="tasks" className={cn("flex items-center gap-2", mobileTabsTriggerClass)}>
                     <CheckCircle className="h-4 w-4" />
                     Задачи
                   </TabsTrigger>
-                  <TabsTrigger value="remarks" className="flex items-center gap-2">
+                  <TabsTrigger value="remarks" className={cn("flex items-center gap-2", mobileTabsTriggerClass)}>
                     <AlertTriangle className="h-4 w-4" />
                     Замечания
                   </TabsTrigger>
-                  <TabsTrigger value="user-work" className="flex items-center gap-2">
+                  <TabsTrigger value="user-work" className={cn("flex items-center gap-2", mobileTabsTriggerClass)}>
                     <Users className="h-4 w-4" />
                     Работы сотрудников
                   </TabsTrigger>
-                  <TabsTrigger value="budget" className="flex items-center gap-2">
+                  <TabsTrigger value="budget" className={cn("flex items-center gap-2", mobileTabsTriggerClass)}>
                     <Wallet className="h-4 w-4" />
                     Затраты
                   </TabsTrigger>
-                  <TabsTrigger value="warehouse" className="flex items-center gap-2">
+                  <TabsTrigger value="warehouse" className={cn("flex items-center gap-2", mobileTabsTriggerClass)}>
                     <Package className="h-4 w-4" />
                     Склад
                   </TabsTrigger>
-                  <TabsTrigger value="production-reliability" className="flex items-center gap-2">
-                    <Activity className="h-4 w-4" />
-                    OEE / MTBF / MTTR
+                  <TabsTrigger value="production-reliability" className={cn("flex items-center gap-2", mobileTabsTriggerClass)}>
+                    <Activity className="h-4 w-4 shrink-0" />
+                    Надёжность (OEE)
                   </TabsTrigger>
                 </TabsList>
 
@@ -862,7 +864,7 @@ export default function Reports() {
                       <CardContent>
                         <div className="space-y-4">
                           <div className="flex justify-between items-center p-3 bg-blue-50 dark:bg-blue-950 rounded-lg">
-                            <div className="flex items-center gap-2">
+                            <div className={cn("flex items-center gap-2", mobileTabsTriggerClass)}>
                               <BarChart3 className="h-5 w-5 text-blue-600" />
                               <span className="font-medium">Всего задач</span>
                             </div>
@@ -870,7 +872,7 @@ export default function Reports() {
                           </div>
                           
                           <div className="flex justify-between items-center p-3 bg-orange-50 dark:bg-orange-950 rounded-lg">
-                            <div className="flex items-center gap-2">
+                            <div className={cn("flex items-center gap-2", mobileTabsTriggerClass)}>
                               <Clock className="h-5 w-5 text-orange-600" />
                               <span className="font-medium">В работе</span>
                             </div>
@@ -878,7 +880,7 @@ export default function Reports() {
                           </div>
                           
                           <div className="flex justify-between items-center p-3 bg-yellow-50 dark:bg-yellow-950 rounded-lg">
-                            <div className="flex items-center gap-2">
+                            <div className={cn("flex items-center gap-2", mobileTabsTriggerClass)}>
                               <TrendingUp className="h-5 w-5 text-yellow-600" />
                               <span className="font-medium">Ожидают</span>
                             </div>
@@ -886,7 +888,7 @@ export default function Reports() {
                           </div>
                           
                           <div className="flex justify-between items-center p-3 bg-green-50 dark:bg-green-950 rounded-lg">
-                            <div className="flex items-center gap-2">
+                            <div className={cn("flex items-center gap-2", mobileTabsTriggerClass)}>
                               <CheckCircle className="h-5 w-5 text-green-600" />
                               <span className="font-medium">Завершены</span>
                             </div>
@@ -894,7 +896,7 @@ export default function Reports() {
                           </div>
                           
                           <div className="flex justify-between items-center p-3 bg-red-50 dark:bg-red-950 rounded-lg">
-                            <div className="flex items-center gap-2">
+                            <div className={cn("flex items-center gap-2", mobileTabsTriggerClass)}>
                               <AlertTriangle className="h-5 w-5 text-red-600" />
                               <span className="font-medium">Просрочены</span>
                             </div>
@@ -1025,7 +1027,7 @@ export default function Reports() {
                       <CardContent>
                         <div className="space-y-4">
                           <div className="flex justify-between items-center p-3 bg-blue-50 dark:bg-blue-950 rounded-lg">
-                            <div className="flex items-center gap-2">
+                            <div className={cn("flex items-center gap-2", mobileTabsTriggerClass)}>
                               <FileText className="h-5 w-5 text-blue-600" />
                               <span className="font-medium">Всего замечаний</span>
                             </div>
@@ -1033,7 +1035,7 @@ export default function Reports() {
                           </div>
                           
                           <div className="flex justify-between items-center p-3 bg-red-50 dark:bg-red-950 rounded-lg">
-                            <div className="flex items-center gap-2">
+                            <div className={cn("flex items-center gap-2", mobileTabsTriggerClass)}>
                               <XCircle className="h-5 w-5 text-red-600" />
                               <span className="font-medium">Открытые</span>
                             </div>
@@ -1043,7 +1045,7 @@ export default function Reports() {
                           </div>
                           
                           <div className="flex justify-between items-center p-3 bg-orange-50 dark:bg-orange-950 rounded-lg">
-                            <div className="flex items-center gap-2">
+                            <div className={cn("flex items-center gap-2", mobileTabsTriggerClass)}>
                               <Clock className="h-5 w-5 text-orange-600" />
                               <span className="font-medium">В работе</span>
                             </div>
@@ -1053,7 +1055,7 @@ export default function Reports() {
                           </div>
                           
                           <div className="flex justify-between items-center p-3 bg-green-50 dark:bg-green-950 rounded-lg">
-                            <div className="flex items-center gap-2">
+                            <div className={cn("flex items-center gap-2", mobileTabsTriggerClass)}>
                               <CheckCircle className="h-5 w-5 text-green-600" />
                               <span className="font-medium">Решены</span>
                             </div>

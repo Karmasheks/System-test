@@ -384,7 +384,7 @@ export default function TasksPage() {
   const sectionOptions: { value: MyWorkSection; label: string; hidden?: boolean }[] = [
     { value: "tasks", label: "Задачи", hidden: !canViewTasks },
     { value: "requests", label: "Заявки", hidden: !canViewRequests },
-    { value: "maintenance", label: "ТО", hidden: !canViewTasks },
+    { value: "maintenance", label: "Техобслуживание", hidden: !canViewTasks },
     { value: "remarks", label: "Замечания" },
   ];
 
@@ -397,23 +397,23 @@ export default function TasksPage() {
             <h1 className="text-2xl font-bold text-gray-900 dark:text-white shrink-0">
               Задачи и заявки
             </h1>
-            <div className="flex flex-wrap items-center gap-2 min-w-0">
-              <div className="flex items-center gap-1 rounded-md border bg-muted/40 px-1 py-0.5">
-                <span className="text-[9px] uppercase tracking-wide text-muted-foreground px-1 hidden sm:inline">
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center min-w-0 w-full">
+              <div className="flex flex-col gap-1 rounded-md border bg-muted/40 px-2 py-1.5 min-w-0">
+                <span className="text-[10px] uppercase tracking-wide text-muted-foreground px-1">
                   Область
                 </span>
                 <Tabs
                   value={scope}
                   onValueChange={(value) => setMyWork({ scope: value as MyWorkScope })}
                 >
-                  <TabsList className="h-7 gap-0.5 bg-transparent p-0">
+                  <TabsList className="h-auto gap-1 bg-transparent p-0 flex flex-wrap">
                     {scopeOptions
                       .filter((o) => !o.hidden)
                       .map((o) => (
                         <TabsTrigger
                           key={o.value}
                           value={o.value}
-                          className="h-6 px-2 text-[11px] data-[state=active]:bg-background data-[state=active]:shadow-sm"
+                          className="h-8 px-3 text-xs sm:text-sm data-[state=active]:bg-background data-[state=active]:shadow-sm"
                         >
                           {o.label}
                         </TabsTrigger>
@@ -421,22 +421,22 @@ export default function TasksPage() {
                   </TabsList>
                 </Tabs>
               </div>
-              <div className="flex items-center gap-1 rounded-md border bg-muted/40 px-1 py-0.5">
-                <span className="text-[9px] uppercase tracking-wide text-muted-foreground px-1 hidden sm:inline">
+              <div className="flex flex-col gap-1 rounded-md border bg-muted/40 px-2 py-1.5 min-w-0">
+                <span className="text-[10px] uppercase tracking-wide text-muted-foreground px-1">
                   Раздел
                 </span>
                 <Tabs
                   value={section}
                   onValueChange={(value) => setMyWork({ section: value as MyWorkSection })}
                 >
-                  <TabsList className="h-7 gap-0.5 bg-transparent p-0">
+                  <TabsList className="h-auto gap-1 bg-transparent p-0 flex flex-wrap">
                     {sectionOptions
                       .filter((o) => !o.hidden)
                       .map((o) => (
                         <TabsTrigger
                           key={o.value}
                           value={o.value}
-                          className="h-6 px-2 text-[11px] data-[state=active]:bg-background data-[state=active]:shadow-sm"
+                          className="h-8 px-3 text-xs sm:text-sm data-[state=active]:bg-background data-[state=active]:shadow-sm"
                         >
                           {o.label}
                         </TabsTrigger>

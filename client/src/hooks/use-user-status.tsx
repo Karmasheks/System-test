@@ -81,9 +81,10 @@ export function UserStatusProvider({ children }: { children: React.ReactNode }) 
   const { data: users = [] } = useQuery<UserWithStatus[]>({
     queryKey: PRESENCE_QUERY_KEY,
     enabled: !!user,
-    refetchInterval: 15_000,
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
-    staleTime: 5_000,
+    staleTime: 30_000,
     select: (rows) => rows.map((row) => normalizePresenceUser(row)),
   });
 
