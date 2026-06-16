@@ -70,6 +70,7 @@ export default function TasksPage() {
     availableSubdivisions,
     showFilter,
     filterLabel,
+    allowAllOption,
   } = useSubdivisionFilter();
   const { data: subdivisions = [] } = useSubdivisions();
   const { toast } = useToast();
@@ -517,6 +518,7 @@ export default function TasksPage() {
                     value={filterValue}
                     onChange={setFilterValue}
                     subdivisions={availableSubdivisions}
+                    showAll={allowAllOption}
                     className="w-full sm:w-56"
                   />
                 )}

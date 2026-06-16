@@ -46,6 +46,7 @@ export default function ContactsPage() {
     filterSubdivisionId,
     availableSubdivisions,
     showFilter,
+    allowAllOption,
   } = useSubdivisionFilter();
   const { allEquipment } = useEquipmentApi();
   const [searchQuery, setSearchQuery] = useState("");
@@ -182,6 +183,7 @@ export default function ContactsPage() {
                   value={filterValue}
                   onChange={setFilterValue}
                   subdivisions={availableSubdivisions}
+                  showAll={allowAllOption}
                   className="w-56"
                 />
               )}

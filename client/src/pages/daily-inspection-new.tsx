@@ -417,6 +417,7 @@ export default function DailyInspection() {
     availableSubdivisions,
     showFilter,
     filterLabel,
+    allowAllOption,
   } = useSubdivisionFilter();
   const { checklists, createChecklist, updateChecklist, getChecklistByEquipmentId } = useInspectionChecklists();
   const [, setLocation] = useLocation();
@@ -894,7 +895,7 @@ export default function DailyInspection() {
                     value={filterValue}
                     onChange={setFilterValue}
                     subdivisions={availableSubdivisions}
-                    showAll={isAdmin}
+                    showAll={allowAllOption}
                     className="w-full sm:w-64"
                   />
                   <p className="text-xs text-muted-foreground pb-2">

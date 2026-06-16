@@ -41,6 +41,7 @@ export default function SuppliersPage() {
     filterSubdivisionId,
     availableSubdivisions,
     showFilter,
+    allowAllOption,
   } = useSubdivisionFilter();
   const { allEquipment } = useEquipmentApi();
   const [searchQuery, setSearchQuery] = useState("");
@@ -135,6 +136,7 @@ export default function SuppliersPage() {
                   value={filterValue}
                   onChange={setFilterValue}
                   subdivisions={availableSubdivisions}
+                  showAll={allowAllOption}
                   className="w-56"
                 />
               )}

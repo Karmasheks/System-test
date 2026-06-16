@@ -25,6 +25,7 @@ import {
 } from "@shared/subdivision-scope";
 import {
   filterBudgetEntriesByScope,
+  filterBudgetEntriesBySubdivisionId,
   loadEquipmentSubdivisionMap,
 } from "./subdivision-equipment-filter";
 
@@ -169,12 +170,16 @@ export async function linkBudgetToServiceRequest(requestId: number, budgetEntryI
 
 export async function getBudgetSummary(
   equipmentId?: string,
-  scope?: SubdivisionScope | null
+  scope?: SubdivisionScope | null,
+  subdivisionId?: number | null
 ) {
   let entries = await listBudgetEntries(
     equipmentId ? { equipmentId } : undefined
   );
-  if (scope && !scope.viewAll) {
+  if (subdivisionId != null) {
+    const eqMap = await loadEquipmentSubdivisionMap();
+    entries = filterBudgetEntriesBySubdivisionId(entries, subdivisionId, eqMap);
+  } else if (scope && !scope.viewAll) {
     const eqMap = await loadEquipmentSubdivisionMap();
     entries = filterBudgetEntriesByScope(entries, eqMap, scope);
   }

@@ -19,7 +19,7 @@ export function SubdivisionFilterSelect({
   value,
   onChange,
   subdivisions,
-  showAll = true,
+  showAll = false,
   className,
   label = "Подразделение",
   inline = false,

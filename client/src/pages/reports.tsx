@@ -67,6 +67,7 @@ export default function Reports() {
     availableSubdivisions,
     showFilter,
     filterLabel,
+    allowAllOption,
   } = useSubdivisionFilter();
   const { equipment: equipmentData } = useEquipmentData();
   const { remarks } = useRemarksData();
@@ -413,6 +414,7 @@ export default function Reports() {
                           value={filterValue}
                           onChange={setFilterValue}
                           subdivisions={availableSubdivisions}
+                          showAll={allowAllOption}
                         />
                       )}
                       <div>

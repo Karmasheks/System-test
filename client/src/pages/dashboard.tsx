@@ -196,6 +196,7 @@ export default function Dashboard() {
     availableSubdivisions,
     showFilter,
     filterLabel,
+    allowAllOption,
   } = useSubdivisionFilter();
   const { toast } = useToast();
   const { equipment: equipmentList, getActiveEquipment } = useEquipmentApi();
@@ -215,7 +216,9 @@ export default function Dashboard() {
   const calFrom = format(startOfMonth(new Date()), "yyyy-MM-dd");
   const calTo = format(endOfMonth(new Date()), "yyyy-MM-dd");
   const { data: calStats } = useCalendarStats(calFrom, calTo);
-  const { data: budgetSummary } = useBudgetSummary();
+  const { data: budgetSummary } = useBudgetSummary(undefined, filterSubdivisionId, {
+    enabled: filterSubdivisionId != null,
+  });
   const { data: serviceRequests = [] } = useServiceRequests();
   const { data: warehouseStats } = useWarehouseDashboard();
   const { data: warehouseAlerts = [] } = useWarehouseAlerts();
@@ -589,6 +592,7 @@ export default function Dashboard() {
                 value={filterValue}
                 onChange={setFilterValue}
                 subdivisions={availableSubdivisions}
+                showAll={allowAllOption}
                 className="w-48 sm:w-56"
               />
             )}
@@ -650,7 +654,7 @@ export default function Dashboard() {
         )}
 
         {(isDashboardBlockVisible("dash_calendar_stats") ||
-          isDashboardBlockVisible("dash_budget_total")) && (
+          (isDashboardBlockVisible("dash_budget_total") && filterSubdivisionId != null)) && (
           <div className="flex flex-wrap gap-2">
             {isDashboardBlockVisible("dash_calendar_stats") && (
               <Card className="flex-1 min-w-[200px]">
@@ -676,10 +680,12 @@ export default function Dashboard() {
                 </CardContent>
               </Card>
             )}
-            {isDashboardBlockVisible("dash_budget_total") && (
+            {isDashboardBlockVisible("dash_budget_total") && filterSubdivisionId != null && (
               <Card className="min-w-[140px]">
                 <CardContent className="py-3 px-4">
-                  <p className="text-[11px] text-muted-foreground">Бюджет</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    Бюджет · {filterLabel}
+                  </p>
                   <p className="text-lg font-bold tabular-nums">
                     {(budgetSummary?.total ?? 0).toLocaleString("ru")} ₽
                   </p>

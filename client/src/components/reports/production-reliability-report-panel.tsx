@@ -70,6 +70,7 @@ export function ProductionReliabilityReportPanel() {
     filterSubdivisionId,
     availableSubdivisions,
     showFilter,
+    allowAllOption,
   } = useSubdivisionFilter();
 
   const [periodPreset, setPeriodPreset] = useState<ReportPeriodPreset>("month");
@@ -154,6 +155,7 @@ export function ProductionReliabilityReportPanel() {
                   value={filterValue}
                   onChange={setFilterValue}
                   subdivisions={availableSubdivisions}
+                  showAll={allowAllOption}
                 />
               </div>
             )}

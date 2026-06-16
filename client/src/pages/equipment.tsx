@@ -79,6 +79,7 @@ export default function Equipment() {
     availableSubdivisions,
     showFilter,
     filterLabel,
+    allowAllOption,
   } = useSubdivisionFilter();
   const [newEquipmentType, setNewEquipmentType] = useState("");
   const { data: subdivisions = [] } = useSubdivisions();
@@ -282,14 +283,34 @@ export default function Equipment() {
   }, []);
 
   const openEquipmentById = useCallback(
-    (equipmentId: string) => {
-      const item = equipment.find((eq) => eq.id === equipmentId);
-      if (item) {
-        setSelectedEquipment(item);
+    async (equipmentId: string) => {
+      const id = equipmentId?.trim();
+      if (!id) return;
+
+      const local = equipment.find((eq) => eq.id === id);
+      if (local) {
+        setSelectedEquipment(local);
         setViewDialogOpen(true);
+        return;
+      }
+
+      try {
+        const res = await apiRequest("GET", `/api/equipment/${encodeURIComponent(id)}`);
+        const fetched = normalizeEquipmentRecord((await res.json()) as Equipment);
+        setSelectedEquipment(fetched);
+        setViewDialogOpen(true);
+        queryClient.setQueryData<Equipment[]>(["/api/equipment"], (old) => {
+          if (!old) return [fetched];
+          if (old.some((eq) => eq.id === id)) return old;
+          return [...old, fetched];
+        });
+      } catch (error: unknown) {
+        const message =
+          error instanceof Error ? error.message : "Не удалось открыть оборудование";
+        toast({ title: "Ошибка", description: message, variant: "destructive" });
       }
     },
-    [equipment]
+    [equipment, queryClient, toast]
   );
 
   const openTaskById = useCallback(
@@ -574,6 +595,7 @@ export default function Equipment() {
                         value={filterValue}
                         onChange={setFilterValue}
                         subdivisions={availableSubdivisions}
+                        showAll={allowAllOption}
                         className="w-56"
                       />
                     )}
@@ -778,7 +800,7 @@ export default function Equipment() {
             </DialogDescription>
           </DialogHeader>
           {selectedEquipment && (
-            <Tabs defaultValue="card" className="min-w-0">
+            <Tabs key={selectedEquipment.id} defaultValue="card" className="min-w-0">
               <TabsList
                 className={`w-full grid ${systemAdmin ? "grid-cols-3" : "grid-cols-2"}`}
               >

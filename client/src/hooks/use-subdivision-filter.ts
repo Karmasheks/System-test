@@ -1,31 +1,44 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useAuth } from "@/hooks/use-auth";
 import { useAccessControl } from "@/hooks/use-access-control";
 import { useSubdivisions } from "@/hooks/use-subdivisions";
-import { canAccessSubdivision } from "@shared/subdivision-scope";
 
-/** Выбор подразделения для панели и отчётов (админ — любое; остальные — только доступные). */
+/** Выбор подразделения: админ — любое + «все»; остальные — только закреплённое в профиле. */
 export function useSubdivisionFilter() {
-  const { subdivisionScope, isAdmin } = useAccessControl();
+  const { user } = useAuth();
+  const { isSystemAdmin, permissions } = useAccessControl();
   const { data: subdivisions = [] } = useSubdivisions();
-  const [filterValue, setFilterValue] = useState("all");
 
-  const scope = subdivisionScope();
+  const isAdmin = isSystemAdmin();
+  const primarySubdivisionId =
+    permissions?.primarySubdivisionId ?? user?.subdivisionId ?? null;
 
   const availableSubdivisions = useMemo(() => {
-    if (!scope || scope.viewAll) return subdivisions;
-    return subdivisions.filter((s) => canAccessSubdivision(scope, s.id));
-  }, [subdivisions, scope]);
+    if (isAdmin) return subdivisions;
+    if (primarySubdivisionId) {
+      return subdivisions.filter((s) => s.id === primarySubdivisionId);
+    }
+    return [];
+  }, [subdivisions, isAdmin, primarySubdivisionId]);
 
-  const showFilter = availableSubdivisions.length > 1 || isAdmin;
+  const [filterValue, setFilterValue] = useState(() =>
+    isAdmin ? "all" : primarySubdivisionId ? String(primarySubdivisionId) : "all"
+  );
+
+  useEffect(() => {
+    if (!isAdmin && primarySubdivisionId) {
+      setFilterValue(String(primarySubdivisionId));
+    }
+  }, [isAdmin, primarySubdivisionId]);
+
+  const showFilter = isAdmin || availableSubdivisions.length > 1;
 
   const filterSubdivisionId: number | null =
     filterValue === "all" ? null : Number(filterValue);
 
   const filterLabel =
     filterSubdivisionId == null
-      ? scope && !scope.viewAll && availableSubdivisions.length === 1
-        ? availableSubdivisions[0]?.name
-        : "Все подразделения"
+      ? "Все подразделения"
       : availableSubdivisions.find((s) => s.id === filterSubdivisionId)?.name ?? "";
 
   return {
@@ -35,6 +48,8 @@ export function useSubdivisionFilter() {
     availableSubdivisions,
     showFilter,
     filterLabel,
-    scope,
+    allowAllOption: isAdmin,
+    isAdmin,
+    primarySubdivisionId,
   };
 }

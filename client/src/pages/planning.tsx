@@ -32,6 +32,7 @@ export default function PlanningPage() {
     availableSubdivisions,
     showFilter,
     filterLabel,
+    allowAllOption,
   } = useSubdivisionFilter();
 
   const effectiveSubdivisionId = useMemo(() => {
@@ -87,6 +88,7 @@ export default function PlanningPage() {
                   value={filterValue}
                   onChange={setFilterValue}
                   subdivisions={availableSubdivisions}
+                  showAll={allowAllOption}
                   className="w-[200px]"
                 />
               )}

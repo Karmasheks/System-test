@@ -266,8 +266,26 @@ export function registerAssetManagementRoutes(
   app.get("/api/budget/summary", authenticate, async (req, res) => {
     try {
       const equipmentId = req.query.equipmentId as string | undefined;
+      const subdivisionIdRaw = req.query.subdivisionId as string | undefined;
+      const subdivisionId =
+        subdivisionIdRaw != null && subdivisionIdRaw !== ""
+          ? Number(subdivisionIdRaw)
+          : undefined;
       const scope = await getSubdivisionScopeForRequest(req);
-      res.json(await getBudgetSummary(equipmentId, scope));
+      if (subdivisionId != null && !Number.isNaN(subdivisionId) && scope && !scope.viewAll) {
+        try {
+          assertSubdivisionAccess(scope, subdivisionId);
+        } catch {
+          return subdivisionForbidden(res);
+        }
+      }
+      res.json(
+        await getBudgetSummary(
+          equipmentId,
+          scope,
+          subdivisionId != null && !Number.isNaN(subdivisionId) ? subdivisionId : undefined
+        )
+      );
     } catch {
       res.status(500).json({ message: "Ошибка" });
     }

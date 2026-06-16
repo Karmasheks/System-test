@@ -163,14 +163,24 @@ export function useBudgetEntries(
   });
 }
 
-export function useBudgetSummary(equipmentId?: string) {
+export function useBudgetSummary(
+  equipmentId?: string,
+  subdivisionId?: number | null,
+  options?: { enabled?: boolean }
+) {
+  const enabled =
+    options?.enabled ??
+  (equipmentId !== undefined || subdivisionId != null || (equipmentId === undefined && subdivisionId === undefined));
+
   return useQuery({
-    queryKey: ["/api/budget/summary", equipmentId],
+    queryKey: ["/api/budget/summary", equipmentId, subdivisionId],
+    enabled,
     queryFn: async () => {
-      const res = await apiRequest(
-        "GET",
-        `/api/budget/summary${equipmentId ? `?equipmentId=${equipmentId}` : ""}`
-      );
+      const params = new URLSearchParams();
+      if (equipmentId) params.set("equipmentId", equipmentId);
+      if (subdivisionId != null) params.set("subdivisionId", String(subdivisionId));
+      const q = params.toString();
+      const res = await apiRequest("GET", `/api/budget/summary${q ? `?${q}` : ""}`);
       return res.json();
     },
   });

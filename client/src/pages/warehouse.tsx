@@ -199,6 +199,7 @@ export default function WarehousePage() {
     filterSubdivisionId,
     availableSubdivisions,
     showFilter,
+    allowAllOption,
   } = useSubdivisionFilter();
   const [search, setSearch] = useState("");
   const [lowStockOnly, setLowStockOnly] = useState(false);
@@ -484,6 +485,7 @@ export default function WarehousePage() {
                   value={filterValue}
                   onChange={setFilterValue}
                   subdivisions={availableSubdivisions}
+                  showAll={allowAllOption}
                   className="w-48"
                 />
               )}

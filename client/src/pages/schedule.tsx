@@ -86,6 +86,7 @@ export default function Schedule() {
     availableSubdivisions,
     showFilter,
     filterLabel,
+    allowAllOption,
   } = useSubdivisionFilter();
   const { allEquipment: equipment, getActiveEquipment } = useEquipmentApi();
   const queryClient = useQueryClient();
@@ -551,6 +552,7 @@ export default function Schedule() {
                     value={filterValue}
                     onChange={setFilterValue}
                     subdivisions={availableSubdivisions}
+                    showAll={allowAllOption}
                     className="w-52"
                   />
                 )}

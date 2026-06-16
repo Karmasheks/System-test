@@ -71,6 +71,7 @@ export default function BudgetPage() {
     filterSubdivisionId,
     availableSubdivisions,
     showFilter,
+    allowAllOption,
   } = useSubdivisionFilter();
   const { data: subdivisions = [] } = useSubdivisions();
 
@@ -761,6 +762,7 @@ export default function BudgetPage() {
                 value={filterValue}
                 onChange={setFilterValue}
                 subdivisions={availableSubdivisions}
+                showAll={allowAllOption}
               />
             )}
             <div>

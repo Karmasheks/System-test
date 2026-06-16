@@ -2015,6 +2015,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/equipment/:id", authenticate, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const item = await storage.getEquipment(id);
+      if (!item) {
+        return res.status(404).json({ message: "Оборудование не найдено" });
+      }
+      const scope = await getSubdivisionScopeForRequest(req);
+      if (scope && !scope.viewAll) {
+        const { canAccessSubdivision } = await import("@shared/subdivision-scope");
+        if (!canAccessSubdivision(scope, item.subdivisionId)) {
+          return subdivisionForbidden(res);
+        }
+      }
+      return res.status(200).json(normalizeEquipmentRecord(item));
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
   app.post("/api/equipment", authenticate, requireRole(equipmentEditRoles), async (req, res) => {
     try {
       const payload = parseEquipmentCreatePayload(req.body);

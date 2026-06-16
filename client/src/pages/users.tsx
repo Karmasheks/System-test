@@ -116,6 +116,7 @@ export default function Users() {
     filterSubdivisionId,
     availableSubdivisions,
     showFilter: showSubdivisionFilter,
+    allowAllOption,
   } = useSubdivisionFilter();
 
   const subdivisionName = (id: number | null | undefined) =>
@@ -733,6 +734,7 @@ export default function Users() {
                     value={subdivisionFilterValue}
                     onChange={setSubdivisionFilterValue}
                     subdivisions={availableSubdivisions}
+                    showAll={allowAllOption}
                     className="w-full sm:w-64"
                   />
                 )}
