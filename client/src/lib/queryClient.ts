@@ -75,7 +75,7 @@ export const queryClient = new QueryClient({
       queryFn: getQueryFn({ on401: "throw" }),
       refetchInterval: false,
       refetchOnWindowFocus: true,
-      staleTime: Infinity,
+      staleTime: 30_000,
       retry: (failureCount, error) =>
         isTransientNetworkError(error) && failureCount < 4,
       retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 8000),

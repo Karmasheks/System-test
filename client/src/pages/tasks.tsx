@@ -31,8 +31,8 @@ import { useTaskDialog, type TaskRecord } from "@/hooks/use-task-dialog";
 import { useMyWorkParams, type MyWorkSection, type MyWorkScope } from "@/hooks/use-my-work-params";
 import { useServiceRequests, useServiceRequestMeta } from "@/hooks/use-service-requests";
 import { STATUS_LABELS, type ServiceRequestStatus } from "@shared/service-request-constants";
-import { serviceRequestStatusColors } from "@/lib/badge-colors";
-import { taskPriorityColors, taskStatusColors, badgeGreen, badgeBlue, badgeYellow, badgeRed } from "@/lib/badge-colors";
+import { invalidateTaskDomain, upsertTaskInListCaches } from "@/lib/mutation-cache";
+import { serviceRequestStatusColors, taskPriorityColors, taskStatusColors, badgeGreen, badgeBlue, badgeYellow, badgeRed } from "@/lib/badge-colors";
 import { TASK_STATUS_LABELS } from "@shared/task-status-constants";
 import type { TaskSourceType } from "@shared/task-source-constants";
 import type { Equipment } from "@shared/schema";
@@ -189,6 +189,20 @@ export default function TasksPage() {
     }
   }, [scope, showCreatedTab, setMyWork]);
 
+  useEffect(() => {
+    const refreshTasks = () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
+    };
+    window.addEventListener("taskCreated", refreshTasks);
+    window.addEventListener("taskUpdated", refreshTasks);
+    window.addEventListener("taskDeleted", refreshTasks);
+    return () => {
+      window.removeEventListener("taskCreated", refreshTasks);
+      window.removeEventListener("taskUpdated", refreshTasks);
+      window.removeEventListener("taskDeleted", refreshTasks);
+    };
+  }, [queryClient]);
+
   // Удаление задачи
   const deleteTask = useMutation({
     mutationFn: async (id: number) => {
@@ -218,7 +232,7 @@ export default function TasksPage() {
   // Функции для работы с замечаниями
   const createTaskFromRemark = async (remark: any) => {
     try {
-      await apiRequest('POST', '/api/tasks', {
+      const res = await apiRequest('POST', '/api/tasks', {
         title: `Задача из замечания: ${remark.title}`,
         description: remark.description,
         priority: remark.priority,
@@ -228,7 +242,9 @@ export default function TasksPage() {
         userId: user?.id,
         createdBy: user?.name || 'Неизвестный пользователь',
       });
-      queryClient.invalidateQueries({ queryKey: ['/api/tasks'] });
+      const newTask = await res.json();
+      upsertTaskInListCaches(queryClient, newTask);
+      await invalidateTaskDomain(queryClient);
       window.dispatchEvent(new CustomEvent('taskCreated'));
       toast({ title: "Задача создана", description: "Задача успешно создана из замечания" });
     } catch {

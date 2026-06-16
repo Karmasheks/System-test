@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { appendServiceRequestComment } from "@/lib/mutation-cache";
 import type { ServiceRequest } from "@shared/schema";
 
 export function useServiceRequests(filters?: {
@@ -134,7 +135,8 @@ export function useAddRequestComment() {
       });
       return res.json();
     },
-    onSuccess: (_d, v) => {
+    onSuccess: (comment, v) => {
+      appendServiceRequestComment(qc, v.id, comment as Record<string, unknown>);
       qc.invalidateQueries({ queryKey: ["/api/service-requests", v.id] });
     },
   });

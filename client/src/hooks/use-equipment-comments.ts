@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { appendEquipmentComment } from "@/lib/mutation-cache";
 import type { EquipmentComment } from "@shared/schema";
 
 function commentsKey(equipmentId: string | null) {
@@ -30,9 +31,14 @@ export function useEquipmentCommentMutations(equipmentId: string | null) {
     mutationFn: async (body: string) => {
       if (!equipmentId) throw new Error("Оборудование не выбрано");
       const res = await apiRequest("POST", `/api/equipment/${equipmentId}/comments`, { body });
-      return res.json();
+      return res.json() as Promise<EquipmentComment>;
     },
-    onSuccess: invalidate,
+    onSuccess: (comment) => {
+      if (equipmentId) {
+        appendEquipmentComment(qc, equipmentId, comment);
+      }
+      invalidate();
+    },
   });
 
   const updateComment = useMutation({
@@ -40,16 +46,29 @@ export function useEquipmentCommentMutations(equipmentId: string | null) {
       const res = await apiRequest("PUT", `/api/equipment/${equipmentId}/comments/${commentId}`, {
         body,
       });
-      return res.json();
+      return res.json() as Promise<EquipmentComment>;
     },
-    onSuccess: invalidate,
+    onSuccess: (comment) => {
+      if (equipmentId) {
+        qc.setQueryData<EquipmentComment[]>(commentsKey(equipmentId), (old) =>
+          old?.map((c) => (c.id === comment.id ? comment : c)) ?? [comment]
+        );
+      }
+    },
   });
 
   const deleteComment = useMutation({
     mutationFn: async (commentId: number) => {
       await apiRequest("DELETE", `/api/equipment/${equipmentId}/comments/${commentId}`);
+      return commentId;
     },
-    onSuccess: invalidate,
+    onSuccess: (commentId) => {
+      if (equipmentId) {
+        qc.setQueryData<EquipmentComment[]>(commentsKey(equipmentId), (old) =>
+          old?.filter((c) => c.id !== commentId) ?? []
+        );
+      }
+    },
   });
 
   return { addComment, updateComment, deleteComment };

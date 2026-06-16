@@ -64,6 +64,11 @@ import { useSubdivisions } from "@/hooks/use-subdivisions";
 import { canAccessSubdivision } from "@shared/subdivision-scope";
 import { equipmentOptionLabel } from "@/lib/equipment-label";
 import { buildUrlAttachment } from "@/lib/comment-attachment";
+import {
+  appendTaskComment,
+  invalidateTaskDomain,
+  upsertTaskInListCaches,
+} from "@/lib/mutation-cache";
 
 const taskTypeCodes = TASK_TYPES.map((t) => t.code) as [
   (typeof TASK_TYPES)[number]["code"],
@@ -265,7 +270,7 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
   const { data: taskComments = [], refetch: refetchComments } = useQuery<TaskComment[]>({
     queryKey: ["/api/tasks", editingTask?.id, "comments"],
     enabled: open && !!editingTask?.id,
-    refetchInterval: open && editingTask?.id ? 4000 : false,
+    refetchInterval: false,
     queryFn: async () => {
       const res = await apiRequest("GET", `/api/tasks/${editingTask!.id}/comments`);
       return res.json();
@@ -600,11 +605,9 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
       });
       return res.json();
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/tasks/stats"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/equipment"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/notifications"] });
+    onSuccess: async (newTask: Task) => {
+      upsertTaskInListCaches(queryClient, newTask);
+      await invalidateTaskDomain(queryClient);
       window.dispatchEvent(new CustomEvent("taskCreated"));
       window.dispatchEvent(new CustomEvent("equipmentUpdated"));
       close();
@@ -656,9 +659,9 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
 
       return updated;
     },
-    onSuccess: async () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/tasks/stats"] });
+    onSuccess: async (updated: Task) => {
+      if (updated) upsertTaskInListCaches(queryClient, updated);
+      await invalidateTaskDomain(queryClient);
       queryClient.invalidateQueries({ queryKey: ["/api/equipment"] });
       queryClient.invalidateQueries({ queryKey: ["/api/warehouse/parts"] });
       queryClient.invalidateQueries({ queryKey: ["/api/warehouse/activity"] });
@@ -738,12 +741,16 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
       });
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: (comment: TaskComment) => {
+      if (comment && editingTask) {
+        appendTaskComment(queryClient, editingTask.id, comment);
+      } else {
+        refetchComments();
+      }
       setCommentText("");
       setAttachmentName("");
       setAttachmentUrl("");
       setAttachmentFile(null);
-      refetchComments();
       queryClient.invalidateQueries({ queryKey: ["/api/notifications"] });
       window.dispatchEvent(new CustomEvent("taskCommentAdded"));
       toast({ title: "Комментарий добавлен" });
@@ -763,8 +770,15 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
       );
       return res.json();
     },
-    onSuccess: () => {
-      refetchComments();
+    onSuccess: (comment: TaskComment) => {
+      if (comment && editingTask) {
+        queryClient.setQueryData<TaskComment[]>(
+          ["/api/tasks", editingTask.id, "comments"],
+          (old) => old?.map((c) => (c.id === comment.id ? comment : c)) ?? [comment]
+        );
+      } else {
+        refetchComments();
+      }
       toast({ title: "Комментарий обновлён" });
     },
     onError: (err: Error) => {
@@ -777,8 +791,13 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
       if (!editingTask) return;
       await apiRequest("DELETE", `/api/tasks/${editingTask.id}/comments/${commentId}`);
     },
-    onSuccess: () => {
-      refetchComments();
+    onSuccess: (_, commentId) => {
+      if (editingTask) {
+        queryClient.setQueryData<TaskComment[]>(
+          ["/api/tasks", editingTask.id, "comments"],
+          (old) => old?.filter((c) => c.id !== commentId) ?? []
+        );
+      }
       toast({ title: "Комментарий удалён" });
     },
     onError: (err: Error) => {
