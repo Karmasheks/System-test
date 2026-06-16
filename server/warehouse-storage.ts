@@ -14,6 +14,7 @@ import {
 import { DEFAULT_WAREHOUSE_CATEGORIES, warehouseCategoryForBudget } from "@shared/warehouse-constants";
 import { filterBySubdivisionScope, type SubdivisionScope } from "@shared/subdivision-scope";
 import { eq, and, desc } from "drizzle-orm";
+import { assertCanModifyComment } from "./comment-access";
 import {
   backfillWriteOffBudgetEntries,
   enrichWarehouseMovement,
@@ -496,6 +497,45 @@ export async function addPartComment(
     })
     .returning();
   return row;
+}
+
+export async function updatePartComment(
+  partId: number,
+  commentId: number,
+  body: string,
+  user: { id: number; role: string }
+) {
+  const [existing] = await db
+    .select()
+    .from(warehousePartComments)
+    .where(eq(warehousePartComments.id, commentId));
+  if (!existing || existing.partId !== partId) {
+    throw new Error("Комментарий не найден");
+  }
+  assertCanModifyComment(existing.authorId, user);
+  const [row] = await db
+    .update(warehousePartComments)
+    .set({ body: body.trim(), updatedAt: new Date() })
+    .where(eq(warehousePartComments.id, commentId))
+    .returning();
+  return row;
+}
+
+export async function deletePartComment(
+  partId: number,
+  commentId: number,
+  user: { id: number; role: string }
+) {
+  const [existing] = await db
+    .select()
+    .from(warehousePartComments)
+    .where(eq(warehousePartComments.id, commentId));
+  if (!existing || existing.partId !== partId) {
+    throw new Error("Комментарий не найден");
+  }
+  assertCanModifyComment(existing.authorId, user);
+  await db.delete(warehousePartComments).where(eq(warehousePartComments.id, commentId));
+  return existing;
 }
 
 export async function getWarehouseDashboardStats() {

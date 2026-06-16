@@ -17,6 +17,7 @@ import type {
   UserWorkReport,
   WarehouseReport,
 } from "@/hooks/use-asset-management";
+import type { ProductionReliabilityReport } from "@shared/production-reliability-types";
 
 export type ReportFileFormat = "csv" | "excel" | "pdf";
 
@@ -103,6 +104,13 @@ export function exportEmployeeWorkReport(
     t.assignedDurationHours != null ? String(t.assignedDurationHours) : "",
   ]);
 
+  const openRequestRows = data.openServiceRequests.map((sr) => [
+    String(sr.id),
+    sr.equipmentName,
+    sr.statusLabel,
+    String(sr.loggedHours),
+  ]);
+
   const completedRows = data.completedTasks.map((t) => [
     String(t.id),
     t.title,
@@ -112,6 +120,14 @@ export function exportEmployeeWorkReport(
     String(t.actualHours),
     t.assignedDurationHours != null ? String(t.assignedDurationHours) : "",
     t.completionComment ?? "",
+  ]);
+
+  const srTimeRows = data.serviceRequestTimeEntries.map((e) => [
+    String(e.requestId),
+    e.equipmentName,
+    e.workDate,
+    String(e.hours),
+    e.comment ?? "",
   ]);
 
   if (format === "csv") {
@@ -126,11 +142,21 @@ export function exportEmployeeWorkReport(
         ["ID", "Название", "Статус", "Создана", "Назначена", "В работе, ч"],
         ...openRows,
         [],
+        ["Заявки на сотруднике"],
+        ["ID", "Оборудование", "Статус", "Залогировано, ч"],
+        ...openRequestRows,
+        [],
         ["Закрытые задачи за период"],
         ["ID", "Название", "Создана", "Назначена", "Закрыта", "Факт, ч", "От назнач., ч", "Итог работ"],
         ...completedRows,
         [],
-        ["Итого закрыто", String(data.summary.completedTasksCount)],
+        ["Трудозатраты по заявкам"],
+        ["Заявка", "Оборудование", "Дата", "Часы", "Комментарий"],
+        ...srTimeRows,
+        [],
+        ["Итого закрыто задач", String(data.summary.completedTasksCount)],
+        ["Часов по задачам", String(data.summary.taskHoursInPeriod)],
+        ["Часов по заявкам", String(data.summary.serviceRequestHoursInPeriod)],
         ["Часов за период", String(data.summary.totalHoursInPeriod)],
       ],
       `${baseName}.csv`
@@ -148,6 +174,8 @@ export function exportEmployeeWorkReport(
         ["Подразделение", data.department ?? ""],
         ["Период", `${from} — ${to}`],
         ["Закрыто за период", data.summary.completedTasksCount],
+        ["Часов по задачам", data.summary.taskHoursInPeriod],
+        ["Часов по заявкам", data.summary.serviceRequestHoursInPeriod],
         ["Часов за период", data.summary.totalHoursInPeriod],
       ]),
       "Сводка"
@@ -163,10 +191,26 @@ export function exportEmployeeWorkReport(
     XLSX.utils.book_append_sheet(
       wb,
       XLSX.utils.aoa_to_sheet([
+        ["ID", "Оборудование", "Статус", "Залогировано, ч"],
+        ...openRequestRows,
+      ]),
+      "Заявки"
+    );
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.aoa_to_sheet([
         ["ID", "Название", "Создана", "Назначена", "Закрыта", "Факт, ч", "От назнач., ч", "Итог"],
         ...completedRows,
       ]),
       "Закрытые"
+    );
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.aoa_to_sheet([
+        ["Заявка", "Оборудование", "Дата", "Часы", "Комментарий"],
+        ...srTimeRows,
+      ]),
+      "Трудозатраты заявок"
     );
     downloadWorkbook(wb, `${baseName}.xlsx`);
     return;
@@ -180,7 +224,9 @@ export function exportEmployeeWorkReport(
         Период: ${from} — ${to} · Закрыто: ${data.summary.completedTasksCount} · Часов: ${data.summary.totalHoursInPeriod}
       </p>
       ${htmlTable("На сотруднике", ["ID", "Задача", "Статус", "Создана", "Назначена", "В работе, ч"], openRows)}
+      ${htmlTable("Заявки на сотруднике", ["ID", "Оборудование", "Статус", "Залогировано, ч"], openRequestRows)}
       ${htmlTable("Закрытые за период", ["ID", "Задача", "Создана", "Назначена", "Закрыта", "Факт, ч", "От назнач., ч", "Итог"], completedRows)}
+      ${htmlTable("Трудозатраты по заявкам", ["Заявка", "Оборудование", "Дата", "Часы", "Комментарий"], srTimeRows)}
     </div>
   `;
   return downloadPdfFromHtml(html, `${baseName}.pdf`);
@@ -786,6 +832,108 @@ export function exportWarehouseReport(
       ${htmlTable("Остатки", ["ID", "Название", "Категория", "Остаток", "Мин.", "Статус", "Подразделение"], partRows)}
       ${htmlTable("Движения", ["Дата", "Запчасть", "Тип", "Кол-во", "Оборудование", "Исполнитель", "Комментарий"], movementRows)}
       ${htmlTable("Алерты", ["Запчасть", "Тип", "Остаток", "Мин.", "Создан"], alertRows)}
+    </div>
+  `;
+  return downloadPdfFromHtml(html, `${baseName}.pdf`);
+}
+
+function fmtPct(v: number | null): string {
+  return v == null ? "—" : `${v.toFixed(1)}%`;
+}
+
+export async function exportProductionReliabilityReport(
+  data: ProductionReliabilityReport,
+  format: ReportFileFormat,
+  from: string,
+  to: string
+) {
+  const baseName = `oee-mtbf-mttr-${from}-${to}`;
+  const oee = data.summary.oee;
+
+  const summaryRows: string[][] = [
+    ["OEE", fmtPct(oee?.oee ?? null)],
+    ["Доступность", fmtPct(oee?.availability ?? null)],
+    ["Производительность", fmtPct(oee?.performance ?? null)],
+    ["Качество", fmtPct(oee?.quality ?? null)],
+    ["MTTR, ч", data.summary.mttrHours != null ? String(data.summary.mttrHours) : "—"],
+    ["MTBF, ч", data.summary.mtbfHours != null ? String(data.summary.mtbfHours) : "—"],
+    ["Отказов", String(data.summary.failureCount)],
+    ["Ремонт, мин", String(data.summary.repairMinutesTotal)],
+    ["Операционное время, мин", String(data.summary.operatingMinutes)],
+  ];
+
+  const equipmentRows = data.byEquipment.map((r) => [
+    r.equipmentName,
+    fmtPct(r.oee?.oee ?? null),
+    r.mttrHours != null ? String(r.mttrHours) : "—",
+    r.mtbfHours != null ? String(r.mtbfHours) : "—",
+    String(r.failureCount),
+    String(r.repairMinutesTotal),
+  ]);
+
+  const failureRows = data.failures.map((f) => [
+    f.failureAt,
+    f.equipmentName,
+    f.source === "service_request" ? "Заявка" : "Простой",
+    f.title,
+    String(f.repairMinutes),
+    f.resolvedAt ?? "—",
+  ]);
+
+  if (format === "csv") {
+    const rows = [
+      ["Период", from, to],
+      [],
+      ["Показатель", "Значение"],
+      ...summaryRows,
+      [],
+      ["Оборудование", "OEE", "MTTR, ч", "MTBF, ч", "Отказов", "Ремонт, мин"],
+      ...equipmentRows,
+      [],
+      ["Дата", "Оборудование", "Источник", "Описание", "Ремонт, мин", "Закрыто"],
+      ...failureRows,
+    ];
+    downloadCsv(rows, `${baseName}.csv`);
+    return;
+  }
+
+  if (format === "excel") {
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.aoa_to_sheet([
+        ["Показатель", "Значение"],
+        ...summaryRows,
+      ]),
+      "Сводка"
+    );
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.aoa_to_sheet([
+        ["Оборудование", "OEE", "MTTR, ч", "MTBF, ч", "Отказов", "Ремонт, мин"],
+        ...equipmentRows,
+      ]),
+      "По оборудованию"
+    );
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.aoa_to_sheet([
+        ["Дата", "Оборудование", "Источник", "Описание", "Ремонт, мин", "Закрыто"],
+        ...failureRows,
+      ]),
+      "Отказы"
+    );
+    downloadWorkbook(wb, `${baseName}.xlsx`);
+    return;
+  }
+
+  const html = `
+    <div style="font-family:'Segoe UI',Arial,sans-serif;padding:24px;color:#111;">
+      <h1 style="font-size:18px;margin:0 0 8px;">OEE, MTBF и MTTR</h1>
+      <p style="margin:0 0 16px;font-size:12px;color:#555;">Период: ${escapeHtml(from)} — ${escapeHtml(to)}</p>
+      ${htmlTable("Сводка", ["Показатель", "Значение"], summaryRows)}
+      ${htmlTable("По оборудованию", ["Оборудование", "OEE", "MTTR, ч", "MTBF, ч", "Отказов", "Ремонт, мин"], equipmentRows)}
+      ${htmlTable("Отказы", ["Дата", "Оборудование", "Источник", "Описание", "Ремонт, мин", "Закрыто"], failureRows)}
     </div>
   `;
   return downloadPdfFromHtml(html, `${baseName}.pdf`);

@@ -1,9 +1,11 @@
-import { eq } from "drizzle-orm";
+import { and, eq, gte, lte, sql } from "drizzle-orm";
 import { db } from "./db";
-import { tasks, users } from "../shared/schema";
+import { tasks, users, serviceRequests, requestTimeEntries } from "../shared/schema";
 import { taskStatusLabel } from "../shared/task-status-constants";
+import { STATUS_LABELS } from "../shared/service-request-constants";
 
 const OPEN_TASK_STATUSES = ["pending", "in_progress", "overdue"] as const;
+const CLOSED_SR_STATUSES = ["closed", "cancelled", "duplicate", "not_needed"] as const;
 
 export type EmployeeWorkOpenTask = {
   id: number;
@@ -13,6 +15,14 @@ export type EmployeeWorkOpenTask = {
   createdAt: string | null;
   assigneeAssignedAt: string | null;
   assignedDurationHours: number | null;
+};
+
+export type EmployeeWorkOpenServiceRequest = {
+  id: number;
+  equipmentName: string;
+  status: string;
+  statusLabel: string;
+  loggedHours: number;
 };
 
 export type EmployeeWorkCompletedTask = {
@@ -29,6 +39,15 @@ export type EmployeeWorkCompletedTask = {
   assignedDurationHours: number | null;
 };
 
+export type EmployeeWorkServiceRequestTimeEntry = {
+  id: number;
+  requestId: number;
+  equipmentName: string;
+  workDate: string;
+  hours: number;
+  comment: string | null;
+};
+
 export type EmployeeWorkReport = {
   userId: number;
   userName: string;
@@ -37,13 +56,18 @@ export type EmployeeWorkReport = {
   period: { from: string | null; to: string | null };
   summary: {
     openTasksCount: number;
+    openServiceRequestsCount: number;
     completedTasksCount: number;
     completedTasksToday: number;
+    taskHoursInPeriod: number;
+    serviceRequestHoursInPeriod: number;
     totalHoursInPeriod: number;
     totalHoursToday: number;
   };
   openTasks: EmployeeWorkOpenTask[];
+  openServiceRequests: EmployeeWorkOpenServiceRequest[];
   completedTasks: EmployeeWorkCompletedTask[];
+  serviceRequestTimeEntries: EmployeeWorkServiceRequestTimeEntry[];
 };
 
 import { normalizeActualHours } from "@shared/task-hours";
@@ -86,6 +110,10 @@ function endOfDay(d: Date): Date {
   return copy;
 }
 
+function toDateStr(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
 export async function getEmployeeWorkReport(options: {
   userId: number;
   from?: Date;
@@ -96,9 +124,12 @@ export async function getEmployeeWorkReport(options: {
   if (!user) return null;
 
   const allTasks = await db.select().from(tasks);
+  const allRequests = await db.select().from(serviceRequests);
+  const requestById = new Map(allRequests.map((r) => [r.id, r]));
   const now = new Date();
   const todayStart = startOfDay(now);
   const todayEnd = endOfDay(now);
+  const todayStr = toDateStr(now);
 
   const userTasks = allTasks.filter((t) => t.assigneeId === userId);
 
@@ -121,6 +152,34 @@ export async function getEmployeeWorkReport(options: {
       const bTime = b.assigneeAssignedAt ? new Date(b.assigneeAssignedAt).getTime() : 0;
       return bTime - aTime;
     });
+
+  const loggedHoursByRequest = new Map<number, number>();
+  const loggedRows = await db
+    .select({
+      requestId: requestTimeEntries.requestId,
+      hours: sql<number>`sum(${requestTimeEntries.hours})`,
+    })
+    .from(requestTimeEntries)
+    .groupBy(requestTimeEntries.requestId);
+
+  for (const row of loggedRows) {
+    loggedHoursByRequest.set(row.requestId, Number(row.hours));
+  }
+
+  const openServiceRequests: EmployeeWorkOpenServiceRequest[] = allRequests
+    .filter(
+      (r) =>
+        r.assigneeId === userId &&
+        !CLOSED_SR_STATUSES.includes(r.status as (typeof CLOSED_SR_STATUSES)[number])
+    )
+    .map((r) => ({
+      id: r.id,
+      equipmentName: r.equipmentName,
+      status: r.status,
+      statusLabel: STATUS_LABELS[r.status as keyof typeof STATUS_LABELS] ?? r.status,
+      loggedHours: loggedHoursByRequest.get(r.id) ?? 0,
+    }))
+    .sort((a, b) => b.id - a.id);
 
   const completedTasks: EmployeeWorkCompletedTask[] = userTasks
     .filter((t) => {
@@ -152,12 +211,38 @@ export async function getEmployeeWorkReport(options: {
       return bTime - aTime;
     });
 
+  const timeConditions = [eq(requestTimeEntries.userId, userId)];
+  if (from) timeConditions.push(gte(requestTimeEntries.workDate, toDateStr(from)));
+  if (to) timeConditions.push(lte(requestTimeEntries.workDate, toDateStr(to)));
+
+  const srTimeRows = await db
+    .select()
+    .from(requestTimeEntries)
+    .where(and(...timeConditions))
+    .orderBy(requestTimeEntries.workDate);
+
+  const serviceRequestTimeEntries: EmployeeWorkServiceRequestTimeEntry[] = srTimeRows.map((row) => {
+    const request = requestById.get(row.requestId);
+    return {
+      id: row.id,
+      requestId: row.requestId,
+      equipmentName: request?.equipmentName ?? `#${row.requestId}`,
+      workDate: String(row.workDate),
+      hours: Number(row.hours),
+      comment: row.comment ?? null,
+    };
+  });
+
   const completedToday = userTasks.filter(
     (t) => t.status === "completed" && inPeriod(t.completedAt, todayStart, todayEnd)
   );
 
-  const totalHoursInPeriod = completedTasks.reduce((sum, t) => sum + t.actualHours, 0);
-  const totalHoursToday = completedToday.reduce((sum, t) => sum + parseHours(t.actualHours), 0);
+  const taskHoursInPeriod = completedTasks.reduce((sum, t) => sum + t.actualHours, 0);
+  const serviceRequestHoursInPeriod = serviceRequestTimeEntries.reduce((sum, e) => sum + e.hours, 0);
+  const taskHoursToday = completedToday.reduce((sum, t) => sum + parseHours(t.actualHours), 0);
+  const serviceRequestHoursToday = serviceRequestTimeEntries
+    .filter((e) => e.workDate === todayStr)
+    .reduce((sum, e) => sum + e.hours, 0);
 
   return {
     userId: user.id,
@@ -170,12 +255,17 @@ export async function getEmployeeWorkReport(options: {
     },
     summary: {
       openTasksCount: openTasks.length,
+      openServiceRequestsCount: openServiceRequests.length,
       completedTasksCount: completedTasks.length,
       completedTasksToday: completedToday.length,
-      totalHoursInPeriod: Math.round(totalHoursInPeriod * 10) / 10,
-      totalHoursToday: Math.round(totalHoursToday * 10) / 10,
+      taskHoursInPeriod: Math.round(taskHoursInPeriod * 10) / 10,
+      serviceRequestHoursInPeriod: Math.round(serviceRequestHoursInPeriod * 10) / 10,
+      totalHoursInPeriod: Math.round((taskHoursInPeriod + serviceRequestHoursInPeriod) * 10) / 10,
+      totalHoursToday: Math.round((taskHoursToday + serviceRequestHoursToday) * 10) / 10,
     },
     openTasks,
+    openServiceRequests,
     completedTasks,
+    serviceRequestTimeEntries,
   };
 }

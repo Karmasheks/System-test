@@ -5,6 +5,7 @@ import {
   createWarehousePartSchema,
   addWarehouseMovementSchema,
   addWarehouseCommentSchema,
+  updateCommentBodySchema,
 } from "@shared/schema";
 import {
   seedWarehouseCategories,
@@ -20,6 +21,8 @@ import {
   addWarehouseMovement,
   listPartComments,
   addPartComment,
+  updatePartComment,
+  deletePartComment,
   listUnresolvedStockAlerts,
   resolveStockAlert,
   getWarehouseDashboardStats,
@@ -209,6 +212,42 @@ export function registerWarehouseRoutes(
       res.status(201).json(await addPartComment(Number(req.params.id), parsed.body, user));
     } catch (e: any) {
       res.status(400).json({ message: e.message ?? "Ошибка" });
+    }
+  });
+
+  app.put("/api/warehouse/parts/:id/comments/:commentId", authenticate, async (req, res) => {
+    try {
+      const user = req.user as AuthenticatedUser;
+      const partId = Number(req.params.id);
+      const commentId = Number(req.params.commentId);
+      const parsed = updateCommentBodySchema.parse(req.body);
+      res.json(await updatePartComment(partId, commentId, parsed.body, user));
+    } catch (e: any) {
+      const status =
+        e.message === "Комментарий не найден"
+          ? 404
+          : e.message?.includes("Недостаточно прав")
+            ? 403
+            : 400;
+      res.status(status).json({ message: e.message ?? "Ошибка" });
+    }
+  });
+
+  app.delete("/api/warehouse/parts/:id/comments/:commentId", authenticate, async (req, res) => {
+    try {
+      const user = req.user as AuthenticatedUser;
+      const partId = Number(req.params.id);
+      const commentId = Number(req.params.commentId);
+      await deletePartComment(partId, commentId, user);
+      res.json({ message: "Комментарий удалён" });
+    } catch (e: any) {
+      const status =
+        e.message === "Комментарий не найден"
+          ? 404
+          : e.message?.includes("Недостаточно прав")
+            ? 403
+            : 400;
+      res.status(status).json({ message: e.message ?? "Ошибка" });
     }
   });
 

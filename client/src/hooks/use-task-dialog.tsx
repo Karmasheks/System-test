@@ -53,6 +53,10 @@ import { format } from "date-fns";
 import { ru } from "date-fns/locale";
 import { X, ExternalLink, History, ArrowLeft, CircleDot, MessageSquare } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { CommentThreadList } from "@/components/comment-thread-list";
+import { CommentComposer, hasUnsentCommentDraft } from "@/components/comment-composer";
+import { ExternalLinksPanel } from "@/components/external-links-panel";
+import { useTaskLinks, useTaskLinkMutations } from "@/hooks/use-task-links";
 import { cn } from "@/lib/utils";
 import { taskStatusColors } from "@/lib/badge-colors";
 import { SubdivisionPicker } from "@/components/subdivision-picker";
@@ -267,6 +271,10 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
       return res.json();
     },
   });
+
+  const { data: taskLinks = [] } = useTaskLinks(editingTask?.id);
+  const { addLink: addTaskLinkMutation, removeLink: removeTaskLinkMutation } =
+    useTaskLinkMutations(editingTask?.id);
 
   const { data: taskReservations = [] } = useQuery<PartReservation[]>({
     queryKey: ["/api/tasks", editingTask?.id, "reservations"],
@@ -745,6 +753,39 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
     },
   });
 
+  const updateTaskCommentMutation = useMutation({
+    mutationFn: async ({ commentId, body }: { commentId: number; body: string }) => {
+      if (!editingTask) return;
+      const res = await apiRequest(
+        "PUT",
+        `/api/tasks/${editingTask.id}/comments/${commentId}`,
+        { body }
+      );
+      return res.json();
+    },
+    onSuccess: () => {
+      refetchComments();
+      toast({ title: "Комментарий обновлён" });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Ошибка", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const deleteTaskCommentMutation = useMutation({
+    mutationFn: async (commentId: number) => {
+      if (!editingTask) return;
+      await apiRequest("DELETE", `/api/tasks/${editingTask.id}/comments/${commentId}`);
+    },
+    onSuccess: () => {
+      refetchComments();
+      toast({ title: "Комментарий удалён" });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Ошибка", description: err.message, variant: "destructive" });
+    },
+  });
+
   const addTaskCoexecutor = useMutation({
     mutationFn: async () => {
       if (!editingTask || !coexecId) return;
@@ -809,6 +850,20 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
 
   const onSubmit = (data: TaskFormData) => {
     if (!canModify) return;
+
+    if (
+      hasUnsentCommentDraft(commentText, attachmentFile, attachmentName, attachmentUrl)
+    ) {
+      toast({
+        title: "Неотправленный комментарий",
+        description:
+          "Нажмите «Отправить комментарий» на вкладке «Комментарии». Кнопка «Сохранить» не отправляет сообщения.",
+        variant: "destructive",
+      });
+      setDialogTab("comments");
+      return;
+    }
+
     const reservedPending = taskReservations.filter((r) => r.status === "reserved");
     if (
       editingTask &&
@@ -1022,7 +1077,9 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
                         variant="outline"
                         size="sm"
                         className="h-6 text-[10px] px-2 border-indigo-300/60 bg-indigo-50/80 dark:bg-indigo-950/30"
-                        onClick={() => navigateAway(`/service-requests/${linkedServiceRequestId}`)}
+                        onClick={() =>
+                          navigateAway(`/service-requests/${linkedServiceRequestId}?from=tasks`)
+                        }
                       >
                         <ExternalLink className="w-3 h-3 mr-1" />
                         Заявка #{linkedServiceRequestId}
@@ -1080,7 +1137,7 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
                     <TabsTrigger value="history" className="text-xs">История</TabsTrigger>
                   </TabsList>
                 )}
-                <div className="flex-1 overflow-y-auto px-4 py-3 min-h-0">
+                <div className="overflow-y-auto px-4 py-3 min-h-0 max-h-[min(56vh,520px)]">
                   <TabsContent value="details" className="mt-0 space-y-3">
                     {editingTask && isCompletingTask && canModify && (
                       <div className="rounded-md border border-green-200 bg-green-50/50 dark:bg-green-950/20 p-3">
@@ -1308,6 +1365,23 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
                   </FormItem>
                 )}
               />
+
+              {editingTask && canViewTaskDetails && (
+                <ExternalLinksPanel
+                  links={taskLinks}
+                  canEdit={canCommentOnTask}
+                  isPending={
+                    addTaskLinkMutation.isPending || removeTaskLinkMutation.isPending
+                  }
+                  onAdd={async (body) => {
+                    await addTaskLinkMutation.mutateAsync(body);
+                  }}
+                  onRemove={async (linkId) => {
+                    await removeTaskLinkMutation.mutateAsync(linkId);
+                  }}
+                  className="rounded-lg border bg-muted/20 p-4"
+                />
+              )}
 
               {canManageParticipants && (
                 <div className="rounded-lg border bg-muted/20 p-4 space-y-3">
@@ -1541,8 +1615,16 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
                             }
                             groupHint={
                               linkedServiceRequestId
-                                ? "Все этапы связаны одной заявкой"
+                                ? "Заголовок — открыть заявку, строка — задачу"
                                 : "Подзадачи одной родительской задачи"
+                            }
+                            onOpenGroup={
+                              linkedServiceRequestId
+                                ? () =>
+                                    navigateAway(
+                                      `/service-requests/${linkedServiceRequestId}?from=tasks`
+                                    )
+                                : undefined
                             }
                             rootTask={{
                               id: taskTree.root.id,
@@ -1560,7 +1642,9 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
                               }))}
                             highlightTaskId={editingTask?.id}
                             onOpenTask={(taskId) => {
-                              const t = taskTree.tasks.find((x) => x.id === taskId);
+                              const t =
+                                taskTree.tasks.find((x) => x.id === taskId) ??
+                                (taskTree.root.id === taskId ? taskTree.root : undefined);
                               if (t) navigateToSubtask(toTaskRecord(t));
                             }}
                           />
@@ -1570,7 +1654,9 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
                               size="sm"
                               variant="outline"
                               className="h-7 text-xs"
-                              onClick={() => navigateAway(`/service-requests/${linkedServiceRequestId}`)}
+                              onClick={() =>
+                          navigateAway(`/service-requests/${linkedServiceRequestId}?from=tasks`)
+                        }
                             >
                               <ExternalLink className="w-3 h-3 mr-1" />
                               Управление на странице заявки
@@ -1590,7 +1676,9 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
                             type="button"
                             size="sm"
                             className="h-7 text-xs"
-                            onClick={() => navigateAway(`/service-requests/${linkedServiceRequestId}`)}
+                            onClick={() =>
+                          navigateAway(`/service-requests/${linkedServiceRequestId}?from=tasks`)
+                        }
                           >
                             <ExternalLink className="w-3 h-3 mr-1" />
                             Открыть заявку
@@ -1620,89 +1708,32 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
                       </ul>
                     </div>
                   )}
-                  <div className="max-h-52 overflow-y-auto space-y-2">
-                    {taskComments.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">Комментариев пока нет</p>
-                    ) : (
-                      taskComments.map((c) => (
-                        <div
-                          key={c.id}
-                          id={`task-comment-${c.id}`}
-                          className={cn(
-                            "bg-muted rounded p-2 text-sm",
-                            highlightCommentId === c.id && "ring-2 ring-primary"
-                          )}
-                        >
-                          <div className="flex justify-between text-xs text-muted-foreground mb-1">
-                            <span>{c.authorName}</span>
-                            <span>{format(new Date(c.createdAt), "dd.MM.yyyy HH:mm", { locale: ru })}</span>
-                          </div>
-                          <p>{c.body}</p>
-                          {(c.attachments ?? []).length > 0 && (
-                            <ul className="mt-1 space-y-0.5">
-                              {(c.attachments ?? []).map((a, i) => (
-                                <li key={i}>
-                                  <a
-                                    href={a.url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-blue-600 hover:underline text-xs"
-                                  >
-                                    📎 {a.name}
-                                  </a>
-                                </li>
-                              ))}
-                            </ul>
-                          )}
-                        </div>
-                      ))
-                    )}
-                  </div>
+                  <CommentThreadList
+                    comments={taskComments}
+                    itemIdPrefix="task-comment"
+                    highlightId={highlightCommentId}
+                    maxHeightClass="max-h-52"
+                    onUpdate={async (commentId, body) => {
+                      await updateTaskCommentMutation.mutateAsync({ commentId, body });
+                    }}
+                    onDelete={async (commentId) => {
+                      await deleteTaskCommentMutation.mutateAsync(commentId);
+                    }}
+                  />
                   {canCommentOnTask ? (
-                    <div className="space-y-2">
-                      <Textarea
-                        placeholder="Напишите сообщение..."
-                        value={commentText}
-                        onChange={(e) => setCommentText(e.target.value)}
-                        rows={2}
-                      />
-                      <div className="grid grid-cols-2 gap-2">
-                        <Input
-                          placeholder="Название ссылки (необяз.)"
-                          value={attachmentName}
-                          onChange={(e) => setAttachmentName(e.target.value)}
-                        />
-                        <Input
-                          placeholder="URL"
-                          value={attachmentUrl}
-                          onChange={(e) => setAttachmentUrl(e.target.value)}
-                          disabled={!!attachmentFile}
-                        />
-                      </div>
-                      <Input
-                        type="file"
-                        accept=".jpg,.jpeg,.png,.webp,.gif,.pdf,.txt,.doc,.docx,.xls,.xlsx"
-                        onChange={(e) => setAttachmentFile(e.target.files?.[0] ?? null)}
-                      />
-                      {attachmentFile && (
-                        <p className="text-xs text-muted-foreground">
-                          Файл: {attachmentFile.name} ({Math.round(attachmentFile.size / 1024)} КБ)
-                        </p>
-                      )}
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        disabled={
-                          (!commentText.trim() &&
-                            !attachmentFile &&
-                            !buildUrlAttachment(attachmentName, attachmentUrl)) ||
-                          addComment.isPending
-                        }
-                        onClick={() => addComment.mutate()}
-                      >
-                        Отправить
-                      </Button>
-                    </div>
+                    <CommentComposer
+                      text={commentText}
+                      onTextChange={setCommentText}
+                      attachmentName={attachmentName}
+                      onAttachmentNameChange={setAttachmentName}
+                      attachmentUrl={attachmentUrl}
+                      onAttachmentUrlChange={setAttachmentUrl}
+                      attachmentFile={attachmentFile}
+                      onAttachmentFileChange={setAttachmentFile}
+                      isPending={addComment.isPending}
+                      showSaveHint
+                      onSubmit={() => addComment.mutate()}
+                    />
                   ) : (
                     <p className="text-xs text-muted-foreground">
                       У вас нет прав на добавление комментариев к этой задаче
@@ -1812,8 +1843,21 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
                   Отмена
                 </Button>
                 {canModify && (
-                  <Button type="submit" disabled={createTask.isPending || updateTask.isPending}>
-                    {editingTask ? "Сохранить" : "Создать"}
+                  <Button
+                    type="submit"
+                    disabled={createTask.isPending || updateTask.isPending}
+                    variant={
+                      hasUnsentCommentDraft(
+                        commentText,
+                        attachmentFile,
+                        attachmentName,
+                        attachmentUrl
+                      )
+                        ? "outline"
+                        : "default"
+                    }
+                  >
+                    {editingTask ? "Сохранить задачу" : "Создать"}
                   </Button>
                 )}
               </div>

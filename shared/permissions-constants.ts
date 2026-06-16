@@ -13,6 +13,7 @@ export type AppModule =
   | "warehouse"
   | "budget"
   | "documents"
+  | "production_planning"
   | "users"
   | "reports";
 
@@ -254,6 +255,7 @@ export const MODULE_DEFINITIONS: ModuleDefinition[] = [
   { key: "warehouse", label: "Склад", section: "main" },
   { key: "budget", label: "Затраты (Бюджет)", section: "main" },
   { key: "documents", label: "Документы", section: "main" },
+  { key: "production_planning", label: "Планирование производства", section: "main" },
   { key: "users", label: "Пользователи", section: "admin" },
   { key: "reports", label: "Отчёты", section: "admin" },
 ];
@@ -326,6 +328,7 @@ const RAW_DEFAULT_ROLE_ACCESS_PROFILES: DefaultRoleProfileInput[] = [
       warehouse: "edit",
       budget: "view",
       documents: "view",
+      production_planning: "edit",
       reports: "view",
     }),
     hiddenFields: ["reports_financial"],
@@ -344,6 +347,7 @@ const RAW_DEFAULT_ROLE_ACCESS_PROFILES: DefaultRoleProfileInput[] = [
       tasks: "edit",
       service_requests: "view",
       documents: "view",
+      production_planning: "edit",
     }),
     hiddenFields: ["budget_amounts", "warehouse_costs", "contact_phones", "contact_emails", "supplier_details", "reports_financial"],
     hiddenDashboardBlocks: ["dash_warehouse_alerts", "dash_budget_total"],
@@ -362,6 +366,7 @@ const RAW_DEFAULT_ROLE_ACCESS_PROFILES: DefaultRoleProfileInput[] = [
       service_requests: "view",
       warehouse: "view",
       documents: "view",
+      production_planning: "view",
     }),
     hiddenFields: [
       "budget_amounts",
@@ -425,6 +430,9 @@ export const MODULE_BY_PATH: Record<string, AppModule> = {
   "/warehouse": "warehouse",
   "/budget": "budget",
   "/documents": "documents",
+  "/production": "production_planning",
+  "/production-planning": "production_planning",
+  "/planning": "production_planning",
   "/users": "users",
   "/reports": "reports",
   "/profile": "dashboard",
@@ -548,6 +556,7 @@ export function buildPermissionPreset(
           documents: "view",
           users: "edit",
           reports: "view",
+          production_planning: "edit",
         }),
         hiddenFields: ["reports_financial"],
         hiddenDashboardBlocks: [],
@@ -572,6 +581,7 @@ export function buildPermissionPreset(
           documents: "view",
           users: "view",
           reports: "view",
+          production_planning: "edit",
         }),
         hiddenFields: ["reports_financial", "user_emails"],
         hiddenDashboardBlocks: [],

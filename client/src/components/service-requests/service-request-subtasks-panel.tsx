@@ -75,7 +75,7 @@ export function ServiceRequestSubtasksPanel({
     <Card
       className={cn(
         "border-primary/30 shadow-md",
-        fillHeight && "flex flex-col min-h-[28rem] lg:min-h-[calc(100vh-14rem)] h-full",
+        fillHeight && "flex flex-col min-h-[20rem] h-full",
         className
       )}
     >

@@ -26,7 +26,7 @@ export function SubdivisionFilterSelect({
 }: Props) {
   const select = (
     <Select value={value} onValueChange={onChange}>
-      <SelectTrigger className={inline ? cn(className) : undefined}>
+      <SelectTrigger className={cn("h-10", inline ? className : "w-full")}>
         {inline && <Filter className="w-4 h-4 mr-2 shrink-0" />}
         <SelectValue placeholder="Подразделение" />
       </SelectTrigger>

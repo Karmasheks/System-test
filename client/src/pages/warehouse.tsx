@@ -52,6 +52,8 @@ import {
   History,
 } from "lucide-react";
 import type { WarehousePart } from "@shared/schema";
+import { CommentThreadList } from "@/components/comment-thread-list";
+import { CommentComposer } from "@/components/comment-composer";
 
 function LinkedWorkChip({
   item,
@@ -214,7 +216,15 @@ export default function WarehousePage() {
       return res.json();
     },
   });
-  const { createPart, updatePart, addMovement, addComment, createCategory } = useWarehouseMutations();
+  const {
+    createPart,
+    updatePart,
+    addMovement,
+    addComment,
+    updateComment,
+    deleteComment,
+    createCategory,
+  } = useWarehouseMutations();
 
   const [formOpen, setFormOpen] = useState(false);
   const [edit, setEdit] = useState<WarehousePart | null>(null);
@@ -841,26 +851,36 @@ export default function WarehousePage() {
                   </div>
                 </TabsContent>
                 <TabsContent value="comments" className="space-y-3">
-                  <div className="max-h-48 overflow-y-auto space-y-2">
-                    {comments.map((c) => (
-                      <div key={c.id} className="bg-muted rounded p-2 text-sm">
-                        <div className="flex justify-between text-xs text-muted-foreground mb-1">
-                          <span>{c.authorName}</span>
-                          <span>{format(new Date(c.createdAt), "dd.MM.yyyy HH:mm", { locale: ru })}</span>
-                        </div>
-                        <p>{c.body}</p>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="flex gap-2">
-                    <Input
-                      placeholder="Написать комментарий..."
-                      value={commentText}
-                      onChange={(e) => setCommentText(e.target.value)}
-                      onKeyDown={(e) => e.key === "Enter" && submitComment()}
-                    />
-                    <Button onClick={submitComment}>Отправить</Button>
-                  </div>
+                  <CommentThreadList
+                    comments={comments}
+                    emptyText="Комментариев пока нет"
+                    maxHeightClass="max-h-48"
+                    multilineEdit={false}
+                    onUpdate={async (commentId, body) => {
+                      if (!detailPart) return;
+                      await updateComment.mutateAsync({
+                        partId: detailPart.id,
+                        commentId,
+                        body,
+                      });
+                    }}
+                    onDelete={async (commentId) => {
+                      if (!detailPart) return;
+                      await deleteComment.mutateAsync({
+                        partId: detailPart.id,
+                        commentId,
+                      });
+                    }}
+                  />
+                  <CommentComposer
+                    variant="simple"
+                    text={commentText}
+                    onTextChange={setCommentText}
+                    isPending={addComment.isPending}
+                    placeholder="Написать комментарий…"
+                    submitLabel="Отправить комментарий"
+                    onSubmit={submitComment}
+                  />
                 </TabsContent>
               </Tabs>
             </>

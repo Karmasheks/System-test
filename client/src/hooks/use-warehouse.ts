@@ -203,6 +203,35 @@ export function useWarehouseMutations() {
         qc.invalidateQueries({ queryKey: ["/api/warehouse/parts", vars.partId, "comments"] });
       },
     }),
+    updateComment: useMutation({
+      mutationFn: async ({
+        partId,
+        commentId,
+        body,
+      }: {
+        partId: number;
+        commentId: number;
+        body: string;
+      }) => {
+        const res = await apiRequest(
+          "PUT",
+          `/api/warehouse/parts/${partId}/comments/${commentId}`,
+          { body }
+        );
+        return res.json();
+      },
+      onSuccess: (_d, vars) => {
+        qc.invalidateQueries({ queryKey: ["/api/warehouse/parts", vars.partId, "comments"] });
+      },
+    }),
+    deleteComment: useMutation({
+      mutationFn: async ({ partId, commentId }: { partId: number; commentId: number }) => {
+        await apiRequest("DELETE", `/api/warehouse/parts/${partId}/comments/${commentId}`);
+      },
+      onSuccess: (_d, vars) => {
+        qc.invalidateQueries({ queryKey: ["/api/warehouse/parts", vars.partId, "comments"] });
+      },
+    }),
     resolveAlert: useMutation({
       mutationFn: async ({
         alertId,

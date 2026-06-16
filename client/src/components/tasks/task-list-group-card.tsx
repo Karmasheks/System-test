@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useLocation } from "wouter";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { LinkedTaskTree } from "@/components/tasks/linked-task-tree";
@@ -10,6 +11,7 @@ import { format } from "date-fns";
 import { ru } from "date-fns/locale";
 import { Bell, AlertTriangle, Link2, ListTodo } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useMyWorkParams } from "@/hooks/use-my-work-params";
 
 export type TaskListItemData = {
   id: number;
@@ -159,7 +161,15 @@ function TaskListCardShell<T extends TaskListItemData>({
 
 export function TaskListGroupCard<T extends TaskListItemData>(props: Props<T>) {
   const { group, canOpenTask, onOpen, ...shared } = props;
+  const [, setLocation] = useLocation();
+  const { scope } = useMyWorkParams();
   const task = group.root;
+
+  const openServiceRequest = (requestId: number) => {
+    const q = new URLSearchParams({ from: "tasks" });
+    if (scope !== "all") q.set("scope", scope);
+    setLocation(`/service-requests/${requestId}?${q.toString()}`);
+  };
 
   const openById = (id: number) => {
     const t = group.tasks.find((x) => x.id === id);
@@ -211,7 +221,14 @@ export function TaskListGroupCard<T extends TaskListItemData>(props: Props<T>) {
         <LinkedTaskTree
           variant="accent"
           groupLabel={groupLabel}
-          groupHint="Клик по строке — открыть задачу"
+          groupHint={
+            group.serviceRequestId
+              ? "Заголовок — открыть заявку, строка — задачу"
+              : "Клик по строке — открыть задачу"
+          }
+          onOpenGroup={
+            group.serviceRequestId ? () => openServiceRequest(group.serviceRequestId!) : undefined
+          }
           rootTask={{
             id: task.id,
             title: task.title,

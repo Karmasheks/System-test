@@ -27,6 +27,7 @@ import {
   getCalendarTaskChipClass,
   getCalendarServiceRequestChipClass,
   getCalendarRemarkChipClass,
+  getCalendarProductionChipClass,
   calendarTaskTypeColors,
   calendarServiceRequestColors,
   calendarRemarkColors,
@@ -51,6 +52,8 @@ import {
   serviceRequestCalendarTitle,
   taskCalendarTitle,
 } from "@/lib/calendar-event-label";
+import { useProductionDisplayConfig } from "@/hooks/use-production-display-config";
+import { ProductionDisplaySettings } from "@/components/planning/production-display-settings";
 
 const SCHEDULE_PAGE_TITLE = "План ТО и задач";
 
@@ -59,12 +62,13 @@ const scheduleDialogClass =
 const scheduleDialogBodyClass = "overflow-y-auto px-6 py-4 space-y-4 flex-1 min-h-0";
 const scheduleDialogFooterClass = "px-6 py-4 border-t shrink-0";
 
-type CalendarEventFilter = "all" | "service_request" | "remark" | TaskTypeCode;
+type CalendarEventFilter = "all" | "service_request" | "remark" | "production_schedule" | TaskTypeCode;
 
 const CALENDAR_FILTER_OPTIONS: { value: CalendarEventFilter; label: string }[] = [
   { value: "all", label: "Все события" },
   { value: "service_request", label: "Заявки" },
   { value: "remark", label: "Замечания" },
+  { value: "production_schedule", label: "Производство" },
   ...TASK_TYPES.map((t) => ({
     value: t.code as CalendarEventFilter,
     label: t.label,
@@ -73,7 +77,7 @@ const CALENDAR_FILTER_OPTIONS: { value: CalendarEventFilter; label: string }[] =
 
 export default function Schedule() {
   const { user } = useAuth();
-  const { isAdmin } = useAccessControl();
+  const { isAdmin, canViewModule } = useAccessControl();
   const { openCreate } = useTaskDialog();
   const {
     filterValue,
@@ -112,7 +116,22 @@ export default function Schedule() {
   const monthEnd = endOfMonth(currentDate);
   const calFrom = format(monthStart, "yyyy-MM-dd");
   const calTo = format(monthEnd, "yyyy-MM-dd");
-  const { data: calEventsRaw = [] } = useCalendarEvents(calFrom, calTo);
+
+  const calendarSubdivisionId = useMemo(() => {
+    if (filterSubdivisionId != null) return filterSubdivisionId;
+    if (availableSubdivisions.length === 1) return availableSubdivisions[0].id;
+    return null;
+  }, [filterSubdivisionId, availableSubdivisions]);
+
+  const { config: displayConfig } = useProductionDisplayConfig(
+    canViewModule("production_planning") ? calendarSubdivisionId : null
+  );
+
+  const { data: calEventsRaw = [] } = useCalendarEvents(calFrom, calTo, undefined, {
+    includeProduction:
+      canViewModule("production_planning") && displayConfig.calendar.showProduction,
+    productionStatuses: displayConfig.calendar.slotStatuses,
+  });
 
   const scopedEquipmentIds = useMemo(
     () => equipmentIdsInScope(getActiveEquipment(), filterSubdivisionId, null),
@@ -168,7 +187,13 @@ export default function Schedule() {
 
   const filterTasksByType = (dayTasks: Task[]) => {
     if (eventFilter === "all") return dayTasks;
-    if (eventFilter === "service_request" || eventFilter === "remark") return [];
+    if (
+      eventFilter === "service_request" ||
+      eventFilter === "remark" ||
+      eventFilter === "production_schedule"
+    ) {
+      return [];
+    }
     return dayTasks.filter((task) => (task.taskType || "other") === eventFilter);
   };
 
@@ -193,11 +218,26 @@ export default function Schedule() {
     );
   };
 
+  const getProductionForDay = (day: Date) => {
+    if (!displayConfig.calendar.showProduction) return [];
+    if (eventFilter !== "all" && eventFilter !== "production_schedule") return [];
+    return (calEvents as any[])
+      .filter(
+        (e) =>
+          e.sourceType === "production_schedule" &&
+          (displayConfig.calendar.slotStatuses as string[]).includes(e.status) &&
+          isSameDay(new Date(e.date), day)
+      )
+      .slice(0, displayConfig.calendar.maxEventsPerDay);
+  };
+
   const getOtherCalEventsForDay = (day: Date) => {
     if (eventFilter !== "all") return [];
     return (calEvents as any[]).filter(
       (e) =>
-        !["task", "service_request", "remark", "maintenance"].includes(e.sourceType) &&
+        !["task", "service_request", "remark", "maintenance", "production_schedule"].includes(
+          e.sourceType
+        ) &&
         isSameDay(new Date(e.date), day)
     );
   };
@@ -206,11 +246,18 @@ export default function Schedule() {
     const taskEvents = getTasksForDay(day);
     const serviceRequests = getServiceRequestsForDay(day);
     const remarkEvents = getRemarksForDay(day);
-    return { tasks: taskEvents, serviceRequests, remarks: remarkEvents };
+    const productionEvents = getProductionForDay(day);
+    return { tasks: taskEvents, serviceRequests, remarks: remarkEvents, production: productionEvents };
   };
 
   const getTasksForMonth = (month: Date) => {
-    if (eventFilter === "service_request" || eventFilter === "remark") return [];
+    if (
+      eventFilter === "service_request" ||
+      eventFilter === "remark" ||
+      eventFilter === "production_schedule"
+    ) {
+      return [];
+    }
     const monthStart = startOfMonth(month);
     const monthEnd = endOfMonth(month);
     const monthTasks = scopedTasks.filter((task) => {
@@ -542,6 +589,12 @@ export default function Schedule() {
                             ))}
                           </SelectContent>
                         </Select>
+                        {canViewModule("production_planning") && (
+                          <ProductionDisplaySettings
+                            subdivisionId={calendarSubdivisionId}
+                            context="calendar"
+                          />
+                        )}
                         <div className="flex gap-2">
                         {/* Кнопки переключения вида */}
                         <div className="flex gap-1 mr-4">
@@ -599,7 +652,12 @@ export default function Schedule() {
                           </div>
                           <div className="grid grid-cols-7 gap-1">
                             {calendarDays.map(day => {
-                              const { tasks: dayTasks, serviceRequests: daySr, remarks: dayRemarks } = getAllEventsForDay(day);
+                              const {
+                                tasks: dayTasks,
+                                serviceRequests: daySr,
+                                remarks: dayRemarks,
+                                production: dayProduction,
+                              } = getAllEventsForDay(day);
                               const dayOtherEvents = getOtherCalEventsForDay(day);
                               const isCurrentMonth = day.getMonth() === currentDate.getMonth();
                               const isCurrentDay = isToday(day);
@@ -704,6 +762,32 @@ export default function Schedule() {
                                       );
                                     })}
 
+                                    {dayProduction.map((prod: any) => {
+                                      const href = getCalendarItemHref(
+                                        "production_schedule",
+                                        prod.sourceId
+                                      );
+                                      if (!href) return null;
+                                      const equipmentModel =
+                                        prod.equipmentModel?.trim() ||
+                                        equipmentModelFromId(prod.equipmentId, equipment);
+                                      const label =
+                                        prod.title.length > 14
+                                          ? `${prod.title.substring(0, 14)}…`
+                                          : prod.title;
+                                      return (
+                                        <Link key={prod.id} href={href}>
+                                          <div
+                                            className={`text-xs p-1 rounded cursor-pointer hover:opacity-80 ${getCalendarProductionChipClass(prod.isCompleted)}`}
+                                            title={`${prod.title}${equipmentModel ? ` · ${equipmentModel}` : ""}`}
+                                            onClick={(e) => e.stopPropagation()}
+                                          >
+                                            {prod.isCompleted ? "✓" : "●"} {label}
+                                          </div>
+                                        </Link>
+                                      );
+                                    })}
+
                                     {dayOtherEvents.map((event: any) => {
                                       const href = getCalendarItemHref(event.sourceType, event.sourceId);
                                       if (!href) return null;
@@ -730,6 +814,7 @@ export default function Schedule() {
                                     {dayTasks.length === 0 &&
                                       daySr.length === 0 &&
                                       dayRemarks.length === 0 &&
+                                      dayProduction.length === 0 &&
                                       dayOtherEvents.length === 0 &&
                                       eventFilter === "all" && (
                                       <div className="text-xs text-gray-700 text-center py-2">

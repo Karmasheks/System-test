@@ -1,8 +1,9 @@
-import { pgTable, text, serial, integer, boolean, timestamp, unique, date, real, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, timestamp, unique, date, real, jsonb, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import type { TaskCapabilities, UserPermissionOverrides } from "./permissions-constants";
 import type { VacationPeriod } from "./user-presence-constants";
+import type { ProductionDisplayConfig } from "./production-display-config";
 
 export const subdivisions = pgTable("subdivisions", {
   id: serial("id").primaryKey(),
@@ -39,6 +40,7 @@ export const users = pgTable("users", {
   telegramLinkCode: text("telegram_link_code"),
   telegramLinkCodeExpiresAt: timestamp("telegram_link_code_expires_at"),
   telegramLinkedAt: timestamp("telegram_linked_at"),
+  uiPreferences: jsonb("ui_preferences").$type<import("./user-ui-preferences").UserUiPreferences | null>(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -129,6 +131,7 @@ export const taskComments = pgTable("task_comments", {
   body: text("body").notNull(),
   attachments: jsonb("attachments").$type<{ name: string; url: string }[]>().notNull().default([]),
   createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 export const partReservations = pgTable("part_reservations", {
@@ -220,6 +223,17 @@ export const equipmentLinks = pgTable(
   })
 );
 
+/** Заметки и комментарии по карточке оборудования */
+export const equipmentComments = pgTable("equipment_comments", {
+  id: serial("id").primaryKey(),
+  equipmentId: text("equipment_id").notNull(),
+  authorId: integer("author_id").notNull(),
+  authorName: text("author_name").notNull(),
+  body: text("body").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 /** Журнал изменений оборудования: связи, статус, расположение */
 export const equipmentEventLog = pgTable("equipment_event_log", {
   id: serial("id").primaryKey(),
@@ -298,6 +312,7 @@ export const requestComments = pgTable("request_comments", {
   body: text("body").notNull(),
   attachments: jsonb("attachments").$type<{ name: string; url: string }[]>().notNull().default([]),
   createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 export const requestAuditLog = pgTable("request_audit_log", {
@@ -347,6 +362,15 @@ export const taskCoexecutors = pgTable("task_coexecutors", {
   taskId: integer("task_id").notNull(),
   userId: integer("user_id").notNull(),
   userName: text("user_name").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const taskLinks = pgTable("task_links", {
+  id: serial("id").primaryKey(),
+  taskId: integer("task_id").notNull(),
+  title: text("title").notNull(),
+  description: text("description"),
+  url: text("url").notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -535,6 +559,7 @@ export const warehousePartComments = pgTable("warehouse_part_comments", {
   authorName: text("author_name").notNull(),
   body: text("body").notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 export const warehouseStockAlerts = pgTable("warehouse_stock_alerts", {
@@ -642,6 +667,535 @@ export const documents = pgTable("documents", {
   createdByName: text("created_by_name"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
+
+// --- Планирование производства (MVP) ---
+
+export const MATERIAL_TYPES = [
+  "base",
+  "secondary",
+  "additive",
+  "colorant",
+  "packaging",
+  "tooling",
+  "other",
+] as const;
+export type MaterialType = (typeof MATERIAL_TYPES)[number];
+
+export const MATERIAL_MOVEMENT_TYPES = [
+  "in",
+  "out",
+  "reserve",
+  "unreserve",
+  "writeoff",
+  "correction",
+] as const;
+export type MaterialMovementType = (typeof MATERIAL_MOVEMENT_TYPES)[number];
+
+export const PRODUCT_BOM_USAGE_TYPES = [
+  "per_unit",
+  "percentage",
+  "fixed",
+  "other",
+] as const;
+export type ProductBomUsageType = (typeof PRODUCT_BOM_USAGE_TYPES)[number];
+
+export const PRODUCTION_ORDER_STATUSES = [
+  "draft",
+  "ready",
+  "planned",
+  "in_progress",
+  "paused",
+  "completed",
+  "cancelled",
+] as const;
+export type ProductionOrderStatus = (typeof PRODUCTION_ORDER_STATUSES)[number];
+
+export const PRODUCTION_ORDER_PRIORITIES = ["low", "medium", "high", "critical"] as const;
+export type ProductionOrderPriority = (typeof PRODUCTION_ORDER_PRIORITIES)[number];
+
+export const PRODUCTION_ORDER_SOURCES = ["manual", "excel_import", "api", "copied"] as const;
+export type ProductionOrderSource = (typeof PRODUCTION_ORDER_SOURCES)[number];
+
+export const PRODUCTION_SCHEDULE_STATUSES = [
+  "planned",
+  "in_progress",
+  "completed",
+  "paused",
+  "cancelled",
+] as const;
+export type ProductionScheduleStatus = (typeof PRODUCTION_SCHEDULE_STATUSES)[number];
+
+export const PRODUCTION_SCHEDULE_CONFLICT_STATUSES = ["none", "warning", "blocked"] as const;
+export type ProductionScheduleConflictStatus = (typeof PRODUCTION_SCHEDULE_CONFLICT_STATUSES)[number];
+
+export const PRODUCTION_DOWNTIME_REASON_TYPES = [
+  "maintenance",
+  "repair",
+  "no_material",
+  "no_operator",
+  "setup",
+  "quality",
+  "other",
+] as const;
+export type ProductionDowntimeReasonType = (typeof PRODUCTION_DOWNTIME_REASON_TYPES)[number];
+
+export const PRODUCTION_CONFLICT_TYPES = [
+  "equipment_busy",
+  "maintenance_overlap",
+  "repair_overlap",
+  "no_material",
+  "cross_subdivision",
+  "missing_norm",
+  "deadline_risk",
+] as const;
+export type ProductionConflictType = (typeof PRODUCTION_CONFLICT_TYPES)[number];
+
+export const PRODUCTION_CONFLICT_SEVERITIES = ["info", "warning", "critical", "blocking"] as const;
+export type ProductionConflictSeverity = (typeof PRODUCTION_CONFLICT_SEVERITIES)[number];
+
+export const PRODUCTION_IMPORT_BATCH_STATUSES = [
+  "pending",
+  "processing",
+  "completed",
+  "failed",
+  "partial",
+] as const;
+export type ProductionImportBatchStatus = (typeof PRODUCTION_IMPORT_BATCH_STATUSES)[number];
+
+export const MATERIAL_WRITEOFF_MODES = ["sync", "async", "manual"] as const;
+export type MaterialWriteoffMode = (typeof MATERIAL_WRITEOFF_MODES)[number];
+
+export const PRODUCTION_FACT_TYPES = ["scheduled", "ad_hoc"] as const;
+export type ProductionFactType = (typeof PRODUCTION_FACT_TYPES)[number];
+
+export const PRODUCTION_TOOLING_TYPES = [
+  "press_form",
+  "applicator",
+  "tampon_print",
+  "fixture",
+  "other",
+] as const;
+export type ProductionToolingType = (typeof PRODUCTION_TOOLING_TYPES)[number];
+
+export const PRODUCTION_TOOLING_STATUSES = [
+  "ok",
+  "repair",
+  "testing",
+  "decommissioned",
+] as const;
+export type ProductionToolingStatus = (typeof PRODUCTION_TOOLING_STATUSES)[number];
+
+export const PRODUCTION_DAILY_SHIFT_CODES = ["1", "2"] as const;
+export type ProductionDailyShiftCode = (typeof PRODUCTION_DAILY_SHIFT_CODES)[number];
+
+export const shiftScheduleTemplates = pgTable("shift_schedule_templates", {
+  id: serial("id").primaryKey(),
+  subdivisionId: integer("subdivision_id"),
+  name: text("name").notNull(),
+  description: text("description"),
+  /** Гибкая схема смен: слоты, ротация, перерывы — JSON для UI/API */
+  pattern: jsonb("pattern").notNull(),
+  timezone: text("timezone"),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const workCenters = pgTable("work_centers", {
+  id: serial("id").primaryKey(),
+  subdivisionId: integer("subdivision_id").notNull(),
+  name: text("name").notNull(),
+  description: text("description"),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const shifts = pgTable("shifts", {
+  id: serial("id").primaryKey(),
+  subdivisionId: integer("subdivision_id").notNull(),
+  sourceTemplateId: integer("source_template_id"),
+  name: text("name").notNull(),
+  startTime: text("start_time").notNull(),
+  endTime: text("end_time").notNull(),
+  crossesMidnight: boolean("crosses_midnight").notNull().default(false),
+  /** Локальные отличия от шаблона (слоты, перерывы) */
+  patternOverride: jsonb("pattern_override"),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const products = pgTable(
+  "products",
+  {
+    id: serial("id").primaryKey(),
+    subdivisionId: integer("subdivision_id").notNull(),
+    sapCode: text("sap_code").notNull(),
+    name: text("name").notNull(),
+    pfNumber: text("pf_number"),
+    description: text("description"),
+    cycleTimeSec: integer("cycle_time_sec"),
+    cavities: integer("cavities"),
+    productWeight: real("product_weight"),
+    shotWeight: real("shot_weight"),
+    defaultShiftNorm: real("default_shift_norm"),
+    isSharedAcrossSubdivisions: boolean("is_shared_across_subdivisions").notNull().default(false),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    subdivisionSapUnique: unique("products_subdivision_sap_unique").on(
+      table.subdivisionId,
+      table.sapCode
+    ),
+  })
+);
+
+export const productSubdivisionAvailability = pgTable(
+  "product_subdivision_availability",
+  {
+    id: serial("id").primaryKey(),
+    productId: integer("product_id").notNull(),
+    subdivisionId: integer("subdivision_id").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    productSubdivisionUnique: unique("product_subdivision_availability_unique").on(
+      table.productId,
+      table.subdivisionId
+    ),
+  })
+);
+
+export const materials = pgTable(
+  "materials",
+  {
+    id: serial("id").primaryKey(),
+    subdivisionId: integer("subdivision_id"),
+    sapCode: text("sap_code").notNull(),
+    name: text("name").notNull(),
+    type: text("type").notNull().default("other"),
+    unit: text("unit").notNull().default("kg"),
+    description: text("description"),
+    isSharedAcrossSubdivisions: boolean("is_shared_across_subdivisions").notNull().default(false),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    subdivisionSapUnique: unique("materials_subdivision_sap_unique").on(
+      table.subdivisionId,
+      table.sapCode
+    ),
+  })
+);
+
+export const materialSubdivisionAvailability = pgTable(
+  "material_subdivision_availability",
+  {
+    id: serial("id").primaryKey(),
+    materialId: integer("material_id").notNull(),
+    subdivisionId: integer("subdivision_id").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    materialSubdivisionUnique: unique("material_subdivision_availability_unique").on(
+      table.materialId,
+      table.subdivisionId
+    ),
+  })
+);
+
+export const materialStocks = pgTable(
+  "material_stocks",
+  {
+    id: serial("id").primaryKey(),
+    materialId: integer("material_id").notNull(),
+    subdivisionId: integer("subdivision_id").notNull(),
+    storageLocation: text("storage_location").notNull().default(""),
+    quantity: real("quantity").notNull().default(0),
+    reservedQuantity: real("reserved_quantity").notNull().default(0),
+    minStock: real("min_stock").notNull().default(0),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    materialStockLocationUnique: unique("material_stocks_material_subdivision_location_unique").on(
+      table.materialId,
+      table.subdivisionId,
+      table.storageLocation
+    ),
+  })
+);
+
+export const materialMovements = pgTable("material_movements", {
+  id: serial("id").primaryKey(),
+  materialId: integer("material_id").notNull(),
+  subdivisionId: integer("subdivision_id").notNull(),
+  type: text("type").notNull(),
+  quantity: real("quantity").notNull(),
+  productionOrderId: integer("production_order_id"),
+  productionFactId: integer("production_fact_id"),
+  comment: text("comment"),
+  performedById: integer("performed_by_id"),
+  performedByName: text("performed_by_name"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const productBom = pgTable("product_bom", {
+  id: serial("id").primaryKey(),
+  productId: integer("product_id").notNull(),
+  materialId: integer("material_id").notNull(),
+  subdivisionId: integer("subdivision_id").notNull(),
+  usageType: text("usage_type").notNull().default("per_unit"),
+  quantityPerUnit: real("quantity_per_unit"),
+  percentage: real("percentage"),
+  unit: text("unit"),
+  isRequired: boolean("is_required").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const productEquipment = pgTable(
+  "product_equipment",
+  {
+    id: serial("id").primaryKey(),
+    productId: integer("product_id").notNull(),
+    equipmentId: text("equipment_id").notNull(),
+    subdivisionId: integer("subdivision_id").notNull(),
+    priority: integer("priority").notNull().default(0),
+    cycleTimeSecOverride: integer("cycle_time_sec_override"),
+    shiftNormOverride: real("shift_norm_override"),
+    setupTimeMin: integer("setup_time_min"),
+    note: text("note"),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    productEquipmentUnique: unique("product_equipment_product_equipment_unique").on(
+      table.productId,
+      table.equipmentId
+    ),
+  })
+);
+
+export const productionOrders = pgTable(
+  "production_orders",
+  {
+    id: serial("id").primaryKey(),
+    subdivisionId: integer("subdivision_id").notNull(),
+    orderNumber: text("order_number").notNull(),
+    orderNumberIsManual: boolean("order_number_is_manual").notNull().default(false),
+    productId: integer("product_id").notNull(),
+    requestedQuantity: real("requested_quantity").notNull().default(0),
+    plannedQuantity: real("planned_quantity").notNull().default(0),
+    completedQuantity: real("completed_quantity").notNull().default(0),
+    defectiveQuantity: real("defective_quantity").notNull().default(0),
+    priority: text("priority").notNull().default("medium"),
+    desiredStartDate: date("desired_start_date"),
+    desiredEndDate: date("desired_end_date"),
+    status: text("status").notNull().default("draft"),
+    source: text("source").notNull().default("manual"),
+    comment: text("comment"),
+    createdById: integer("created_by_id"),
+    createdByName: text("created_by_name"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    subdivisionOrderNumberUnique: unique("production_orders_subdivision_order_unique").on(
+      table.subdivisionId,
+      table.orderNumber
+    ),
+  })
+);
+
+export const productionSchedule = pgTable(
+  "production_schedule",
+  {
+    id: serial("id").primaryKey(),
+    subdivisionId: integer("subdivision_id").notNull(),
+    orderId: integer("order_id").notNull(),
+    equipmentId: text("equipment_id").notNull(),
+    workCenterId: integer("work_center_id"),
+    shiftId: integer("shift_id"),
+    startTime: timestamp("start_time").notNull(),
+    endTime: timestamp("end_time").notNull(),
+    plannedQuantity: real("planned_quantity").notNull().default(0),
+    status: text("status").notNull().default("planned"),
+    conflictStatus: text("conflict_status").notNull().default("none"),
+    assignedById: integer("assigned_by_id"),
+    assignedByName: text("assigned_by_name"),
+    comment: text("comment"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    subdivisionEquipmentStartIdx: index("production_schedule_subdivision_equipment_start_idx").on(
+      table.subdivisionId,
+      table.equipmentId,
+      table.startTime
+    ),
+    subdivisionStatusStartIdx: index("production_schedule_subdivision_status_start_idx").on(
+      table.subdivisionId,
+      table.status,
+      table.startTime
+    ),
+  })
+);
+
+export const productionFact = pgTable("production_fact", {
+  id: serial("id").primaryKey(),
+  subdivisionId: integer("subdivision_id").notNull(),
+  scheduleId: integer("schedule_id"),
+  factType: text("fact_type").notNull().default("scheduled"),
+  orderId: integer("order_id").notNull(),
+  equipmentId: text("equipment_id").notNull(),
+  shiftId: integer("shift_id"),
+  reportDate: date("report_date").notNull(),
+  producedQuantity: real("produced_quantity").notNull().default(0),
+  defectiveQuantity: real("defective_quantity").notNull().default(0),
+  downtimeMinutes: integer("downtime_minutes").notNull().default(0),
+  downtimeReason: text("downtime_reason"),
+  comment: text("comment"),
+  reportedById: integer("reported_by_id"),
+  reportedByName: text("reported_by_name"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const productionDowntimes = pgTable("production_downtimes", {
+  id: serial("id").primaryKey(),
+  subdivisionId: integer("subdivision_id").notNull(),
+  factId: integer("fact_id"),
+  scheduleId: integer("schedule_id"),
+  equipmentId: text("equipment_id").notNull(),
+  reasonType: text("reason_type").notNull().default("other"),
+  reasonText: text("reason_text"),
+  startTime: timestamp("start_time"),
+  endTime: timestamp("end_time"),
+  durationMinutes: integer("duration_minutes").notNull().default(0),
+  linkedServiceRequestId: integer("linked_service_request_id"),
+  linkedMaintenanceId: integer("linked_maintenance_id"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const productionPlanConflicts = pgTable("production_plan_conflicts", {
+  id: serial("id").primaryKey(),
+  subdivisionId: integer("subdivision_id").notNull(),
+  scheduleId: integer("schedule_id"),
+  orderId: integer("order_id"),
+  equipmentId: text("equipment_id"),
+  conflictType: text("conflict_type").notNull(),
+  severity: text("severity").notNull().default("warning"),
+  message: text("message").notNull(),
+  linkedMaintenanceId: integer("linked_maintenance_id"),
+  linkedServiceRequestId: integer("linked_service_request_id"),
+  linkedTaskId: integer("linked_task_id"),
+  isResolved: boolean("is_resolved").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  resolvedAt: timestamp("resolved_at"),
+});
+
+export const productionImportBatches = pgTable("production_import_batches", {
+  id: serial("id").primaryKey(),
+  subdivisionId: integer("subdivision_id").notNull(),
+  fileName: text("file_name").notNull(),
+  status: text("status").notNull().default("pending"),
+  rowsTotal: integer("rows_total").notNull().default(0),
+  rowsSuccess: integer("rows_success").notNull().default(0),
+  rowsFailed: integer("rows_failed").notNull().default(0),
+  importedById: integer("imported_by_id"),
+  importedByName: text("imported_by_name"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const productionImportErrors = pgTable("production_import_errors", {
+  id: serial("id").primaryKey(),
+  batchId: integer("batch_id").notNull(),
+  rowNumber: integer("row_number").notNull(),
+  fieldName: text("field_name"),
+  rawValue: text("raw_value"),
+  message: text("message").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const productionTooling = pgTable(
+  "production_tooling",
+  {
+    id: serial("id").primaryKey(),
+    subdivisionId: integer("subdivision_id").notNull(),
+    pfNumber: text("pf_number").notNull(),
+    name: text("name").notNull(),
+    productId: integer("product_id"),
+    toolingType: text("tooling_type").notNull().default("press_form"),
+    status: text("status").notNull().default("ok"),
+    cycleTimeSec: integer("cycle_time_sec"),
+    cavities: integer("cavities"),
+    productWeightGr: real("product_weight_gr"),
+    shotWeightGr: real("shot_weight_gr"),
+    applicableEquipmentIds: jsonb("applicable_equipment_ids").$type<string[]>().default([]),
+    storageLocation: text("storage_location"),
+    requiresMaintenanceLevel2: boolean("requires_maintenance_level2").notNull().default(false),
+    comment: text("comment"),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    subdivisionPfUnique: unique("production_tooling_subdivision_pf_unique").on(
+      table.subdivisionId,
+      table.pfNumber
+    ),
+  })
+);
+
+export const productionDailyPlan = pgTable(
+  "production_daily_plan",
+  {
+    id: serial("id").primaryKey(),
+    subdivisionId: integer("subdivision_id").notNull(),
+    equipmentId: text("equipment_id").notNull(),
+    orderId: integer("order_id"),
+    productId: integer("product_id"),
+    planDate: date("plan_date").notNull(),
+    shiftCode: text("shift_code").notNull().default("1"),
+    plannedQuantity: real("planned_quantity").notNull().default(0),
+    pfNumber: text("pf_number"),
+    comment: text("comment"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    subdivisionDateIdx: index("production_daily_plan_subdivision_date_idx").on(
+      table.subdivisionId,
+      table.planDate
+    ),
+    equipmentDateIdx: index("production_daily_plan_equipment_date_idx").on(
+      table.equipmentId,
+      table.planDate
+    ),
+  })
+);
+
+export const productionPlanningSettings = pgTable(
+  "production_planning_settings",
+  {
+    id: serial("id").primaryKey(),
+    subdivisionId: integer("subdivision_id").notNull(),
+    materialWriteoffMode: text("material_writeoff_mode").notNull().default("sync"),
+    timezone: text("timezone"),
+    defaultShiftTemplateId: integer("default_shift_template_id"),
+    displayConfig: jsonb("display_config").$type<ProductionDisplayConfig>(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    subdivisionUnique: unique("production_planning_settings_subdivision_unique").on(
+      table.subdivisionId
+    ),
+  })
+);
 
 // Insert Schemas
 export const insertUserSchema = createInsertSchema(users, {
@@ -843,6 +1397,18 @@ export const addWarehouseCommentSchema = z.object({
   body: z.string().min(1, "Комментарий не может быть пустым"),
 });
 
+export const addEquipmentCommentSchema = z.object({
+  body: z.string().min(1, "Заметка не может быть пустой"),
+});
+
+export const updateEquipmentCommentSchema = z.object({
+  body: z.string().min(1, "Заметка не может быть пустой"),
+});
+
+export const updateCommentBodySchema = z.object({
+  body: z.string().min(1, "Комментарий не может быть пустым"),
+});
+
 export const commentAttachmentSchema = z.object({
   name: z.string().min(1, "Укажите название файла"),
   url: z.string().min(1, "Укажите ссылку на файл"),
@@ -941,6 +1507,8 @@ export const addRequestLinkSchema = z.object({
   url: z.string().min(1, "Укажите URL"),
 });
 
+export const addTaskLinkSchema = addRequestLinkSchema;
+
 export const createServiceRequestSubtaskSchema = z.object({
   title: z.string().min(1, "Укажите название подзадачи"),
   description: z.string().optional(),
@@ -964,6 +1532,180 @@ export const insertChecklistTemplateSchema = z.object({
   measurementNorm: z.string().optional(),
   sortOrder: z.number().int().optional(),
 });
+
+// Zod enum-схемы планирования производства
+export const materialTypeSchema = z.enum(MATERIAL_TYPES);
+export const materialMovementTypeSchema = z.enum(MATERIAL_MOVEMENT_TYPES);
+export const productBomUsageTypeSchema = z.enum(PRODUCT_BOM_USAGE_TYPES);
+export const productionOrderStatusSchema = z.enum(PRODUCTION_ORDER_STATUSES);
+export const productionOrderPrioritySchema = z.enum(PRODUCTION_ORDER_PRIORITIES);
+export const productionOrderSourceSchema = z.enum(PRODUCTION_ORDER_SOURCES);
+export const productionScheduleStatusSchema = z.enum(PRODUCTION_SCHEDULE_STATUSES);
+export const productionScheduleConflictStatusSchema = z.enum(PRODUCTION_SCHEDULE_CONFLICT_STATUSES);
+export const productionDowntimeReasonTypeSchema = z.enum(PRODUCTION_DOWNTIME_REASON_TYPES);
+export const productionConflictTypeSchema = z.enum(PRODUCTION_CONFLICT_TYPES);
+export const productionConflictSeveritySchema = z.enum(PRODUCTION_CONFLICT_SEVERITIES);
+export const productionImportBatchStatusSchema = z.enum(PRODUCTION_IMPORT_BATCH_STATUSES);
+export const materialWriteoffModeSchema = z.enum(MATERIAL_WRITEOFF_MODES);
+export const productionFactTypeSchema = z.enum(PRODUCTION_FACT_TYPES);
+export const productionToolingTypeSchema = z.enum(PRODUCTION_TOOLING_TYPES);
+export const productionToolingStatusSchema = z.enum(PRODUCTION_TOOLING_STATUSES);
+export const productionDailyShiftCodeSchema = z.enum(PRODUCTION_DAILY_SHIFT_CODES);
+
+export const insertShiftScheduleTemplateSchema = createInsertSchema(shiftScheduleTemplates).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export const insertWorkCenterSchema = createInsertSchema(workCenters).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export const insertShiftSchema = createInsertSchema(shifts).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export const insertProductSchema = createInsertSchema(products).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export const insertProductSubdivisionAvailabilitySchema = createInsertSchema(
+  productSubdivisionAvailability
+).omit({
+  id: true,
+  createdAt: true,
+});
+export const insertMaterialSchema = createInsertSchema(materials)
+  .omit({
+    id: true,
+    createdAt: true,
+    updatedAt: true,
+  })
+  .extend({
+    type: materialTypeSchema.optional(),
+  });
+export const insertMaterialSubdivisionAvailabilitySchema = createInsertSchema(
+  materialSubdivisionAvailability
+).omit({
+  id: true,
+  createdAt: true,
+});
+export const insertMaterialStockSchema = createInsertSchema(materialStocks).omit({
+  id: true,
+  updatedAt: true,
+});
+export const insertMaterialMovementSchema = createInsertSchema(materialMovements)
+  .omit({
+    id: true,
+    createdAt: true,
+  })
+  .extend({
+    type: materialMovementTypeSchema,
+  });
+export const insertProductBomSchema = createInsertSchema(productBom)
+  .omit({
+    id: true,
+    createdAt: true,
+    updatedAt: true,
+  })
+  .extend({
+    usageType: productBomUsageTypeSchema.optional(),
+  });
+export const insertProductEquipmentSchema = createInsertSchema(productEquipment).omit({
+  id: true,
+  createdAt: true,
+});
+export const insertProductionOrderSchema = createInsertSchema(productionOrders)
+  .omit({
+    id: true,
+    createdAt: true,
+    updatedAt: true,
+  })
+  .extend({
+    status: productionOrderStatusSchema.optional(),
+    priority: productionOrderPrioritySchema.optional(),
+    source: productionOrderSourceSchema.optional(),
+  });
+export const insertProductionScheduleSchema = createInsertSchema(productionSchedule)
+  .omit({
+    id: true,
+    createdAt: true,
+    updatedAt: true,
+  })
+  .extend({
+    status: productionScheduleStatusSchema.optional(),
+    conflictStatus: productionScheduleConflictStatusSchema.optional(),
+  });
+export const insertProductionFactSchema = createInsertSchema(productionFact)
+  .omit({
+    id: true,
+    createdAt: true,
+    updatedAt: true,
+  })
+  .extend({
+    factType: productionFactTypeSchema.optional(),
+  });
+export const insertProductionDowntimeSchema = createInsertSchema(productionDowntimes)
+  .omit({
+    id: true,
+    createdAt: true,
+  })
+  .extend({
+    reasonType: productionDowntimeReasonTypeSchema.optional(),
+  });
+export const insertProductionPlanConflictSchema = createInsertSchema(productionPlanConflicts)
+  .omit({
+    id: true,
+    createdAt: true,
+  })
+  .extend({
+    conflictType: productionConflictTypeSchema,
+    severity: productionConflictSeveritySchema.optional(),
+  });
+export const insertProductionImportBatchSchema = createInsertSchema(productionImportBatches)
+  .omit({
+    id: true,
+    createdAt: true,
+  })
+  .extend({
+    status: productionImportBatchStatusSchema.optional(),
+  });
+export const insertProductionImportErrorSchema = createInsertSchema(productionImportErrors).omit({
+  id: true,
+  createdAt: true,
+});
+export const insertProductionToolingSchema = createInsertSchema(productionTooling)
+  .omit({
+    id: true,
+    createdAt: true,
+    updatedAt: true,
+  })
+  .extend({
+    toolingType: productionToolingTypeSchema.optional(),
+    status: productionToolingStatusSchema.optional(),
+    applicableEquipmentIds: z.array(z.string()).optional(),
+  });
+export const insertProductionDailyPlanSchema = createInsertSchema(productionDailyPlan)
+  .omit({
+    id: true,
+    createdAt: true,
+    updatedAt: true,
+  })
+  .extend({
+    shiftCode: productionDailyShiftCodeSchema.optional(),
+  });
+export const insertProductionPlanningSettingsSchema = createInsertSchema(productionPlanningSettings)
+  .omit({
+    id: true,
+    updatedAt: true,
+  })
+  .extend({
+    materialWriteoffMode: materialWriteoffModeSchema.optional(),
+    displayConfig: z.record(z.unknown()).optional(),
+  });
 
 // Login Schema
 export const loginSchema = z.object({
@@ -1023,6 +1765,7 @@ export type RequestComment = typeof requestComments.$inferSelect;
 export type RequestAuditLog = typeof requestAuditLog.$inferSelect;
 export type RequestPart = typeof requestParts.$inferSelect;
 export type RequestLink = typeof requestLinks.$inferSelect;
+export type TaskLink = typeof taskLinks.$inferSelect;
 export type RequestCoexecutor = typeof requestCoexecutors.$inferSelect;
 export type TaskCoexecutor = typeof taskCoexecutors.$inferSelect;
 export type ChecklistTemplate = typeof checklistTemplates.$inferSelect;
@@ -1048,8 +1791,56 @@ export type InsertWarehousePart = z.infer<typeof insertWarehousePartSchema>;
 export type WarehouseMovement = typeof warehouseMovements.$inferSelect;
 export type InsertWarehouseMovement = z.infer<typeof insertWarehouseMovementSchema>;
 export type WarehousePartComment = typeof warehousePartComments.$inferSelect;
+export type EquipmentComment = typeof equipmentComments.$inferSelect;
 export type WarehouseStockAlert = typeof warehouseStockAlerts.$inferSelect;
 export type TaskStatusHistory = typeof taskStatusHistory.$inferSelect;
 export type TaskComment = typeof taskComments.$inferSelect;
 export type PartReservation = typeof partReservations.$inferSelect;
 export type MaintenanceStatusHistory = typeof maintenanceStatusHistory.$inferSelect;
+
+export type WorkCenter = typeof workCenters.$inferSelect;
+export type InsertWorkCenter = z.infer<typeof insertWorkCenterSchema>;
+export type ShiftScheduleTemplate = typeof shiftScheduleTemplates.$inferSelect;
+export type InsertShiftScheduleTemplate = z.infer<typeof insertShiftScheduleTemplateSchema>;
+export type Shift = typeof shifts.$inferSelect;
+export type InsertShift = z.infer<typeof insertShiftSchema>;
+export type Product = typeof products.$inferSelect;
+export type InsertProduct = z.infer<typeof insertProductSchema>;
+export type ProductSubdivisionAvailability = typeof productSubdivisionAvailability.$inferSelect;
+export type InsertProductSubdivisionAvailability = z.infer<
+  typeof insertProductSubdivisionAvailabilitySchema
+>;
+export type Material = typeof materials.$inferSelect;
+export type InsertMaterial = z.infer<typeof insertMaterialSchema>;
+export type MaterialSubdivisionAvailability = typeof materialSubdivisionAvailability.$inferSelect;
+export type InsertMaterialSubdivisionAvailability = z.infer<
+  typeof insertMaterialSubdivisionAvailabilitySchema
+>;
+export type MaterialStock = typeof materialStocks.$inferSelect;
+export type InsertMaterialStock = z.infer<typeof insertMaterialStockSchema>;
+export type MaterialMovement = typeof materialMovements.$inferSelect;
+export type InsertMaterialMovement = z.infer<typeof insertMaterialMovementSchema>;
+export type ProductBom = typeof productBom.$inferSelect;
+export type InsertProductBom = z.infer<typeof insertProductBomSchema>;
+export type ProductEquipment = typeof productEquipment.$inferSelect;
+export type InsertProductEquipment = z.infer<typeof insertProductEquipmentSchema>;
+export type ProductionOrder = typeof productionOrders.$inferSelect;
+export type InsertProductionOrder = z.infer<typeof insertProductionOrderSchema>;
+export type ProductionSchedule = typeof productionSchedule.$inferSelect;
+export type InsertProductionSchedule = z.infer<typeof insertProductionScheduleSchema>;
+export type ProductionFact = typeof productionFact.$inferSelect;
+export type InsertProductionFact = z.infer<typeof insertProductionFactSchema>;
+export type ProductionDowntime = typeof productionDowntimes.$inferSelect;
+export type InsertProductionDowntime = z.infer<typeof insertProductionDowntimeSchema>;
+export type ProductionPlanConflict = typeof productionPlanConflicts.$inferSelect;
+export type InsertProductionPlanConflict = z.infer<typeof insertProductionPlanConflictSchema>;
+export type ProductionImportBatch = typeof productionImportBatches.$inferSelect;
+export type InsertProductionImportBatch = z.infer<typeof insertProductionImportBatchSchema>;
+export type ProductionImportError = typeof productionImportErrors.$inferSelect;
+export type InsertProductionImportError = z.infer<typeof insertProductionImportErrorSchema>;
+export type ProductionTooling = typeof productionTooling.$inferSelect;
+export type InsertProductionTooling = z.infer<typeof insertProductionToolingSchema>;
+export type ProductionDailyPlan = typeof productionDailyPlan.$inferSelect;
+export type InsertProductionDailyPlan = z.infer<typeof insertProductionDailyPlanSchema>;
+export type ProductionPlanningSettings = typeof productionPlanningSettings.$inferSelect;
+export type InsertProductionPlanningSettings = z.infer<typeof insertProductionPlanningSettingsSchema>;

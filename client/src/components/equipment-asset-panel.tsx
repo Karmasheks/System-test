@@ -103,29 +103,160 @@ export function EquipmentAssetPanel({
 
   return (
     <div className={embedded ? "min-w-0 overflow-hidden" : "border-t pt-4 mt-4 min-w-0 overflow-hidden"}>
-      <Tabs defaultValue="budget">
+      <Tabs defaultValue="history">
         <TabsList className="grid w-full grid-cols-5">
-          <TabsTrigger value="budget" className="text-xs sm:text-sm">
-            <Wallet className="h-3 w-3 mr-1 hidden sm:inline" />
-            Затраты
-          </TabsTrigger>
-          <TabsTrigger value="suppliers" className="text-xs sm:text-sm">
-            <Building2 className="h-3 w-3 mr-1 hidden sm:inline" />
-            Поставщики
-          </TabsTrigger>
-          <TabsTrigger value="contacts" className="text-xs sm:text-sm">
-            <UserCircle className="h-3 w-3 mr-1 hidden sm:inline" />
-            Контакты
+          <TabsTrigger value="history" className="text-xs sm:text-sm">
+            <History className="h-3 w-3 mr-1 hidden sm:inline" />
+            История
           </TabsTrigger>
           <TabsTrigger value="links" className="text-xs sm:text-sm">
             <Link2 className="h-3 w-3 mr-1 hidden sm:inline" />
             Связи
           </TabsTrigger>
-          <TabsTrigger value="history" className="text-xs sm:text-sm">
-            <History className="h-3 w-3 mr-1 hidden sm:inline" />
-            История
+          <TabsTrigger value="contacts" className="text-xs sm:text-sm">
+            <UserCircle className="h-3 w-3 mr-1 hidden sm:inline" />
+            Контакты
+          </TabsTrigger>
+          <TabsTrigger value="suppliers" className="text-xs sm:text-sm">
+            <Building2 className="h-3 w-3 mr-1 hidden sm:inline" />
+            Поставщики
+          </TabsTrigger>
+          <TabsTrigger value="budget" className="text-xs sm:text-sm">
+            <Wallet className="h-3 w-3 mr-1 hidden sm:inline" />
+            Затраты
           </TabsTrigger>
         </TabsList>
+
+        <TabsContent value="history" className="space-y-3 mt-3">
+          <p className="text-sm text-gray-500">
+            Все действия с оборудованием: задачи, заявки, ТО, связи, переносы, ремонт в других подразделениях, статус и расположение
+          </p>
+          <EquipmentActivityList
+            items={activity}
+            isLoading={loadingActivity}
+            onOpenEquipment={onOpenEquipment}
+            onOpenTask={onOpenTask}
+          />
+        </TabsContent>
+
+        <TabsContent value="links" className="space-y-3 mt-3">
+          <Tabs defaultValue="current" className="w-full">
+            <TabsList className="grid w-full grid-cols-2 h-9">
+              <TabsTrigger value="current" className="text-xs">
+                Текущие связи
+              </TabsTrigger>
+              <TabsTrigger value="link-history" className="text-xs">
+                История связей
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="current" className="space-y-3 mt-3">
+              <p className="text-sm text-gray-500">
+                Оборудование, работающее в связке с этим активом
+              </p>
+              {loadingLinks ? (
+                <p className="text-sm text-gray-500">Загрузка…</p>
+              ) : links.length === 0 ? (
+                <p className="text-sm text-gray-500 py-4 text-center">
+                  Связи не указаны. Добавьте их при редактировании оборудования.
+                </p>
+              ) : (
+                <ul className="space-y-2 max-h-56 overflow-y-auto">
+                  {links.map((link) => (
+                    <li key={link.id} className="p-2 border rounded-md text-sm">
+                      <button
+                        type="button"
+                        className="text-left w-full hover:bg-accent/50 rounded p-1 -m-1 transition-colors"
+                        onClick={() => onOpenEquipment?.(link.otherEquipmentId)}
+                      >
+                        <p className="font-medium text-blue-600 dark:text-blue-400 hover:underline">
+                          {link.otherEquipmentName}
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {link.otherEquipmentId} · {link.otherEquipmentType}
+                        </p>
+                        <Badge variant="outline" className="text-[10px] mt-1">
+                          {equipmentLinkTypeLabel(link.linkType)}
+                        </Badge>
+                        {link.note && (
+                          <p className="text-xs text-muted-foreground mt-1">{link.note}</p>
+                        )}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </TabsContent>
+
+            <TabsContent value="link-history" className="space-y-3 mt-3">
+              <p className="text-sm text-gray-500">
+                Добавление, удаление и изменение связей с другим оборудованием
+              </p>
+              <EquipmentActivityList
+                items={linkHistory}
+                isLoading={loadingLinkHistory}
+                emptyText="История связей пока пуста"
+                maxHeightClass="max-h-56"
+                onOpenEquipment={onOpenEquipment}
+                onOpenTask={onOpenTask}
+                showCategory={false}
+              />
+            </TabsContent>
+          </Tabs>
+        </TabsContent>
+
+        <TabsContent value="contacts" className="space-y-3 mt-3">
+          <div className="flex justify-between items-center">
+            <p className="text-sm text-gray-500">Контакты, привязанные к активу</p>
+            <Link href="/contacts">
+              <Button size="sm" variant="ghost">
+                <ExternalLink className="h-3 w-3 mr-1" />Все
+              </Button>
+            </Link>
+          </div>
+          {contacts.length === 0 ? (
+            <p className="text-sm text-gray-500 py-4 text-center">
+              Нет контактов с привязкой к этому оборудованию
+            </p>
+          ) : (
+            <ul className="space-y-2 max-h-48 overflow-y-auto">
+              {contacts.map((c) => (
+                <li key={c.id} className="text-sm p-2 border rounded-md">
+                  <p className="font-medium">{c.name}</p>
+                  {c.company && <p className="text-gray-500">{c.company}</p>}
+                  {c.phone && <p className="text-gray-500">{c.phone}</p>}
+                  {c.email && <p className="text-gray-500">{c.email}</p>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </TabsContent>
+
+        <TabsContent value="suppliers" className="space-y-3 mt-3">
+          <div className="flex justify-between items-center">
+            <p className="text-sm text-gray-500">Поставщики, привязанные к активу</p>
+            <Link href="/suppliers">
+              <Button size="sm" variant="ghost">
+                <ExternalLink className="h-3 w-3 mr-1" />Все
+              </Button>
+            </Link>
+          </div>
+          {suppliers.length === 0 ? (
+            <p className="text-sm text-gray-500 py-4 text-center">
+              Нет поставщиков с привязкой к этому оборудованию
+            </p>
+          ) : (
+            <ul className="space-y-2 max-h-48 overflow-y-auto">
+              {suppliers.map((s) => (
+                <li key={s.id} className="text-sm p-2 border rounded-md">
+                  <p className="font-medium">{s.name}</p>
+                  {s.contactPerson && <p className="text-gray-500">{s.contactPerson}</p>}
+                  {s.phone && <p className="text-gray-500">{s.phone}</p>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </TabsContent>
 
         <TabsContent value="budget" className="space-y-3 mt-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -232,137 +363,6 @@ export function EquipmentAssetPanel({
               </Table>
             </div>
           )}
-        </TabsContent>
-
-        <TabsContent value="suppliers" className="space-y-3 mt-3">
-          <div className="flex justify-between items-center">
-            <p className="text-sm text-gray-500">Поставщики, привязанные к активу</p>
-            <Link href="/suppliers">
-              <Button size="sm" variant="ghost">
-                <ExternalLink className="h-3 w-3 mr-1" />Все
-              </Button>
-            </Link>
-          </div>
-          {suppliers.length === 0 ? (
-            <p className="text-sm text-gray-500 py-4 text-center">
-              Нет поставщиков с привязкой к этому оборудованию
-            </p>
-          ) : (
-            <ul className="space-y-2 max-h-48 overflow-y-auto">
-              {suppliers.map((s) => (
-                <li key={s.id} className="text-sm p-2 border rounded-md">
-                  <p className="font-medium">{s.name}</p>
-                  {s.contactPerson && <p className="text-gray-500">{s.contactPerson}</p>}
-                  {s.phone && <p className="text-gray-500">{s.phone}</p>}
-                </li>
-              ))}
-            </ul>
-          )}
-        </TabsContent>
-
-        <TabsContent value="contacts" className="space-y-3 mt-3">
-          <div className="flex justify-between items-center">
-            <p className="text-sm text-gray-500">Контакты, привязанные к активу</p>
-            <Link href="/contacts">
-              <Button size="sm" variant="ghost">
-                <ExternalLink className="h-3 w-3 mr-1" />Все
-              </Button>
-            </Link>
-          </div>
-          {contacts.length === 0 ? (
-            <p className="text-sm text-gray-500 py-4 text-center">
-              Нет контактов с привязкой к этому оборудованию
-            </p>
-          ) : (
-            <ul className="space-y-2 max-h-48 overflow-y-auto">
-              {contacts.map((c) => (
-                <li key={c.id} className="text-sm p-2 border rounded-md">
-                  <p className="font-medium">{c.name}</p>
-                  {c.company && <p className="text-gray-500">{c.company}</p>}
-                  {c.phone && <p className="text-gray-500">{c.phone}</p>}
-                  {c.email && <p className="text-gray-500">{c.email}</p>}
-                </li>
-              ))}
-            </ul>
-          )}
-        </TabsContent>
-
-        <TabsContent value="links" className="space-y-3 mt-3">
-          <Tabs defaultValue="current" className="w-full">
-            <TabsList className="grid w-full grid-cols-2 h-9">
-              <TabsTrigger value="current" className="text-xs">
-                Текущие связи
-              </TabsTrigger>
-              <TabsTrigger value="link-history" className="text-xs">
-                История связей
-              </TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="current" className="space-y-3 mt-3">
-              <p className="text-sm text-gray-500">
-                Оборудование, работающее в связке с этим активом
-              </p>
-              {loadingLinks ? (
-                <p className="text-sm text-gray-500">Загрузка…</p>
-              ) : links.length === 0 ? (
-                <p className="text-sm text-gray-500 py-4 text-center">
-                  Связи не указаны. Добавьте их при редактировании оборудования.
-                </p>
-              ) : (
-                <ul className="space-y-2 max-h-56 overflow-y-auto">
-                  {links.map((link) => (
-                    <li key={link.id} className="p-2 border rounded-md text-sm">
-                      <button
-                        type="button"
-                        className="text-left w-full hover:bg-accent/50 rounded p-1 -m-1 transition-colors"
-                        onClick={() => onOpenEquipment?.(link.otherEquipmentId)}
-                      >
-                        <p className="font-medium text-blue-600 dark:text-blue-400 hover:underline">
-                          {link.otherEquipmentName}
-                        </p>
-                        <p className="text-xs text-muted-foreground mt-0.5">
-                          {link.otherEquipmentId} · {link.otherEquipmentType}
-                        </p>
-                        <Badge variant="outline" className="text-[10px] mt-1">
-                          {equipmentLinkTypeLabel(link.linkType)}
-                        </Badge>
-                        {link.note && (
-                          <p className="text-xs text-muted-foreground mt-1">{link.note}</p>
-                        )}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </TabsContent>
-
-            <TabsContent value="link-history" className="space-y-3 mt-3">
-              <p className="text-sm text-gray-500">
-                Добавление, удаление и изменение связей с другим оборудованием
-              </p>
-              <EquipmentActivityList
-                items={linkHistory}
-                isLoading={loadingLinkHistory}
-                emptyText="История связей пока пуста"
-                maxHeightClass="max-h-56"
-                onOpenEquipment={onOpenEquipment}
-                onOpenTask={onOpenTask}
-                showCategory={false}
-              />
-            </TabsContent>
-          </Tabs>
-        </TabsContent>
-
-        <TabsContent value="history" className="space-y-3 mt-3">
-          <p className="text-sm text-gray-500">
-            Все действия с оборудованием: задачи, заявки, ТО, связи, переносы, ремонт в других подразделениях, статус и расположение
-          </p>
-          <EquipmentActivityList
-            items={activity}
-            isLoading={loadingActivity}
-            onOpenEquipment={onOpenEquipment}
-            onOpenTask={onOpenTask}
-          />
         </TabsContent>
       </Tabs>
     </div>

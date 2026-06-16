@@ -18,6 +18,7 @@ type Props = {
   childTasks: LinkedTaskTreeItem[];
   highlightTaskId?: number;
   onOpenTask?: (taskId: number) => void;
+  onOpenGroup?: () => void;
   className?: string;
   /** accent — фиолетовая группа в списке; plain — нейтральный стиль */
   variant?: "accent" | "plain";
@@ -128,6 +129,7 @@ export function LinkedTaskTree({
   childTasks,
   highlightTaskId,
   onOpenTask,
+  onOpenGroup,
   className,
   variant = "plain",
   single = false,
@@ -148,11 +150,25 @@ export function LinkedTaskTree({
     >
       <div
         className={cn(
-          "px-3 py-1.5 border-b flex items-center gap-2",
+          "px-3 py-1.5 border-b flex items-center gap-2 text-left w-full",
           accent
             ? "border-violet-300/40 bg-violet-100/60 dark:bg-violet-950/40"
-            : "bg-muted/30"
+            : "bg-muted/30",
+          onOpenGroup && "cursor-pointer hover:bg-violet-200/70 dark:hover:bg-violet-900/50 transition-colors"
         )}
+        role={onOpenGroup ? "button" : undefined}
+        tabIndex={onOpenGroup ? 0 : undefined}
+        onClick={onOpenGroup ? () => onOpenGroup() : undefined}
+        onKeyDown={
+          onOpenGroup
+            ? (e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onOpenGroup();
+                }
+              }
+            : undefined
+        }
       >
         <Link2
           className={cn(

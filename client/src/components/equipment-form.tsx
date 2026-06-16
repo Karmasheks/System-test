@@ -300,6 +300,8 @@ export default function EquipmentForm({ initialData, allEquipment, onSave, onCan
         allEquipment={allEquipment}
         value={linkDrafts}
         onChange={setLinkDrafts}
+        collapsible={!isEdit}
+        defaultOpen={false}
       />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

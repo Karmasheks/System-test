@@ -55,6 +55,7 @@ const TABLE_ORDER = [
   "checklist_templates",
   "equipment",
   "equipment_links",
+  "equipment_comments",
   "campaigns",
   "maintenance_records",
   "maintenance_status_history",

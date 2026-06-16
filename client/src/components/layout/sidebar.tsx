@@ -1,137 +1,24 @@
 import { useEffect, useRef } from "react";
-import { Link, useLocation } from "wouter";
+import { Link } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { useAccessControl } from "@/hooks/use-access-control";
 import { useUserStatus } from "@/hooks/use-user-status";
 import { useSidebarState } from "@/hooks/use-sidebar-state";
+import { useSidebarNavigation } from "@/hooks/use-sidebar-navigation";
 import { UserStatusSelector, getStatusDotColor } from "@/components/layout/user-status";
 import { EmployeePresencePanel } from "@/components/layout/employee-presence-panel";
+import { SidebarCustomizeButton } from "@/components/layout/sidebar-customize-dialog";
 import { UserAvatar } from "@/components/user-avatar";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import {
-  BarChart2,
-  Users,
-  Calendar,
-  Wrench,
-  CheckSquare,
-  ChartBar,
-  ClipboardCheck,
-  UserCircle,
-  Building2,
-  Wallet,
-  FolderOpen,
-  Package,
-  PanelLeftClose,
-  PanelLeftOpen,
-} from "lucide-react";
+import { BarChart2, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 
 export function Sidebar() {
-  const [location] = useLocation();
   const { user } = useAuth();
-  const { canViewModule, canAccessTasksSection, canViewEmployeePresence } = useAccessControl();
+  const { canViewEmployeePresence } = useAccessControl();
   const { users, getCurrentUserStatus, getCurrentUserActivityStatus, isCurrentUserOnVacation, getCurrentUserExpiresAt, setCurrentUserStatus } = useUserStatus();
   const { isCollapsed, toggleCollapsed } = useSidebarState();
-
-
-
-  const navigation = [
-    {
-      section: "Основное",
-      items: [
-        {
-          module: "dashboard" as const,
-          name: "Панель управления",
-          href: "/dashboard",
-          icon: <BarChart2 className="w-5 h-5" />,
-          active: location === "/dashboard" || location === "/",
-        },
-        {
-          module: "schedule" as const,
-          name: "План ТО и задач",
-          href: "/schedule",
-          icon: <Calendar className="w-5 h-5" />,
-          active: location === "/schedule",
-        },
-        {
-          module: "equipment" as const,
-          name: "Оборудование",
-          href: "/equipment",
-          icon: <Wrench className="w-5 h-5" />,
-          active: location === "/equipment",
-        },
-        {
-          module: "daily_inspection" as const,
-          name: "Ежедневные осмотры",
-          href: "/daily-inspection",
-          icon: <ClipboardCheck className="w-5 h-5" />,
-          active: location === "/daily-inspection",
-        },
-        {
-          module: "tasks" as const,
-          alsoModule: "service_requests" as const,
-          name: "Задачи и заявки",
-          href: "/tasks",
-          icon: <CheckSquare className="w-5 h-5" />,
-          active: location === "/tasks" || location.startsWith("/tasks?"),
-        },
-        {
-          module: "contacts" as const,
-          name: "Контакты",
-          href: "/contacts",
-          icon: <UserCircle className="w-5 h-5" />,
-          active: location === "/contacts",
-        },
-        {
-          module: "suppliers" as const,
-          name: "Поставщики",
-          href: "/suppliers",
-          icon: <Building2 className="w-5 h-5" />,
-          active: location === "/suppliers",
-        },
-        {
-          module: "warehouse" as const,
-          name: "Склад",
-          href: "/warehouse",
-          icon: <Package className="w-5 h-5" />,
-          active: location === "/warehouse",
-        },
-        {
-          module: "budget" as const,
-          name: "Затраты (Бюджет)",
-          href: "/budget",
-          icon: <Wallet className="w-5 h-5" />,
-          active: location === "/budget",
-        },
-        {
-          module: "documents" as const,
-          name: "Документы",
-          href: "/documents",
-          icon: <FolderOpen className="w-5 h-5" />,
-          active: location === "/documents",
-        }
-      ]
-    },
-    {
-      section: "Администрирование",
-      items: [
-        {
-          module: "users" as const,
-          name: "Пользователи",
-          href: "/users",
-          icon: <Users className="w-5 h-5" />,
-          active: location === "/users",
-        },
-        {
-          module: "reports" as const,
-          name: "Отчеты",
-          href: "/reports",
-          icon: <ChartBar className="w-5 h-5" />,
-          active: location === "/reports",
-        }
-      ]
-    }
-  ];
+  const { sections } = useSidebarNavigation();
 
   const showEmployeePresence = canViewEmployeePresence();
   const navRef = useRef<HTMLElement>(null);
@@ -199,27 +86,19 @@ export function Sidebar() {
         ref={navRef}
         className={cn("flex-grow overflow-y-auto overflow-x-hidden", isCollapsed ? "px-1 py-2" : "p-4")}
       >
-        {navigation.map((section, idx) => {
-          const visibleItems = section.items.filter((item) => {
-            if (item.module === "tasks") {
-              return canAccessTasksSection();
-            }
-            return canViewModule(item.module);
-          });
-          if (visibleItems.length === 0) return null;
-          return (
-          <div key={`section-${idx}`} className={cn(isCollapsed ? "mb-2" : "mb-6")}>
+        {sections.map((section, idx) => (
+          <div key={section.section} className={cn(isCollapsed ? "mb-2" : "mb-6")}>
             {!isCollapsed && (
               <p className="uppercase text-xs font-semibold text-gray-400 mb-2 px-2">
-                {section.section}
+                {section.label}
               </p>
             )}
             {isCollapsed && idx > 0 && (
               <div className="my-2 mx-auto w-8 border-t border-gray-700" />
             )}
             <ul className={cn(isCollapsed ? "space-y-1" : "space-y-2")}>
-              {visibleItems.map((item, itemIdx) => (
-                <li key={`item-${idx}-${itemIdx}`}>
+              {section.items.map((item) => (
+                <li key={item.id}>
                   <Link href={item.href}>
                     <div
                       title={isCollapsed ? item.name : undefined}
@@ -241,9 +120,12 @@ export function Sidebar() {
               ))}
             </ul>
           </div>
-          );
-        })}
-        
+        ))}
+
+        <div className={cn(isCollapsed ? "mt-2 px-1" : "mt-4")}>
+          <SidebarCustomizeButton collapsed={isCollapsed} />
+        </div>
+
         {!isCollapsed && showEmployeePresence && (
           <div className="mt-8 pt-6 border-t border-gray-700">
             <h3 className="px-4 text-xs font-semibold text-gray-400 uppercase tracking-wider">

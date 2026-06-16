@@ -29,7 +29,12 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { EquipmentImageGallery, EquipmentImageThumbnail } from "@/components/equipment-image-urls";
 import { EquipmentAssetPanel } from "@/components/equipment-asset-panel";
 import { apiRequest } from "@/lib/queryClient";
-import { normalizeEquipmentRecord, generateNextEquipmentId, formatEquipmentResponsible } from "@shared/equipment-utils";
+import {
+  normalizeEquipmentRecord,
+  generateNextEquipmentId,
+  formatEquipmentResponsible,
+} from "@shared/equipment-utils";
+import { EQUIPMENT_STATUSES, EQUIPMENT_STATUS_LABELS } from "@shared/equipment-status-constants";
 import type { Equipment } from "@shared/schema";
 import { syncEquipmentLinksApi, useEquipmentLinks } from "@/hooks/use-equipment-links";
 import { equipmentLinkTypeLabel } from "@shared/equipment-link-constants";
@@ -39,6 +44,10 @@ import { SubdivisionTransferPanel } from "@/components/admin/subdivision-transfe
 import { useSubdivisionFilter } from "@/hooks/use-subdivision-filter";
 import { SubdivisionFilterSelect } from "@/components/subdivision-filter-select";
 import { filterItemsBySubdivision } from "@/lib/subdivision-filter";
+import { matchesListSearch } from "@/lib/list-search";
+import { ListSearchInput } from "@/components/list-search-input";
+import { EquipmentCommentsPanel } from "@/components/equipment-comments-panel";
+import { EquipmentProductionPlanPanel } from "@/components/equipment-production-plan-panel";
 
 const equipmentFormDialogClass =
   "max-w-3xl w-[min(100vw-2rem,48rem)] max-h-[90vh] overflow-y-auto overflow-x-hidden p-4 sm:p-6";
@@ -47,7 +56,7 @@ const equipmentViewDialogClass =
 
 export default function Equipment() {
   const { user, isLoading, isAuthenticated } = useAuth();
-  const { isSystemAdmin } = useAccessControl();
+  const { isSystemAdmin, canViewModule } = useAccessControl();
   const systemAdmin = isSystemAdmin();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
@@ -61,6 +70,8 @@ export default function Equipment() {
   const { data: equipmentTypesList = [] } = useEquipmentTypes();
   const { createType } = useEquipmentTypeMutations();
   const [typeFilter, setTypeFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [searchQuery, setSearchQuery] = useState("");
   const {
     filterValue,
     setFilterValue,
@@ -91,8 +102,28 @@ export default function Equipment() {
     if (typeFilter !== "all") {
       list = list.filter((e) => e.type === typeFilter);
     }
+    if (statusFilter !== "all") {
+      list = list.filter((e) => e.status === statusFilter);
+    }
+    if (searchQuery.trim()) {
+      list = list.filter((item) =>
+        matchesListSearch(searchQuery, [
+          item.id,
+          item.name,
+          item.type,
+          item.description,
+          item.status,
+          item.responsible,
+          item.department,
+          item.subdivisionName,
+          item.serialNumber,
+          item.inventoryNumber,
+          equipmentSubdivisionLabel(item),
+        ])
+      );
+    }
     return list;
-  }, [equipment, typeFilter, filterSubdivisionId]);
+  }, [equipment, typeFilter, statusFilter, filterSubdivisionId, searchQuery, subdivisions]);
 
   const createEquipmentMutation = useMutation({
     mutationFn: async (newEquipment: any) => {
@@ -532,6 +563,12 @@ export default function Equipment() {
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="flex flex-wrap gap-3 items-end">
+                    <ListSearchInput
+                      value={searchQuery}
+                      onChange={setSearchQuery}
+                      placeholder="Название, ID, тип, ответственный…"
+                      className="w-full sm:max-w-xs"
+                    />
                     {showFilter && (
                       <SubdivisionFilterSelect
                         value={filterValue}
@@ -540,6 +577,22 @@ export default function Equipment() {
                         className="w-56"
                       />
                     )}
+                    <div className="w-56">
+                      <Label>Статус</Label>
+                      <Select value={statusFilter} onValueChange={setStatusFilter}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">Все статусы</SelectItem>
+                          {EQUIPMENT_STATUSES.map((code) => (
+                            <SelectItem key={code} value={code}>
+                              {EQUIPMENT_STATUS_LABELS[code]}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                     <div className="w-56">
                       <Label>Категория (тип)</Label>
                       <Select value={typeFilter} onValueChange={setTypeFilter}>
@@ -825,6 +878,10 @@ export default function Equipment() {
                   </p>
                 </div>
 
+                {canViewModule("production_planning") && (
+                  <EquipmentProductionPlanPanel equipmentId={selectedEquipment.id} />
+                )}
+
                 <div>
                   <Label className="font-medium">Confluence</Label>
                   {selectedEquipment.confluenceUrl ? (
@@ -906,6 +963,8 @@ export default function Equipment() {
                     </ul>
                   )}
                 </div>
+
+                <EquipmentCommentsPanel equipmentId={selectedEquipment.id} />
               </TabsContent>
 
               <TabsContent value="management" className="min-w-0 mt-3">

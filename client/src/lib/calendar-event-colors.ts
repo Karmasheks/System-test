@@ -43,6 +43,10 @@ export const calendarRemarkColors = chip(
   "bg-orange-100 text-orange-950 border border-orange-400 dark:bg-orange-950/45 dark:text-orange-100 dark:border-orange-600"
 );
 
+export const calendarProductionColors = chip(
+  "bg-teal-100 text-teal-950 border border-teal-400 dark:bg-teal-950/45 dark:text-teal-100 dark:border-teal-600"
+);
+
 export function getCalendarTaskChipClass(
   taskType: string | null | undefined,
   isCompleted: boolean
@@ -60,9 +64,16 @@ export function getCalendarRemarkChipClass(isCompleted: boolean): string {
   return isCompleted ? calendarRemarkColors.completed : calendarRemarkColors.active;
 }
 
+export function getCalendarProductionChipClass(isCompleted: boolean): string {
+  return isCompleted ? calendarProductionColors.completed : calendarProductionColors.active;
+}
+
 /** Короткий swatch для легенды (только фон + рамка). */
-export function calendarLegendSwatchClass(kind: keyof typeof calendarTaskTypeColors | "service_request" | "remark"): string {
+export function calendarLegendSwatchClass(
+  kind: keyof typeof calendarTaskTypeColors | "service_request" | "remark" | "production"
+): string {
   if (kind === "service_request") return calendarServiceRequestColors.active;
   if (kind === "remark") return calendarRemarkColors.active;
+  if (kind === "production") return calendarProductionColors.active;
   return calendarTaskTypeColors[kind].active;
 }

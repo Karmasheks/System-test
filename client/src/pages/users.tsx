@@ -46,6 +46,8 @@ import {
 import { isSubdivisionAdminRole, parseSubdivisionAdminRoleKey } from "@shared/subdivision-admin-roles";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { matchesListSearch } from "@/lib/list-search";
+import { ListSearchInput } from "@/components/list-search-input";
 import {
   DEFAULT_ROLE_ACCESS_PROFILES,
   MODULE_DEFINITIONS,
@@ -270,6 +272,25 @@ export default function Users() {
 
   const getRoleDisplayLabel = (roleKey: string) =>
     resolveRoleProfileLabel(roleKey, sortedRoleProfiles);
+
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const displayUsersList = useMemo(() => {
+    if (!searchQuery.trim()) return filteredUsersList;
+    return filteredUsersList.filter((item) => {
+      const subdivision = getSubdivisionCell(item);
+      return matchesListSearch(searchQuery, [
+        item.name,
+        item.email,
+        item.position,
+        item.department,
+        item.role,
+        resolveRoleProfileLabel(item.role ?? "", sortedRoleProfiles),
+        subdivision.primary,
+        subdivision.full,
+      ]);
+    });
+  }, [filteredUsersList, searchQuery, sortedRoleProfiles, subdivisions]);
 
   const isKnownRoleKey = (roleKey: string) =>
     sortedRoleProfiles.some((p) => p.role === (roleKey?.trim() || "viewer"));
@@ -700,21 +721,27 @@ export default function Users() {
                 </div>
               </div>
 
-              {showSubdivisionFilter && (
-                <div className="mb-4 flex flex-wrap items-end gap-4 rounded-lg border bg-white dark:bg-gray-800 p-3 shadow-sm">
+              <div className="mb-4 flex flex-wrap items-end gap-4 rounded-lg border bg-white dark:bg-gray-800 p-3 shadow-sm">
+                <ListSearchInput
+                  value={searchQuery}
+                  onChange={setSearchQuery}
+                  placeholder="Имя, email, роль, подразделение…"
+                  className="w-full sm:max-w-sm"
+                />
+                {showSubdivisionFilter && (
                   <SubdivisionFilterSelect
                     value={subdivisionFilterValue}
                     onChange={setSubdivisionFilterValue}
                     subdivisions={availableSubdivisions}
                     className="w-full sm:w-64"
                   />
-                  {filterSubdivisionId != null && (
-                    <p className="text-xs text-muted-foreground pb-2">
-                      Показано {filteredUsersList.length} из {Array.isArray(usersList) ? usersList.length : 0}
-                    </p>
-                  )}
-                </div>
-              )}
+                )}
+                {(searchQuery.trim() || filterSubdivisionId != null) && (
+                  <p className="text-xs text-muted-foreground pb-2">
+                    Показано {displayUsersList.length} из {Array.isArray(usersList) ? usersList.length : 0}
+                  </p>
+                )}
+              </div>
 
               <div className="bg-white rounded-lg shadow overflow-hidden dark:bg-gray-800">
                 {usersLoading ? (
@@ -726,12 +753,14 @@ export default function Users() {
                   <div className="flex items-center justify-center p-8">
                     <span className="text-red-600 dark:text-red-400">Ошибка загрузки пользователей</span>
                   </div>
-                ) : filteredUsersList.length === 0 ? (
+                ) : displayUsersList.length === 0 ? (
                   <div className="flex items-center justify-center p-8">
                     <span className="text-muted-foreground">
-                      {filterSubdivisionId != null
-                        ? "Нет пользователей в выбранном подразделении"
-                        : "Пользователи не найдены"}
+                      {searchQuery.trim()
+                        ? "Ничего не найдено по запросу"
+                        : filterSubdivisionId != null
+                          ? "Нет пользователей в выбранном подразделении"
+                          : "Пользователи не найдены"}
                     </span>
                   </div>
                 ) : (
@@ -768,7 +797,7 @@ export default function Users() {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200 dark:bg-gray-800 dark:divide-gray-700">
-                      {filteredUsersList.map((item: any) => {
+                      {displayUsersList.map((item: any) => {
                         const subdivision = getSubdivisionCell(item);
                         return (
                         <tr

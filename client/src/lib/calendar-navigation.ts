@@ -4,6 +4,7 @@ export type CalendarSourceType =
   | "service_request"
   | "remark"
   | "inspection"
+  | "production_schedule"
   | (string & {});
 
 /** URL для перехода к объекту из календаря «План ТО». */
@@ -22,6 +23,8 @@ export function getCalendarItemHref(
       return `/tasks?section=remarks`;
     case "inspection":
       return `/daily-inspection-new?inspection=${sourceId}`;
+    case "production_schedule":
+      return "/planning";
     default:
       return null;
   }
@@ -39,6 +42,8 @@ export function getCalendarItemLabel(sourceType: CalendarSourceType): string {
       return "Замечание";
     case "inspection":
       return "Осмотр";
+    case "production_schedule":
+      return "Производство";
     default:
       return "Событие";
   }

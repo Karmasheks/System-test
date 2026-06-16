@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, lte } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lte } from "drizzle-orm";
 import { isoWeekToMonday } from "@shared/iso-week";
 import { db } from "./db";
 import {
@@ -12,6 +12,8 @@ import {
   serviceRequests,
   remarks,
   equipment,
+  productionSchedule,
+  productionOrders,
   type InsertContact,
   type InsertSupplier,
   type InsertBudgetEntry,
@@ -289,6 +291,7 @@ export type CalendarEvent = {
   equipmentId?: string | null;
   equipmentName?: string | null;
   equipmentModel?: string | null;
+  subdivisionId?: number | null;
   isCompleted: boolean;
   isPending: boolean;
 };
@@ -307,16 +310,23 @@ export async function getCalendarEvents(
   from?: string,
   to?: string,
   equipmentId?: string,
-  scope?: SubdivisionScope | null
+  scope?: SubdivisionScope | null,
+  options?: {
+    includeProduction?: boolean;
+    productionSlotStatuses?: string[];
+  }
 ) {
   const { fromDate, toDate } = parseDateRange(from, to);
   const events: CalendarEvent[] = [];
 
   const equipmentRows = await db
-    .select({ id: equipment.id, model: equipment.model })
+    .select({ id: equipment.id, name: equipment.name, model: equipment.model })
     .from(equipment);
   const modelByEquipmentId = new Map(
     equipmentRows.map((row) => [row.id, row.model?.trim() || null])
+  );
+  const nameByEquipmentId = new Map(
+    equipmentRows.map((row) => [row.id, row.name?.trim() || row.id])
   );
   const modelFor = (equipmentId?: string | null) =>
     equipmentId ? modelByEquipmentId.get(equipmentId) ?? null : null;
@@ -401,6 +411,57 @@ export async function getCalendarEvents(
       isCompleted: done,
       isPending: pending && !done,
     });
+  }
+
+  const includeProduction = options?.includeProduction ?? true;
+  const productionStatuses =
+    options?.productionSlotStatuses?.length
+      ? options.productionSlotStatuses
+      : ["planned", "in_progress", "paused"];
+
+  if (includeProduction && productionStatuses.length > 0) {
+    let scheduleSlots = await db
+      .select()
+      .from(productionSchedule)
+      .where(inArray(productionSchedule.status, productionStatuses));
+    if (scope && !scope.viewAll) {
+      scheduleSlots = filterBySubdivisionScope(scheduleSlots, scope);
+    }
+
+    const orderIds = [...new Set(scheduleSlots.map((s) => s.orderId))];
+    const orderRows =
+      orderIds.length > 0
+        ? await db
+            .select({
+              id: productionOrders.id,
+              orderNumber: productionOrders.orderNumber,
+            })
+            .from(productionOrders)
+            .where(inArray(productionOrders.id, orderIds))
+        : [];
+    const orderNumberById = new Map(orderRows.map((o) => [o.id, o.orderNumber]));
+
+    for (const slot of scheduleSlots) {
+      if (equipmentId && slot.equipmentId !== equipmentId) continue;
+      const start = slot.startTime;
+      const end = slot.endTime;
+      if (end < fromDate || start > toDate) continue;
+      const orderNumber = orderNumberById.get(slot.orderId) ?? `#${slot.orderId}`;
+      events.push({
+        id: `prod-${slot.id}`,
+        sourceType: "production_schedule",
+        sourceId: slot.id,
+        title: `Производство: ${orderNumber}`,
+        date: start.toISOString(),
+        status: slot.status,
+        equipmentId: slot.equipmentId,
+        equipmentName: nameByEquipmentId.get(slot.equipmentId) ?? slot.equipmentId,
+        equipmentModel: modelFor(slot.equipmentId),
+        subdivisionId: slot.subdivisionId,
+        isCompleted: slot.status === "completed",
+        isPending: ["planned", "in_progress", "paused"].includes(slot.status),
+      });
+    }
   }
 
   return events.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());

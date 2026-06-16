@@ -37,6 +37,8 @@ import { TASK_STATUS_LABELS } from "@shared/task-status-constants";
 import type { TaskSourceType } from "@shared/task-source-constants";
 import type { Equipment } from "@shared/schema";
 import { buildTaskListGroups } from "@/lib/task-list-groups";
+import { matchesListSearch } from "@/lib/list-search";
+import { ListSearchInput } from "@/components/list-search-input";
 import { TaskListGroupCard } from "@/components/tasks/task-list-group-card";
 
 type Task = TaskRecord & {
@@ -123,6 +125,7 @@ export default function TasksPage() {
   const [remarksFilter, setRemarksFilter] = useState<'all' | 'open' | 'in_progress' | 'resolved'>('open');
   const [tasksFilter, setTasksFilter] = useState<'all' | 'pending' | 'in_progress' | 'completed'>('all');
   const [requestsFilter, setRequestsFilter] = useState("all");
+  const [searchQuery, setSearchQuery] = useState("");
 
   // Слушаем событие навигации на вкладку замечаний с Dashboard
   useEffect(() => {
@@ -287,6 +290,12 @@ export default function TasksPage() {
   const subdivisionName = (id: number | null | undefined) =>
     id ? subdivisions.find((s) => s.id === id)?.name ?? `#${id}` : null;
 
+  const equipmentName = (id: string | null | undefined) => {
+    if (!id) return "—";
+    const eq = equipment.find((e) => e.id === id);
+    return eq ? eq.name : id;
+  };
+
   const scopedTasks = useMemo(
     () => filterItemsBySubdivision(categoryTasks, filterSubdivisionId),
     [categoryTasks, filterSubdivisionId]
@@ -295,7 +304,21 @@ export default function TasksPage() {
   const filteredTasks = scopedTasks.filter((task: Task) => {
     const statusMatch = tasksFilter === "all" || task.status === tasksFilter;
     const priorityMatch = filterPriority === "all" || task.priority === filterPriority;
-    return statusMatch && priorityMatch;
+    const searchMatch = matchesListSearch(searchQuery, [
+      task.title,
+      task.description,
+      task.assigneeName,
+      task.createdBy,
+      task.openedByName,
+      task.status,
+      TASK_STATUS_LABELS[task.status as keyof typeof TASK_STATUS_LABELS],
+      task.priority,
+      task.taskType,
+      task.id,
+      equipmentName(task.equipmentId),
+      subdivisionName(task.subdivisionId),
+    ]);
+    return statusMatch && priorityMatch && searchMatch;
   });
 
   const taskDisplayGroups = useMemo(
@@ -303,15 +326,35 @@ export default function TasksPage() {
     [filteredTasks]
   );
 
-  const equipmentName = (id: string | null | undefined) => {
-    if (!id) return "—";
-    const eq = equipment.find((e) => e.id === id);
-    return eq ? eq.name : id;
-  };
-
   const filteredRemarks = remarks.filter((remark) => {
-    return remarksFilter === "all" || remark.status === remarksFilter;
+    const statusMatch = remarksFilter === "all" || remark.status === remarksFilter;
+    const searchMatch = matchesListSearch(searchQuery, [
+      remark.title,
+      remark.description,
+      remark.equipmentName,
+      remark.type,
+      remark.priority,
+      remark.status,
+    ]);
+    return statusMatch && searchMatch;
   });
+
+  const displayedRequests = useMemo(
+    () =>
+      requests.filter((r) =>
+        matchesListSearch(searchQuery, [
+          r.id,
+          r.equipmentName,
+          r.requesterName,
+          r.assigneeName,
+          r.status,
+          STATUS_LABELS[r.status as ServiceRequestStatus],
+          typeLabel(r.requestType),
+          r.problemDescription,
+        ])
+      ),
+    [requests, searchQuery, meta]
+  );
 
   const myTaskStats = useMemo(() => {
     const total = categoryTasks.length;
@@ -429,6 +472,13 @@ export default function TasksPage() {
               </div>
 
               <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                <ListSearchInput
+                  inline
+                  value={searchQuery}
+                  onChange={setSearchQuery}
+                  placeholder="Поиск: название, оборудование, исполнитель…"
+                  className="sm:max-w-sm"
+                />
                 <Select
                   value={tasksFilter}
                   onValueChange={(value: "all" | "pending" | "in_progress" | "completed") =>
@@ -516,6 +566,14 @@ export default function TasksPage() {
                   <ClipboardList className="w-5 h-5 text-muted-foreground" />
                   <h2 className="text-lg font-semibold">{sectionTitle}</h2>
                 </div>
+                <div className="flex flex-col sm:flex-row sm:items-center gap-3 w-full sm:w-auto">
+                  <ListSearchInput
+                    inline
+                    value={searchQuery}
+                    onChange={setSearchQuery}
+                    placeholder="Поиск: №, оборудование, заявитель…"
+                    className="sm:max-w-sm"
+                  />
                 <Select value={requestsFilter} onValueChange={setRequestsFilter}>
                   <SelectTrigger className="w-full sm:w-64">
                     <Filter className="w-4 h-4 mr-2" />
@@ -530,16 +588,17 @@ export default function TasksPage() {
                     ))}
                   </SelectContent>
                 </Select>
+                </div>
               </div>
 
               <Card>
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-base">Найдено: {requests.length}</CardTitle>
+                  <CardTitle className="text-base">Найдено: {displayedRequests.length}</CardTitle>
                 </CardHeader>
                 <CardContent>
                         {requestsLoading ? (
                           <p className="text-muted-foreground">Загрузка...</p>
-                        ) : requests.length === 0 ? (
+                        ) : displayedRequests.length === 0 ? (
                           <p className="text-muted-foreground">Заявок не найдено</p>
                         ) : (
                           <div className="overflow-x-auto">
@@ -556,11 +615,15 @@ export default function TasksPage() {
                                 </tr>
                               </thead>
                               <tbody>
-                                {requests.map((r) => (
+                                {displayedRequests.map((r) => (
                                   <tr
                                     key={r.id}
                                     className="border-b hover:bg-muted/50 cursor-pointer"
-                                    onClick={() => setLocation(`/service-requests/${r.id}`)}
+                                    onClick={() => {
+                                      const q = new URLSearchParams({ from: "tasks" });
+                                      if (scope !== "all") q.set("scope", scope);
+                                      setLocation(`/service-requests/${r.id}?${q.toString()}`);
+                                    }}
                                   >
                                     <td className="py-3 pr-4">
                                       <span className="text-blue-600 font-medium">#{r.id}</span>
@@ -607,6 +670,14 @@ export default function TasksPage() {
                   <FileText className="w-5 h-5 text-muted-foreground" />
                   <h2 className="text-lg font-semibold">{sectionTitle}</h2>
                 </div>
+                <div className="flex flex-col sm:flex-row sm:items-center gap-3 w-full sm:w-auto">
+                  <ListSearchInput
+                    inline
+                    value={searchQuery}
+                    onChange={setSearchQuery}
+                    placeholder="Поиск: замечание, оборудование…"
+                    className="sm:max-w-sm"
+                  />
                 <Select
                   value={remarksFilter}
                   onValueChange={(value: "all" | "open" | "in_progress" | "resolved") =>
@@ -624,6 +695,7 @@ export default function TasksPage() {
                     <SelectItem value="resolved">Решено</SelectItem>
                   </SelectContent>
                 </Select>
+                </div>
               </div>
 
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">

@@ -7,6 +7,7 @@ import {
   addRequestPartSchema,
   addCoexecutorSchema,
   addTaskCommentSchema,
+  updateCommentBodySchema,
   updateServiceRequestDetailsSchema,
   addRequestLinkSchema,
   createServiceRequestSubtaskSchema,
@@ -42,6 +43,8 @@ import {
   getStatusHistory,
   addRequestComment,
   getRequestComments,
+  updateRequestComment,
+  deleteRequestComment,
   addAuditLog,
   getAssignableUsers,
   getTotalHoursForRequest,
@@ -462,6 +465,13 @@ export function registerServiceRequestRoutes(
         console.error("Auto-task/maintenance from SR failed:", autoErr);
       }
 
+      if (body.requestType === "repair" || body.requestType === "diagnostics") {
+        const { syncToirAndRecalculateProduction } = await import(
+          "./production-toir-integration-service"
+        );
+        await syncToirAndRecalculateProduction(eq.id, { id: user.id, name: user.name });
+      }
+
       if (body.budgetEntryId) {
         await linkBudgetToServiceRequest(request.id, body.budgetEntryId);
       }
@@ -529,6 +539,13 @@ export function registerServiceRequestRoutes(
         });
         await onServiceRequestTransition(request, request.status, "closed", user.name);
         await tryCompleteParentTaskForServiceRequest(id, user);
+        const { syncToirAndRecalculateProduction } = await import(
+          "./production-toir-integration-service"
+        );
+        await syncToirAndRecalculateProduction(request.equipmentId, {
+          id: user.id,
+          name: user.name,
+        });
         return res.json(updated);
       }
 
@@ -608,6 +625,14 @@ export function registerServiceRequestRoutes(
       } else if (isServiceRequestVoidStatus(effectiveTo)) {
         await tryFinalizeTasksForVoidServiceRequest(id, effectiveTo, user);
       }
+
+      const { syncToirAndRecalculateProduction } = await import(
+        "./production-toir-integration-service"
+      );
+      await syncToirAndRecalculateProduction(request.equipmentId, {
+        id: user.id,
+        name: user.name,
+      });
 
       res.json(updated);
     } catch (e) {
@@ -818,6 +843,42 @@ export function registerServiceRequestRoutes(
       res.status(201).json(comment);
     } catch (e: any) {
       res.status(400).json({ message: e.message ?? "Ошибка добавления комментария" });
+    }
+  });
+
+  app.put("/api/service-requests/:id/comments/:commentId", authenticate, async (req, res) => {
+    try {
+      const user = req.user as AuthenticatedUser;
+      const requestId = Number(req.params.id);
+      const commentId = Number(req.params.commentId);
+      const parsed = updateCommentBodySchema.parse(req.body);
+      res.json(await updateRequestComment(requestId, commentId, parsed.body, user));
+    } catch (e: any) {
+      const status =
+        e.message === "Комментарий не найден"
+          ? 404
+          : e.message?.includes("Недостаточно прав")
+            ? 403
+            : 400;
+      res.status(status).json({ message: e.message ?? "Ошибка" });
+    }
+  });
+
+  app.delete("/api/service-requests/:id/comments/:commentId", authenticate, async (req, res) => {
+    try {
+      const user = req.user as AuthenticatedUser;
+      const requestId = Number(req.params.id);
+      const commentId = Number(req.params.commentId);
+      await deleteRequestComment(requestId, commentId, user);
+      res.json({ message: "Комментарий удалён" });
+    } catch (e: any) {
+      const status =
+        e.message === "Комментарий не найден"
+          ? 404
+          : e.message?.includes("Недостаточно прав")
+            ? 403
+            : 400;
+      res.status(status).json({ message: e.message ?? "Ошибка" });
     }
   });
 }

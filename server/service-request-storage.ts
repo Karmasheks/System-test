@@ -1,4 +1,5 @@
 import { eq, desc, sql, and, gte, lte, isNull, isNotNull } from "drizzle-orm";
+import { assertCanModifyComment } from "./comment-access";
 import { isoWeekToMonday, getIsoWeek } from "@shared/iso-week";
 import { db } from "./db";
 import {
@@ -145,6 +146,45 @@ export async function getRequestComments(requestId: number): Promise<RequestComm
     .from(requestComments)
     .where(eq(requestComments.requestId, requestId))
     .orderBy(desc(requestComments.createdAt));
+}
+
+export async function updateRequestComment(
+  requestId: number,
+  commentId: number,
+  body: string,
+  user: { id: number; role: string }
+): Promise<RequestComment> {
+  const [existing] = await db
+    .select()
+    .from(requestComments)
+    .where(eq(requestComments.id, commentId));
+  if (!existing || existing.requestId !== requestId) {
+    throw new Error("Комментарий не найден");
+  }
+  assertCanModifyComment(existing.authorId, user);
+  const [row] = await db
+    .update(requestComments)
+    .set({ body: body.trim(), updatedAt: new Date() })
+    .where(eq(requestComments.id, commentId))
+    .returning();
+  return row;
+}
+
+export async function deleteRequestComment(
+  requestId: number,
+  commentId: number,
+  user: { id: number; role: string }
+): Promise<RequestComment> {
+  const [existing] = await db
+    .select()
+    .from(requestComments)
+    .where(eq(requestComments.id, commentId));
+  if (!existing || existing.requestId !== requestId) {
+    throw new Error("Комментарий не найден");
+  }
+  assertCanModifyComment(existing.authorId, user);
+  await db.delete(requestComments).where(eq(requestComments.id, commentId));
+  return existing;
 }
 
 export async function addAuditLog(data: {

@@ -53,6 +53,8 @@ import {
   FileEdit,
 } from "lucide-react";
 import type { BudgetEntry, Task } from "@shared/schema";
+import { matchesListSearch } from "@/lib/list-search";
+import { ListSearchInput } from "@/components/list-search-input";
 
 const formDialogClass =
   "max-w-lg w-[min(100vw-2rem,32rem)] max-h-[90vh] overflow-y-auto overflow-x-hidden";
@@ -75,6 +77,7 @@ export default function BudgetPage() {
   const now = new Date();
   const [equipmentFilter, setEquipmentFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
+  const [searchQuery, setSearchQuery] = useState("");
   const [from, setFrom] = useState(format(startOfMonth(now), "yyyy-MM-dd"));
   const [to, setTo] = useState(format(endOfMonth(now), "yyyy-MM-dd"));
 
@@ -424,6 +427,25 @@ export default function BudgetPage() {
     return parts.length ? parts.join(" · ") : "—";
   };
 
+  const displayedEntries = useMemo(() => {
+    if (!searchQuery.trim()) return entries;
+    return entries.filter((e) =>
+      matchesListSearch(searchQuery, [
+        e.id,
+        e.title,
+        e.notes,
+        e.amount,
+        e.expenseDate,
+        budgetCategoryLabel(e.category),
+        e.equipmentName,
+        e.subdivisionName,
+        e.storageLocation,
+        supplierName(e.supplierId),
+        bindingLabel(e),
+      ])
+    );
+  }, [entries, searchQuery, suppliers, warehouseParts]);
+
   const renderFormFields = () => (
     <div className="grid gap-3">
       <div>
@@ -727,7 +749,13 @@ export default function BudgetPage() {
 
         <Card>
           <CardHeader><CardTitle>Фильтры</CardTitle></CardHeader>
-          <CardContent className="grid md:grid-cols-5 gap-4">
+          <CardContent className="grid md:grid-cols-2 lg:grid-cols-6 gap-4">
+            <ListSearchInput
+              value={searchQuery}
+              onChange={setSearchQuery}
+              placeholder="Название, оборудование, поставщик…"
+              className="md:col-span-2"
+            />
             {showFilter && (
               <SubdivisionFilterSelect
                 value={filterValue}
@@ -768,11 +796,13 @@ export default function BudgetPage() {
         </Card>
 
         <Card>
-          <CardHeader><CardTitle>Расходы</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle>Расходы ({displayedEntries.length})</CardTitle>
+          </CardHeader>
           <CardContent>
             {isLoading ? (
               <p>Загрузка…</p>
-            ) : entries.length === 0 ? (
+            ) : displayedEntries.length === 0 ? (
               <p className="text-muted-foreground">Расходов не найдено</p>
             ) : (
               <Table>
@@ -788,7 +818,7 @@ export default function BudgetPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {entries.map((e) => (
+                  {displayedEntries.map((e) => (
                     <TableRow
                       key={e.id}
                       role="button"

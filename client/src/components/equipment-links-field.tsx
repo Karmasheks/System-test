@@ -10,7 +10,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Link2, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, Link2, Plus, Trash2 } from "lucide-react";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { cn } from "@/lib/utils";
 import {
   EQUIPMENT_LINK_TYPES,
   equipmentLinkTypeLabel,
@@ -26,6 +28,9 @@ interface EquipmentLinksFieldProps {
   value: EquipmentLinkInput[];
   onChange: (links: EquipmentLinkInput[]) => void;
   disabled?: boolean;
+  /** Сворачиваемый блок (форма создания) */
+  collapsible?: boolean;
+  defaultOpen?: boolean;
 }
 
 export function EquipmentLinksField({
@@ -34,7 +39,10 @@ export function EquipmentLinksField({
   value,
   onChange,
   disabled,
+  collapsible = false,
+  defaultOpen = false,
 }: EquipmentLinksFieldProps) {
+  const [open, setOpen] = useState(defaultOpen);
   const [selectedId, setSelectedId] = useState("");
   const [linkType, setLinkType] = useState<string>("works_with");
   const [note, setNote] = useState("");
@@ -73,17 +81,19 @@ export function EquipmentLinksField({
     onChange(value.filter((link) => link.linkedEquipmentId !== linkedEquipmentId));
   };
 
-  return (
+  const body = (
     <div className="space-y-3">
-      <div>
-        <Label className="flex items-center gap-2">
-          <Link2 className="h-4 w-4" />
-          Связанное оборудование
-        </Label>
-        <p className="text-xs text-muted-foreground mt-1">
-          Укажите оборудование, с которым этот актив работает в связке
-        </p>
-      </div>
+      {!collapsible && (
+        <div>
+          <Label className="flex items-center gap-2">
+            <Link2 className="h-4 w-4" />
+            Связанное оборудование
+          </Label>
+          <p className="text-xs text-muted-foreground mt-1">
+            Укажите оборудование, с которым этот актив работает в связке
+          </p>
+        </div>
+      )}
 
       {!disabled && (
         <div className="grid gap-2 p-3 border rounded-md bg-muted/30">
@@ -191,5 +201,34 @@ export function EquipmentLinksField({
         </ul>
       )}
     </div>
+  );
+
+  if (!collapsible) {
+    return body;
+  }
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger asChild>
+        <Button type="button" variant="outline" className="w-full justify-between h-auto py-2.5">
+          <span className="flex items-center gap-2 text-left">
+            <Link2 className="h-4 w-4 shrink-0" />
+            <span>
+              Связанное оборудование
+              {value.length > 0 && (
+                <span className="text-muted-foreground font-normal"> · {value.length}</span>
+              )}
+            </span>
+          </span>
+          <ChevronDown className={cn("h-4 w-4 shrink-0 transition-transform", open && "rotate-180")} />
+        </Button>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="mt-3 space-y-3 rounded-lg border p-3 bg-muted/30">
+        <p className="text-xs text-muted-foreground">
+          Укажите оборудование, с которым этот актив работает в связке
+        </p>
+        {body}
+      </CollapsibleContent>
+    </Collapsible>
   );
 }

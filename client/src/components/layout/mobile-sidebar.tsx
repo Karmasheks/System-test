@@ -5,25 +5,11 @@ import { useMobileSidebar } from "@/hooks/use-mobile-sidebar";
 import { useAuth } from "@/hooks/use-auth";
 import { useAccessControl } from "@/hooks/use-access-control";
 import { useUserStatus } from "@/hooks/use-user-status";
+import { useSidebarNavigation } from "@/hooks/use-sidebar-navigation";
 import { UserStatusSelector } from "@/components/layout/user-status";
 import { EmployeePresencePanel } from "@/components/layout/employee-presence-panel";
-import {
-  BarChart2,
-  Users,
-  ChartBar,
-  Wrench,
-  Clipboard,
-  Calendar,
-  X,
-  ClipboardCheck,
-  CheckSquare,
-  ClipboardList,
-  UserCircle,
-  Building2,
-  Wallet,
-  FolderOpen,
-  Package,
-} from "lucide-react";
+import { SidebarCustomizeButton } from "@/components/layout/sidebar-customize-dialog";
+import { BarChart2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export function MobileSidebar() {
@@ -33,6 +19,7 @@ export function MobileSidebar() {
   const { user } = useAuth();
   const { canViewEmployeePresence } = useAccessControl();
   const { users, getCurrentUserStatus, getCurrentUserActivityStatus, isCurrentUserOnVacation, getCurrentUserExpiresAt, setCurrentUserStatus } = useUserStatus();
+  const { sections } = useSidebarNavigation();
   const showEmployeePresence = canViewEmployeePresence();
 
   useEffect(() => {
@@ -42,91 +29,6 @@ export function MobileSidebar() {
   useEffect(() => {
     if (isDesktop) setOpen(false);
   }, [isDesktop, setOpen]);
-
-  const navigation = [
-    {
-      section: "Основное",
-      items: [
-        {
-          name: "Панель управления",
-          href: "/dashboard",
-          icon: <BarChart2 className="h-5 w-5" />,
-          active: location === "/dashboard" || location === "/",
-        },
-        {
-          name: "План ТО и задач",
-          href: "/schedule",
-          icon: <Calendar className="h-5 w-5" />,
-          active: location === "/schedule",
-        },
-        {
-          name: "Оборудование",
-          href: "/equipment",
-          icon: <Wrench className="h-5 w-5" />,
-          active: location === "/equipment",
-        },
-        {
-          name: "Ежедневные осмотры",
-          href: "/daily-inspection",
-          icon: <ClipboardCheck className="h-5 w-5" />,
-          active: location === "/daily-inspection" || location === "/daily-inspection-new",
-        },
-        {
-          name: "Задачи и заявки",
-          href: "/tasks",
-          icon: <CheckSquare className="h-5 w-5" />,
-          active: location === "/tasks" || location.startsWith("/tasks?"),
-        },
-        {
-          name: "Контакты",
-          href: "/contacts",
-          icon: <UserCircle className="h-5 w-5" />,
-          active: location === "/contacts",
-        },
-        {
-          name: "Поставщики",
-          href: "/suppliers",
-          icon: <Building2 className="h-5 w-5" />,
-          active: location === "/suppliers",
-        },
-        {
-          name: "Склад",
-          href: "/warehouse",
-          icon: <Package className="h-5 w-5" />,
-          active: location === "/warehouse",
-        },
-        {
-          name: "Затраты (Бюджет)",
-          href: "/budget",
-          icon: <Wallet className="h-5 w-5" />,
-          active: location === "/budget",
-        },
-        {
-          name: "Документы",
-          href: "/documents",
-          icon: <FolderOpen className="h-5 w-5" />,
-          active: location === "/documents",
-        },
-      ],
-    },
-    {
-      section: "Администрирование",
-      items: [
-        {
-          name: "Пользователи",
-          href: "/users",
-          icon: <Users className="h-5 w-5" />,
-          active: location === "/users",
-        },
-        {
-          name: "Отчеты",
-          href: "/reports",
-          icon: <ChartBar className="h-5 w-5" />,
-          active: location === "/reports",
-        },
-      ],
-    },
-  ];
 
   if (!open || isDesktop) return null;
 
@@ -162,14 +64,14 @@ export function MobileSidebar() {
           </div>
 
           <nav className="mt-5 px-2">
-            {navigation.map((section, idx) => (
-              <div key={`mobile-section-${idx}`} className="mb-4">
+            {sections.map((section) => (
+              <div key={section.section} className="mb-4">
                 <p className="uppercase text-xs font-semibold text-gray-500 px-2 mb-2 dark:text-gray-400">
-                  {section.section}
+                  {section.label}
                 </p>
                 <div className="space-y-1">
-                  {section.items.map((item, itemIdx) => (
-                    <Link key={`mobile-item-${idx}-${itemIdx}`} href={item.href}>
+                  {section.items.map((item) => (
+                    <Link key={item.id} href={item.href}>
                       <div
                         className={`group flex items-center px-3 py-2.5 text-sm font-medium rounded-md cursor-pointer ${
                           item.active
@@ -186,6 +88,10 @@ export function MobileSidebar() {
                 </div>
               </div>
             ))}
+
+            <div className="px-2 mt-2">
+              <SidebarCustomizeButton variant="light" />
+            </div>
           </nav>
 
           {showEmployeePresence && (

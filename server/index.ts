@@ -128,6 +128,14 @@ app.use((req, res, next) => {
       res.status(status).json({ message });
     });
 
+    // Неизвестные /api/* — JSON 404, а не index.html (иначе клиент падает на res.json)
+    app.use((req, res, next) => {
+      if (!req.path.startsWith("/api/")) return next();
+      res.status(404).json({
+        message: `API не найден: ${req.method} ${req.path}. Обновите сервер или деплой.`,
+      });
+    });
+
     if (isProduction) {
       serveStatic(app);
     } else {

@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from "react";
 import { format, startOfMonth, endOfMonth } from "date-fns";
 import { ru } from "date-fns/locale";
 import { Download, ExternalLink, RefreshCw, Users } from "lucide-react";
+import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -105,6 +106,88 @@ function OpenTasksTable({
               {fmtDateTime(task.assigneeAssignedAt)}
             </TableCell>
             <TableCell className="text-right">{task.assignedDurationHours ?? "—"}</TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
+}
+
+function OpenServiceRequestsTable({ report }: { report: EmployeeWorkReport }) {
+  if (report.openServiceRequests.length === 0) {
+    return <p className="text-sm text-muted-foreground py-4">Нет активных заявок на сотруднике</p>;
+  }
+
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead className="w-[70px]">ID</TableHead>
+          <TableHead>Оборудование</TableHead>
+          <TableHead>Статус</TableHead>
+          <TableHead className="text-right">Залогировано, ч</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {report.openServiceRequests.map((sr) => (
+          <TableRow key={sr.id}>
+            <TableCell>
+              <Link
+                href={`/service-requests/${sr.id}?from=tasks`}
+                className="text-blue-600 dark:text-blue-400 hover:underline"
+              >
+                #{sr.id}
+              </Link>
+            </TableCell>
+            <TableCell>{sr.equipmentName}</TableCell>
+            <TableCell>
+              <Badge variant="outline" className="text-xs">{sr.statusLabel}</Badge>
+            </TableCell>
+            <TableCell className="text-right">{sr.loggedHours} ч</TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
+}
+
+function ServiceRequestTimeEntriesTable({ report }: { report: EmployeeWorkReport }) {
+  if (report.serviceRequestTimeEntries.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground py-4">
+        За выбранный период трудозатраты по заявкам не залогированы
+      </p>
+    );
+  }
+
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead className="w-[70px]">Заявка</TableHead>
+          <TableHead>Оборудование</TableHead>
+          <TableHead>Дата</TableHead>
+          <TableHead className="text-right">Часы</TableHead>
+          <TableHead>Комментарий</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {report.serviceRequestTimeEntries.map((entry) => (
+          <TableRow key={entry.id}>
+            <TableCell>
+              <Link
+                href={`/service-requests/${entry.requestId}?from=tasks`}
+                className="text-blue-600 dark:text-blue-400 hover:underline"
+              >
+                #{entry.requestId}
+              </Link>
+            </TableCell>
+            <TableCell>{entry.equipmentName}</TableCell>
+            <TableCell className="whitespace-nowrap text-xs">{entry.workDate}</TableCell>
+            <TableCell className="text-right font-medium">{entry.hours}</TableCell>
+            <TableCell className="max-w-[240px] text-xs text-muted-foreground truncate">
+              {entry.comment?.trim() || "—"}
+            </TableCell>
           </TableRow>
         ))}
       </TableBody>
@@ -412,7 +495,10 @@ export function EmployeeWorkReportPanel() {
             <Card>
               <CardHeader className="pb-2">
                 <CardDescription>На сотруднике</CardDescription>
-                <CardTitle className="text-2xl">{report.summary.openTasksCount}</CardTitle>
+                <CardTitle className="text-2xl">
+                  {report.summary.openTasksCount} / {report.summary.openServiceRequestsCount}
+                </CardTitle>
+                <p className="text-xs text-muted-foreground">задач / заявок</p>
               </CardHeader>
             </Card>
             <Card>
@@ -425,6 +511,10 @@ export function EmployeeWorkReportPanel() {
               <CardHeader className="pb-2">
                 <CardDescription>Часов за период</CardDescription>
                 <CardTitle className="text-2xl">{report.summary.totalHoursInPeriod} ч</CardTitle>
+                <p className="text-xs text-muted-foreground">
+                  задачи {report.summary.taskHoursInPeriod} · заявки{" "}
+                  {report.summary.serviceRequestHoursInPeriod}
+                </p>
               </CardHeader>
             </Card>
             <Card>
@@ -449,28 +539,33 @@ export function EmployeeWorkReportPanel() {
               <Tabs value={subTab} onValueChange={(v) => setSubTab(v as "open" | "completed")}>
                 <TabsList className="mb-4">
                   <TabsTrigger value="open">
-                    На сотруднике ({report.summary.openTasksCount})
+                    На сотруднике ({report.summary.openTasksCount + report.summary.openServiceRequestsCount})
                   </TabsTrigger>
                   <TabsTrigger value="completed">
-                    Закрытые ({report.summary.completedTasksCount})
+                    Закрытые ({report.summary.completedTasksCount + report.serviceRequestTimeEntries.length})
                   </TabsTrigger>
                 </TabsList>
 
-                <TabsContent value="open" className="space-y-3">
-                  <p className="text-sm text-muted-foreground">
-                    Текущие задачи исполнителя: статус, даты создания и назначения, время в работе
-                  </p>
-                  <OpenTasksTable report={report} onOpenTask={openTaskById} />
+                <TabsContent value="open" className="space-y-6">
+                  <div className="space-y-3">
+                    <p className="text-sm font-medium">Задачи</p>
+                    <OpenTasksTable report={report} onOpenTask={openTaskById} />
+                  </div>
+                  <div className="space-y-3">
+                    <p className="text-sm font-medium">Заявки</p>
+                    <OpenServiceRequestsTable report={report} />
+                  </div>
                 </TabsContent>
 
-                <TabsContent value="completed" className="space-y-4">
+                <TabsContent value="completed" className="space-y-6">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <p className="text-sm text-muted-foreground">
-                      Закрытые задачи · итого{" "}
+                      Итого{" "}
                       <span className="font-semibold text-foreground">
                         {report.summary.totalHoursInPeriod} ч
                       </span>{" "}
-                      за {period.label}
+                      за {period.label} (задачи {report.summary.taskHoursInPeriod} · заявки{" "}
+                      {report.summary.serviceRequestHoursInPeriod})
                     </p>
                     <ReportPeriodFilter
                       preset={periodPreset}
@@ -481,7 +576,14 @@ export function EmployeeWorkReportPanel() {
                       onCustomToChange={setCustomTo}
                     />
                   </div>
-                  <CompletedTasksTable report={report} onOpenTask={openTaskById} />
+                  <div className="space-y-3">
+                    <p className="text-sm font-medium">Закрытые задачи</p>
+                    <CompletedTasksTable report={report} onOpenTask={openTaskById} />
+                  </div>
+                  <div className="space-y-3">
+                    <p className="text-sm font-medium">Трудозатраты по заявкам</p>
+                    <ServiceRequestTimeEntriesTable report={report} />
+                  </div>
                 </TabsContent>
               </Tabs>
             </CardContent>

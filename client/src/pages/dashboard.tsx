@@ -572,7 +572,7 @@ export default function Dashboard() {
         <title>Панель управления - Система управления оборудованием</title>
         <meta name="description" content="Общий обзор состояния оборудования, технического обслуживания и ежедневных осмотров" />
       </Helmet>
-      <div className="p-4 lg:p-5 w-full min-w-0 max-w-[1600px] mx-auto space-y-4">
+      <div className="p-4 lg:p-6 w-full min-w-0 space-y-4">
         <div className="flex flex-wrap justify-between items-start gap-3">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Панель управления</h1>
@@ -585,10 +585,11 @@ export default function Dashboard() {
             {isAdmin && <SubdivisionsPanel />}
             {showFilter && (
               <SubdivisionFilterSelect
+                inline
                 value={filterValue}
                 onChange={setFilterValue}
                 subdivisions={availableSubdivisions}
-                className="w-48"
+                className="w-48 sm:w-56"
               />
             )}
           </div>

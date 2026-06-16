@@ -18,6 +18,7 @@ import Suppliers from "@/pages/suppliers";
 import Budget from "@/pages/budget";
 import Warehouse from "@/pages/warehouse";
 import Documents from "@/pages/documents";
+import Planning from "@/pages/planning";
 import { MobileSidebarProvider } from "@/hooks/use-mobile-sidebar";
 import { AuthProvider } from "@/hooks/use-auth";
 import { UserStatusProvider } from "@/hooks/use-user-status";
@@ -114,6 +115,11 @@ function Router() {
       </Route>
       <Route path="/documents">
         <ProtectedLayout><Documents /></ProtectedLayout>
+      </Route>
+      <Route path="/planning">
+        <ProtectedLayout scrollable>
+          <Planning />
+        </ProtectedLayout>
       </Route>
       <Route path="/profile">
         <ProtectedLayout>

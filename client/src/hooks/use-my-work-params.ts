@@ -109,6 +109,14 @@ export function myWorkScopeLabel(scope: MyWorkScope): string {
   }
 }
 
+/** Ссылка на объединённую страницу «Задачи и заявки». */
+export function myWorkListPath(
+  section: MyWorkSection = "tasks",
+  scope: MyWorkScope = "all"
+): string {
+  return `/tasks${buildSearch(scope, section)}`;
+}
+
 export function myWorkPageSubtitle(scope: MyWorkScope, section: MyWorkSection): string {
   if (section === "remarks") {
     return "Замечания по оборудованию — статус и создание задач";

@@ -140,6 +140,33 @@ export function useAddRequestComment() {
   });
 }
 
+export function useRequestCommentMutations(requestId: number) {
+  const qc = useQueryClient();
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ["/api/service-requests", requestId] });
+  };
+
+  return {
+    updateComment: useMutation({
+      mutationFn: async ({ commentId, body }: { commentId: number; body: string }) => {
+        const res = await apiRequest(
+          "PUT",
+          `/api/service-requests/${requestId}/comments/${commentId}`,
+          { body }
+        );
+        return res.json();
+      },
+      onSuccess: invalidate,
+    }),
+    deleteComment: useMutation({
+      mutationFn: async (commentId: number) => {
+        await apiRequest("DELETE", `/api/service-requests/${requestId}/comments/${commentId}`);
+      },
+      onSuccess: invalidate,
+    }),
+  };
+}
+
 export function usePlanning(week?: string) {
   return useQuery({
     queryKey: ["/api/service-requests/planning", week],

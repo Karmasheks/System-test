@@ -33,6 +33,13 @@ import {
 } from "./equipment-link-service";
 import { getEquipmentActivity, getEquipmentLinkHistory } from "./equipment-activity-service";
 import {
+  listEquipmentComments,
+  addEquipmentComment,
+  updateEquipmentComment,
+  deleteEquipmentComment,
+  deleteEquipmentCommentsForEquipment,
+} from "./equipment-comments-service";
+import {
   logEquipmentLocationChange,
   logEquipmentStatusChange,
 } from "./equipment-event-log";
@@ -43,7 +50,13 @@ import {
   cancelTaskReservations,
   listTaskReservations,
 } from "./part-reservation-service";
-import { listTaskComments, addTaskComment } from "./task-comments-service";
+import {
+  listTaskComments,
+  addTaskComment,
+  updateTaskComment,
+  deleteTaskComment,
+} from "./task-comments-service";
+import { listTaskLinks, addTaskLink, removeTaskLink } from "./task-links-service";
 import {
   assertCanAddTaskComment,
   assertCanViewTaskComments,
@@ -64,7 +77,15 @@ import {
   addTaskCoexecutor,
   removeTaskCoexecutor,
 } from "./task-coexecutors-service";
-import { addTaskCommentSchema, addCoexecutorSchema, reservePartSchema } from "@shared/schema";
+import {
+  addTaskCommentSchema,
+  addTaskLinkSchema,
+  addCoexecutorSchema,
+  reservePartSchema,
+  addEquipmentCommentSchema,
+  updateEquipmentCommentSchema,
+  updateCommentBodySchema,
+} from "@shared/schema";
 import {
   createTaskFromRemark,
   createTaskFromMaintenance,
@@ -99,6 +120,7 @@ import {
   listEquipmentTypes,
 } from "./equipment-types-service";
 import { registerSubdivisionRoutes } from "./subdivision-routes";
+import { registerProductionRoutes } from "./production-routes";
 import {
   canActorManageUser,
   filterUsersForActor,
@@ -133,6 +155,7 @@ import {
   adminUpdatePresenceSchema,
   updateVacationPeriodsSchema,
 } from "@shared/schema";
+import { updateUiPreferencesSchema, mergeUiPreferences } from "@shared/user-ui-preferences";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import session from "express-session";
@@ -391,6 +414,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const updatedUser = await storage.updateUser(req.user.id, updateData);
+      if (!updatedUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const effectivePermissions = await getEffectivePermissionsForUser(updatedUser);
+      return res.status(200).json(serializeUserForClient(updatedUser, { effectivePermissions }));
+    } catch (error: any) {
+      if (error.name === "ZodError") {
+        return res.status(400).json({ message: error.errors?.[0]?.message ?? "Неверные данные" });
+      }
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.patch("/api/auth/ui-preferences", authenticate, async (req, res) => {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ message: "Authentication required" });
+      }
+
+      const patch = updateUiPreferencesSchema.parse(req.body);
+      const currentUser = await storage.getUser(req.user.id);
+      if (!currentUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const merged = mergeUiPreferences(currentUser.uiPreferences, patch);
+      const updatedUser = await storage.updateUser(req.user.id, { uiPreferences: merged });
       if (!updatedUser) {
         return res.status(404).json({ message: "User not found" });
       }
@@ -796,8 +847,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       await notifyNewTaskCreated(task, req.user.id);
 
-      const { syncEquipmentOperationalStatus } = await import("./equipment-status-service");
-      await syncEquipmentOperationalStatus(task.equipmentId, {
+      const { syncToirAndRecalculateProduction } = await import("./production-toir-integration-service");
+      await syncToirAndRecalculateProduction(task.equipmentId, {
         id: req.user.id,
         name: req.user.name,
       });
@@ -1016,11 +1067,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
       }
       
-      const { syncEquipmentOperationalStatus } = await import("./equipment-status-service");
+      const { syncToirAndRecalculateProduction } = await import("./production-toir-integration-service");
       const statusActor = { id: req.user.id, name: req.user.name };
-      await syncEquipmentOperationalStatus(updatedTask.equipmentId, statusActor);
+      await syncToirAndRecalculateProduction(updatedTask.equipmentId, statusActor);
       if (task.equipmentId && task.equipmentId !== updatedTask.equipmentId) {
-        await syncEquipmentOperationalStatus(task.equipmentId, statusActor);
+        await syncToirAndRecalculateProduction(task.equipmentId, statusActor);
       }
 
       // Create activity
@@ -1111,6 +1162,97 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(201).json(row);
     } catch (error: any) {
       const status = error instanceof TaskAccessError ? error.status : 400;
+      return res.status(status).json({ message: error.message });
+    }
+  });
+
+  app.put("/api/tasks/:id/comments/:commentId", authenticate, async (req, res) => {
+    try {
+      if (!req.user) return res.status(401).json({ message: "Authentication required" });
+      const taskId = parseInt(req.params.id, 10);
+      const commentId = Number(req.params.commentId);
+      await assertCanViewTaskComments(req.user, taskId);
+      const parsed = updateCommentBodySchema.parse(req.body);
+      const row = await updateTaskComment(taskId, commentId, parsed.body, req.user);
+      return res.status(200).json(row);
+    } catch (error: any) {
+      const status =
+        error instanceof TaskAccessError
+          ? error.status
+          : error.message === "Комментарий не найден"
+            ? 404
+            : error.message?.includes("Недостаточно прав")
+              ? 403
+              : 400;
+      return res.status(status).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/tasks/:id/comments/:commentId", authenticate, async (req, res) => {
+    try {
+      if (!req.user) return res.status(401).json({ message: "Authentication required" });
+      const taskId = parseInt(req.params.id, 10);
+      const commentId = Number(req.params.commentId);
+      await assertCanViewTaskComments(req.user, taskId);
+      await deleteTaskComment(taskId, commentId, req.user);
+      return res.status(200).json({ message: "Комментарий удалён" });
+    } catch (error: any) {
+      const status =
+        error instanceof TaskAccessError
+          ? error.status
+          : error.message === "Комментарий не найден"
+            ? 404
+            : error.message?.includes("Недостаточно прав")
+              ? 403
+              : 400;
+      return res.status(status).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/tasks/:id/links", authenticate, async (req, res) => {
+    try {
+      if (!req.user) return res.status(401).json({ message: "Authentication required" });
+      const taskId = parseInt(req.params.id, 10);
+      await assertCanViewTaskDetails(req.user, taskId);
+      return res.status(200).json(await listTaskLinks(taskId));
+    } catch (error: any) {
+      const status = error instanceof TaskAccessError ? error.status : 500;
+      return res.status(status).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/tasks/:id/links", authenticate, async (req, res) => {
+    try {
+      if (!req.user) return res.status(401).json({ message: "Authentication required" });
+      const taskId = parseInt(req.params.id, 10);
+      await assertCanAddTaskComment(req.user, taskId);
+      const body = addTaskLinkSchema.parse(req.body);
+      const link = await addTaskLink({
+        taskId,
+        title: body.title,
+        description: body.description,
+        url: body.url,
+      });
+      return res.status(201).json(link);
+    } catch (error: any) {
+      const status = error instanceof TaskAccessError ? error.status : 400;
+      return res.status(status).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/tasks/:id/links/:linkId", authenticate, async (req, res) => {
+    try {
+      if (!req.user) return res.status(401).json({ message: "Authentication required" });
+      const taskId = parseInt(req.params.id, 10);
+      const linkId = Number(req.params.linkId);
+      await assertCanAddTaskComment(req.user, taskId);
+      const links = await listTaskLinks(taskId);
+      const link = links.find((l) => l.id === linkId);
+      if (!link) return res.status(404).json({ message: "Ссылка не найдена" });
+      await removeTaskLink(linkId);
+      return res.status(200).json({ message: "Ссылка удалена" });
+    } catch (error: any) {
+      const status = error instanceof TaskAccessError ? error.status : 500;
       return res.status(status).json({ message: error.message });
     }
   });
@@ -2004,6 +2146,74 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/equipment/:id/comments", authenticate, async (req, res) => {
+    try {
+      return res.status(200).json(await listEquipmentComments(req.params.id));
+    } catch (error: any) {
+      return res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/equipment/:id/comments", authenticate, requireRole(writeRoles), async (req, res) => {
+    try {
+      if (!req.user) return res.status(401).json({ message: "Authentication required" });
+      const parsed = addEquipmentCommentSchema.parse(req.body);
+      const row = await addEquipmentComment(req.params.id, parsed.body, req.user);
+      return res.status(201).json(row);
+    } catch (error: any) {
+      return res.status(400).json({ message: error.message ?? "Ошибка" });
+    }
+  });
+
+  app.put(
+    "/api/equipment/:id/comments/:commentId",
+    authenticate,
+    async (req, res) => {
+      try {
+        if (!req.user) return res.status(401).json({ message: "Authentication required" });
+        const commentId = Number(req.params.commentId);
+        if (!Number.isFinite(commentId)) {
+          return res.status(400).json({ message: "Некорректный ID заметки" });
+        }
+        const parsed = updateEquipmentCommentSchema.parse(req.body);
+        const row = await updateEquipmentComment(commentId, parsed.body, req.user);
+        return res.status(200).json(row);
+      } catch (error: any) {
+        const status =
+          error.message === "Заметка не найдена"
+            ? 404
+            : error.message?.includes("Недостаточно прав")
+              ? 403
+              : 400;
+        return res.status(status).json({ message: error.message ?? "Ошибка" });
+      }
+    }
+  );
+
+  app.delete(
+    "/api/equipment/:id/comments/:commentId",
+    authenticate,
+    async (req, res) => {
+      try {
+        if (!req.user) return res.status(401).json({ message: "Authentication required" });
+        const commentId = Number(req.params.commentId);
+        if (!Number.isFinite(commentId)) {
+          return res.status(400).json({ message: "Некорректный ID заметки" });
+        }
+        await deleteEquipmentComment(commentId, req.user);
+        return res.status(200).json({ message: "Заметка удалена" });
+      } catch (error: any) {
+        const status =
+          error.message === "Заметка не найдена"
+            ? 404
+            : error.message?.includes("Недостаточно прав")
+              ? 403
+              : 400;
+        return res.status(status).json({ message: error.message ?? "Ошибка" });
+      }
+    }
+  );
+
   app.put(
     "/api/equipment/:id/links",
     authenticate,
@@ -2024,6 +2234,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { id } = req.params;
       await deleteEquipmentLinksForEquipment(id);
+      await deleteEquipmentCommentsForEquipment(id);
       const deleted = await storage.deleteEquipment(id);
       if (!deleted) {
         return res.status(404).json({ message: "Оборудование не найдено" });
@@ -2129,8 +2340,8 @@ app.post("/api/maintenance", authenticate, requireRole(writeRoles), async (req, 
     }
 
     if (record.equipmentId && req.user) {
-      const { syncEquipmentOperationalStatus } = await import("./equipment-status-service");
-      await syncEquipmentOperationalStatus(record.equipmentId, {
+      const { syncToirAndRecalculateProduction } = await import("./production-toir-integration-service");
+      await syncToirAndRecalculateProduction(record.equipmentId, {
         id: req.user.id,
         name: req.user.name,
       });
@@ -2232,10 +2443,10 @@ app.put("/api/maintenance/:id", authenticate, requireRole(writeRoles), async (re
       equipmentIdsToSync.add(existing.equipmentId);
     }
     if (equipmentIdsToSync.size > 0 && req.user) {
-      const { syncEquipmentOperationalStatus } = await import("./equipment-status-service");
+      const { syncToirAndRecalculateProduction } = await import("./production-toir-integration-service");
       const actor = { id: req.user.id, name: req.user.name };
       for (const equipmentId of equipmentIdsToSync) {
-        await syncEquipmentOperationalStatus(equipmentId, actor);
+        await syncToirAndRecalculateProduction(equipmentId, actor);
       }
     }
 
@@ -2255,8 +2466,8 @@ app.delete("/api/maintenance/:id", authenticate, requireRole(writeRoles), async 
       return res.status(404).json({ message: "Запись о техобслуживании не найдена" });
     }
     if (existing?.equipmentId && req.user) {
-      const { syncEquipmentOperationalStatus } = await import("./equipment-status-service");
-      await syncEquipmentOperationalStatus(existing.equipmentId, {
+      const { syncToirAndRecalculateProduction } = await import("./production-toir-integration-service");
+      await syncToirAndRecalculateProduction(existing.equipmentId, {
         id: req.user.id,
         name: req.user.name,
       });
@@ -2579,6 +2790,7 @@ app.delete("/api/maintenance/:id", authenticate, requireRole(writeRoles), async 
   registerWarehouseRoutes(app, authenticate, requireRole);
   registerPermissionsRoutes(app, authenticate, requireRole);
   registerSubdivisionRoutes(app, authenticate, requireRole);
+  registerProductionRoutes(app, authenticate);
 
   try {
     await ensureDefaultRoleProfiles();

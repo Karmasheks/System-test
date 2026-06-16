@@ -285,13 +285,36 @@ export function useDocumentMutations() {
 }
 
 // Calendar & reports
-export function useCalendarEvents(from?: string, to?: string, equipmentId?: string) {
+export function useCalendarEvents(
+  from?: string,
+  to?: string,
+  equipmentId?: string,
+  options?: {
+    includeProduction?: boolean;
+    productionStatuses?: string[];
+  }
+) {
+  const statusKey = options?.productionStatuses?.join(",") ?? "";
   return useQuery({
-    queryKey: ["/api/calendar/events", from, to, equipmentId],
+    queryKey: [
+      "/api/calendar/events",
+      from,
+      to,
+      equipmentId,
+      options?.includeProduction,
+      statusKey,
+    ],
     queryFn: async () => {
       const res = await apiRequest(
         "GET",
-        `/api/calendar/events${qs({ from, to, equipmentId })}`
+        `/api/calendar/events${qs({
+          from,
+          to,
+          equipmentId,
+          includeProduction:
+            options?.includeProduction === false ? "false" : undefined,
+          productionStatuses: statusKey || undefined,
+        })}`
       );
       return res.json();
     },
@@ -538,8 +561,11 @@ export type EmployeeWorkReport = {
   period: { from: string | null; to: string | null };
   summary: {
     openTasksCount: number;
+    openServiceRequestsCount: number;
     completedTasksCount: number;
     completedTasksToday: number;
+    taskHoursInPeriod: number;
+    serviceRequestHoursInPeriod: number;
     totalHoursInPeriod: number;
     totalHoursToday: number;
   };
@@ -551,6 +577,13 @@ export type EmployeeWorkReport = {
     createdAt: string | null;
     assigneeAssignedAt: string | null;
     assignedDurationHours: number | null;
+  }>;
+  openServiceRequests: Array<{
+    id: number;
+    equipmentName: string;
+    status: string;
+    statusLabel: string;
+    loggedHours: number;
   }>;
   completedTasks: Array<{
     id: number;
@@ -564,6 +597,14 @@ export type EmployeeWorkReport = {
     completedBy: string | null;
     actualHours: number;
     assignedDurationHours: number | null;
+  }>;
+  serviceRequestTimeEntries: Array<{
+    id: number;
+    requestId: number;
+    equipmentName: string;
+    workDate: string;
+    hours: number;
+    comment: string | null;
   }>;
 };
 
@@ -659,4 +700,36 @@ export async function downloadEquipmentReportCsv(from: string, to: string, equip
     ["Простой (ед.)", data.downtime.equipmentInMaintenance],
   ];
   downloadCsv(rows, `report-${from}-${to}.csv`);
+}
+
+export type ProductionReliabilityReport = import("@shared/production-reliability-types").ProductionReliabilityReport;
+
+export function useProductionReliabilityReport(
+  from?: string,
+  to?: string,
+  subdivisionId?: number | null,
+  equipmentId?: string
+) {
+  return useQuery<ProductionReliabilityReport>({
+    queryKey: [
+      "/api/reports/production-reliability",
+      from,
+      to,
+      subdivisionId,
+      equipmentId,
+    ],
+    queryFn: async () => {
+      const res = await apiRequest(
+        "GET",
+        `/api/reports/production-reliability${qs({
+          from,
+          to,
+          subdivisionId:
+            subdivisionId != null ? String(subdivisionId) : undefined,
+          equipmentId,
+        })}`
+      );
+      return res.json();
+    },
+  });
 }

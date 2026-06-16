@@ -44,7 +44,8 @@ import {
   Printer,
   Users,
   Wallet,
-  Package
+  Package,
+  Activity
 } from "lucide-react";
 import { format, startOfMonth, endOfMonth, subMonths, addDays } from "date-fns";
 import { ru } from "date-fns/locale";
@@ -54,6 +55,7 @@ import { useToast } from "@/hooks/use-toast";
 import { EmployeeWorkReportPanel } from "@/components/reports/employee-work-report-panel";
 import { BudgetReportPanel } from "@/components/reports/budget-report-panel";
 import { WarehouseReportPanel } from "@/components/reports/warehouse-report-panel";
+import { ProductionReliabilityReportPanel } from "@/components/reports/production-reliability-report-panel";
 
 export default function Reports() {
   const { user, isLoading, isAuthenticated } = useAuth();
@@ -645,6 +647,10 @@ export default function Reports() {
                     <Package className="h-4 w-4" />
                     Склад
                   </TabsTrigger>
+                  <TabsTrigger value="production-reliability" className="flex items-center gap-2">
+                    <Activity className="h-4 w-4" />
+                    OEE / MTBF / MTTR
+                  </TabsTrigger>
                 </TabsList>
 
                 {/* Вкладка "Обзор" */}
@@ -1187,6 +1193,10 @@ export default function Reports() {
 
                 <TabsContent value="warehouse">
                   <WarehouseReportPanel />
+                </TabsContent>
+
+                <TabsContent value="production-reliability">
+                  <ProductionReliabilityReportPanel />
                 </TabsContent>
               </Tabs>
         </div>

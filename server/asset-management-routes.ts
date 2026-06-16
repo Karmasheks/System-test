@@ -1,6 +1,10 @@
 import type { Express, Request, Response } from "express";
 import type { AuthenticatedUser } from "./routes";
-import { getSubdivisionScopeForRequest } from "./subdivision-scope-middleware";
+import {
+  assertSubdivisionAccess,
+  getSubdivisionScopeForRequest,
+  subdivisionForbidden,
+} from "./subdivision-scope-middleware";
 import {
   filterBudgetEntriesByScope,
   filterBudgetEntriesBySubdivisionId,
@@ -45,6 +49,7 @@ import {
   seedDefaultDocumentCategories,
 } from "./asset-management-storage";
 import { getStatusDurationReport } from "./status-duration-reports";
+import { getProductionReliabilityReport } from "./production-reliability-report";
 import { getUserWorkReport } from "./user-work-report";
 import { getEmployeeWorkReport } from "./employee-work-report";
 import {
@@ -461,14 +466,22 @@ export function registerAssetManagementRoutes(
   // Calendar & reports
   app.get("/api/calendar/events", authenticate, async (req, res) => {
     try {
-      const { from, to, equipmentId } = req.query;
+      const { from, to, equipmentId, includeProduction, productionStatuses } = req.query;
       const scope = await getSubdivisionScopeForRequest(req);
+      const statusList =
+        typeof productionStatuses === "string" && productionStatuses.trim()
+          ? productionStatuses.split(",").map((s) => s.trim()).filter(Boolean)
+          : undefined;
       res.json(
         await getCalendarEvents(
           from as string | undefined,
           to as string | undefined,
           equipmentId as string | undefined,
-          scope
+          scope,
+          {
+            includeProduction: includeProduction !== "false",
+            productionSlotStatuses: statusList,
+          }
         )
       );
     } catch {
@@ -568,6 +581,56 @@ export function registerAssetManagementRoutes(
       );
     } catch {
       res.status(500).json({ message: "Ошибка формирования отчёта по складу" });
+    }
+  });
+
+  app.get("/api/reports/production-reliability", authenticate, async (req, res) => {
+    try {
+      const { from, to, equipmentId, subdivisionId } = req.query;
+      const subId =
+        subdivisionId != null && subdivisionId !== ""
+          ? Number(subdivisionId)
+          : undefined;
+
+      if (subId != null && Number.isNaN(subId)) {
+        return res.status(400).json({ message: "Некорректный subdivisionId" });
+      }
+
+      const scope = await getSubdivisionScopeForRequest(req);
+      if (scope && subId != null) {
+        try {
+          assertSubdivisionAccess(scope, subId);
+        } catch {
+          return subdivisionForbidden(res);
+        }
+      }
+
+      const parseFrom = (v: unknown) => {
+        if (!v) return undefined;
+        const d = new Date(String(v));
+        d.setHours(0, 0, 0, 0);
+        return d;
+      };
+      const parseTo = (v: unknown) => {
+        if (!v) return undefined;
+        const d = new Date(String(v));
+        d.setHours(23, 59, 59, 999);
+        return d;
+      };
+
+      res.json(
+        await getProductionReliabilityReport({
+          from: parseFrom(from),
+          to: parseTo(to),
+          subdivisionId: subId,
+          equipmentId:
+            typeof equipmentId === "string" && equipmentId.trim()
+              ? equipmentId.trim()
+              : undefined,
+        })
+      );
+    } catch {
+      res.status(500).json({ message: "Ошибка отчёта OEE / MTBF / MTTR" });
     }
   });
 

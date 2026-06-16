@@ -25,6 +25,8 @@ import {
 } from "@/components/supplier-form-fields";
 import { Building2, Plus, Trash2 } from "lucide-react";
 import type { Supplier } from "@shared/schema";
+import { matchesListSearch } from "@/lib/list-search";
+import { ListSearchInput } from "@/components/list-search-input";
 
 const formDialogClass =
   "max-w-lg w-[min(100vw-2rem,32rem)] max-h-[90vh] overflow-y-auto overflow-x-hidden p-4 sm:p-6";
@@ -40,12 +42,27 @@ export default function SuppliersPage() {
     availableSubdivisions,
     showFilter,
   } = useSubdivisionFilter();
-  const filteredSuppliers = useMemo(
-    () => filterItemsBySubdivisionIds(suppliers, filterSubdivisionId),
-    [suppliers, filterSubdivisionId]
-  );
-  const { create, update, remove } = useSupplierMutations();
   const { allEquipment } = useEquipmentApi();
+  const [searchQuery, setSearchQuery] = useState("");
+  const filteredSuppliers = useMemo(() => {
+    let list = filterItemsBySubdivisionIds(suppliers, filterSubdivisionId);
+    if (!searchQuery.trim()) return list;
+    return list.filter((s) =>
+      matchesListSearch(searchQuery, [
+        s.name,
+        s.contactPerson,
+        s.position,
+        s.phone,
+        s.email,
+        s.address,
+        s.website,
+        s.notes,
+        subdivisionLabels(normalizeSubdivisionIds(s), subdivisions),
+        equipmentLabels(normalizeEquipmentIds(s), allEquipment),
+      ])
+    );
+  }, [suppliers, filterSubdivisionId, searchQuery, subdivisions, allEquipment]);
+  const { create, update, remove } = useSupplierMutations();
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState<Supplier | null>(null);
   const [form, setForm] = useState<SupplierFormValues>(emptySupplierForm());
@@ -104,16 +121,24 @@ export default function SuppliersPage() {
           </Button>
         </div>
         <Card>
-          <CardHeader className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+          <CardHeader className="flex flex-col gap-4">
             <CardTitle>Список ({filteredSuppliers.length})</CardTitle>
-            {showFilter && (
-              <SubdivisionFilterSelect
-                value={filterValue}
-                onChange={setFilterValue}
-                subdivisions={availableSubdivisions}
-                className="w-56"
+            <div className="flex flex-wrap items-end gap-3">
+              <ListSearchInput
+                value={searchQuery}
+                onChange={setSearchQuery}
+                placeholder="Название, контакт, телефон, email…"
+                className="w-full sm:max-w-sm"
               />
-            )}
+              {showFilter && (
+                <SubdivisionFilterSelect
+                  value={filterValue}
+                  onChange={setFilterValue}
+                  subdivisions={availableSubdivisions}
+                  className="w-56"
+                />
+              )}
+            </div>
           </CardHeader>
           <CardContent className="overflow-x-auto">
             {isLoading ? (

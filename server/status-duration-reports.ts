@@ -63,7 +63,7 @@ function clipSegmentMs(
   return ms > 0 ? ms : 0;
 }
 
-function computeDurations(
+export function computeDurations(
   history: { fromStatus: string | null; toStatus: string; createdAt: Date }[],
   entityCreatedAt: Date,
   currentStatus: string,
