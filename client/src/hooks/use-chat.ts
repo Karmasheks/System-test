@@ -38,6 +38,43 @@ export type ChatMessage = {
   senderAvatar: string | null;
 };
 
+export type ChatMessagesPage = {
+  messages: ChatMessage[];
+  total: number;
+};
+
+export function chatMessagesQueryKey(conversationId: number): string {
+  return `/api/chat/conversations/${conversationId}/messages`;
+}
+
+function normalizeMessagesResponse(data: unknown): ChatMessagesPage {
+  if (Array.isArray(data)) {
+    return { messages: [], total: 0 };
+  }
+  if (data && typeof data === "object" && "messages" in data) {
+    const record = data as { messages?: ChatMessage[]; total?: number };
+    const messages = Array.isArray(record.messages) ? record.messages : [];
+    return { messages, total: record.total ?? messages.length };
+  }
+  return { messages: [], total: 0 };
+}
+
+export function useChatMessages(conversationId: number | null) {
+  const url = conversationId != null ? chatMessagesQueryKey(conversationId) : null;
+
+  return useQuery<ChatMessagesPage>({
+    queryKey: [url],
+    enabled: url != null,
+    queryFn: async () => {
+      const res = await apiRequest("GET", url!);
+      return normalizeMessagesResponse(await res.json());
+    },
+    refetchInterval: 5000,
+    staleTime: 0,
+    refetchOnMount: "always",
+  });
+}
+
 export function useChatConversations(enabled = true) {
   return useQuery<ChatConversation[]>({
     queryKey: ["/api/chat/conversations"],
@@ -52,23 +89,58 @@ export function useChatUnreadTotal(enabled = true): number {
   return conversations.reduce((sum, c) => sum + c.unreadCount, 0);
 }
 
-export function useChatMessages(conversationId: number | null) {
-  return useQuery<{ messages: ChatMessage[]; total: number }>({
-    queryKey: ["/api/chat/conversations", conversationId, "messages"],
-    enabled: conversationId != null,
-    refetchInterval: 5000,
-  });
-}
-
 export function useChatMutations() {
   const queryClient = useQueryClient();
   const conversationsKey = ["/api/chat/conversations"] as const;
+
+  const patchConversationLastMessage = (conversationId: number, message: ChatMessage) => {
+    queryClient.setQueryData<ChatConversation[]>(conversationsKey, (current) =>
+      current?.map((c) => {
+        if (c.id !== conversationId) return c;
+        const shouldUpdatePreview =
+          !c.lastMessage || c.lastMessage.id === message.id || message.id >= c.lastMessage.id;
+        return {
+          ...c,
+          updatedAt: message.createdAt,
+          lastMessage: shouldUpdatePreview
+            ? {
+                id: message.id,
+                body: message.body,
+                senderId: message.senderId,
+                senderName: message.senderName,
+                createdAt: message.createdAt,
+              }
+            : c.lastMessage,
+        };
+      }) ?? current
+    );
+  };
+
+  const patchMessageInCache = (conversationId: number, message: ChatMessage) => {
+    const messagesKey = [chatMessagesQueryKey(conversationId)];
+    queryClient.setQueryData<ChatMessagesPage>(messagesKey, (current) => {
+      if (!current) {
+        return { messages: [message], total: 1 };
+      }
+      const index = current.messages.findIndex((m) => m.id === message.id);
+      if (index === -1) {
+        return {
+          messages: [...current.messages, message],
+          total: current.total + 1,
+        };
+      }
+      const messages = [...current.messages];
+      messages[index] = message;
+      return { ...current, messages };
+    });
+    patchConversationLastMessage(conversationId, message);
+  };
 
   const invalidate = (conversationId?: number) => {
     queryClient.invalidateQueries({ queryKey: conversationsKey });
     if (conversationId != null) {
       queryClient.invalidateQueries({
-        queryKey: ["/api/chat/conversations", conversationId, "messages"],
+        queryKey: [chatMessagesQueryKey(conversationId)],
       });
     }
   };
@@ -108,7 +180,7 @@ export function useChatMutations() {
       });
       return res.json() as Promise<ChatMessage>;
     },
-    onSuccess: (_, vars) => invalidate(vars.conversationId),
+    onSuccess: (message, vars) => patchMessageInCache(vars.conversationId, message),
   });
 
   const markRead = useMutation({
@@ -127,7 +199,7 @@ export function useChatMutations() {
       const previous = queryClient.getQueryData<ChatConversation[]>(conversationsKey);
       removeConversationFromCache(conversationId);
       queryClient.removeQueries({
-        queryKey: ["/api/chat/conversations", conversationId, "messages"],
+        queryKey: [chatMessagesQueryKey(conversationId)],
       });
       return { previous };
     },
@@ -161,7 +233,7 @@ export function useChatMutations() {
       );
       return res.json() as Promise<ChatMessage>;
     },
-    onSuccess: (_, vars) => invalidate(vars.conversationId),
+    onSuccess: (message, vars) => patchMessageInCache(vars.conversationId, message),
   });
 
   const deleteMessage = useMutation({
@@ -178,7 +250,7 @@ export function useChatMutations() {
       );
       return res.json() as Promise<ChatMessage>;
     },
-    onSuccess: (_, vars) => invalidate(vars.conversationId),
+    onSuccess: (message, vars) => patchMessageInCache(vars.conversationId, message),
   });
 
   return {

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "./db";
 import {
   chatConversations,
@@ -200,45 +200,25 @@ export async function listConversationsForUser(userId: number): Promise<Conversa
     }
   }
 
-  const readRows = await db
-    .select({
-      conversationId: chatConversationMembers.conversationId,
-      lastReadAt: chatConversationMembers.lastReadAt,
-    })
-    .from(chatConversationMembers)
-    .where(
-      and(eq(chatConversationMembers.userId, userId), inArray(chatConversationMembers.conversationId, conversationIds))
-    );
-
-  const readMap = new Map(readRows.map((r) => [r.conversationId, r.lastReadAt]));
-
-  const unreadCounts = await db
+  const unreadRows = await db
     .select({
       conversationId: chatMessages.conversationId,
       count: sql<number>`count(*)::int`,
     })
     .from(chatMessages)
+    .innerJoin(
+      chatConversationMembers,
+      and(
+        eq(chatConversationMembers.conversationId, chatMessages.conversationId),
+        eq(chatConversationMembers.userId, userId),
+        isNull(chatConversationMembers.leftAt),
+        sql`(${chatConversationMembers.lastReadAt} IS NULL OR ${chatMessages.createdAt} > ${chatConversationMembers.lastReadAt})`
+      )
+    )
     .where(inArray(chatMessages.conversationId, conversationIds))
     .groupBy(chatMessages.conversationId);
 
-  const unreadMap = new Map<number, number>();
-  for (const row of unreadCounts) {
-    const lastRead = readMap.get(row.conversationId);
-    if (!lastRead) {
-      unreadMap.set(row.conversationId, row.count);
-      continue;
-    }
-    const unreadRows = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(chatMessages)
-      .where(
-        and(
-          eq(chatMessages.conversationId, row.conversationId),
-          gt(chatMessages.createdAt, lastRead)
-        )
-      );
-    unreadMap.set(row.conversationId, unreadRows[0]?.count ?? 0);
-  }
+  const unreadMap = new Map(unreadRows.map((row) => [row.conversationId, row.count]));
 
   return conversations.map((conversation) => {
     const members = membersMap.get(conversation.id) ?? [];

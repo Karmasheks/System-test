@@ -14,15 +14,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useChatConversations } from "@/hooks/use-chat";
 import { UserAvatar } from "@/components/user-avatar";
 
-function formatPreviewTime(value: string) {
-  const date = new Date(value);
-  return date.toLocaleString("ru-RU", {
-    day: "2-digit",
-    month: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
+import { formatChatDateTime } from "@/lib/chat-datetime";
 
 export function MessagesDropdown() {
   const { user } = useAuth();
@@ -101,7 +93,7 @@ export function MessagesDropdown() {
                       <p className="text-xs text-muted-foreground text-multiline mt-0.5">{preview}</p>
                       {conversation.lastMessage && (
                         <p className="text-[10px] text-muted-foreground/80 mt-1">
-                          {formatPreviewTime(conversation.lastMessage.createdAt)}
+                          {formatChatDateTime(conversation.lastMessage.createdAt)}
                         </p>
                       )}
                     </div>

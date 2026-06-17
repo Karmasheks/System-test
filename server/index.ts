@@ -59,6 +59,8 @@ process.on("unhandledRejection", (reason) => {
 
 const app = express();
 
+let dbReady = false;
+
 function readBuildMeta(): { commit?: string; builtAt?: string } {
   try {
     const raw = fs.readFileSync(
@@ -75,6 +77,7 @@ app.get("/api/health", (_req, res) => {
   const build = readBuildMeta();
   res.json({
     ok: true,
+    status: dbReady ? "ready" : "starting",
     commit: build.commit ?? null,
     builtAt: build.builtAt ?? null,
   });
@@ -116,8 +119,6 @@ app.use((req, res, next) => {
 
 (async () => {
   try {
-    await initializeDatabase();
-
     const server = await registerRoutes(app);
 
     app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
@@ -157,6 +158,15 @@ app.use((req, res, next) => {
         `mode: ${isProduction ? "production" : "development"}, bundle: ${isProductionBundle}, entry: ${normalizePath(process.argv[1] ?? "")}`,
       );
     });
+
+    void initializeDatabase()
+      .then(() => {
+        dbReady = true;
+        log("Database ready");
+      })
+      .catch((error) => {
+        console.error("[server] Database initialization failed:", error);
+      });
   } catch (error) {
     console.error("[server] FATAL startup error:", error);
     process.exit(1);

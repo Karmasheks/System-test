@@ -26,13 +26,14 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { UserAvatar } from "@/components/user-avatar";
 import { MessageSquare, Pencil, Plus, Send, Trash2, Users } from "lucide-react";
 import {
   useChatConversations,
   useChatMessages,
   useChatMutations,
+  chatMessagesQueryKey,
   type ChatConversation,
   type ChatMessage,
 } from "@/hooks/use-chat";
@@ -43,6 +44,7 @@ import { useSubdivisions } from "@/hooks/use-subdivisions";
 import { useAccessControl } from "@/hooks/use-access-control";
 import { userWorkSubdivisionIds } from "@/lib/user-subdivisions";
 import { parseApiErrorMessage } from "@/lib/api-error";
+import { formatChatDateTime } from "@/lib/chat-datetime";
 
 type UserListItem = {
   id: number;
@@ -52,16 +54,6 @@ type UserListItem = {
   subdivisionId: number | null;
   extraSubdivisionIds?: number[] | null;
 };
-
-function formatMessageTime(value: string) {
-  const date = new Date(value);
-  return date.toLocaleString("ru-RU", {
-    day: "2-digit",
-    month: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
 
 function userMatchesSubdivision(user: UserListItem, subdivisionId: number | null): boolean {
   if (subdivisionId == null) return true;
@@ -89,6 +81,7 @@ export default function MessagesPage() {
     return Number.isInteger(id) && id > 0 ? id : null;
   }, [search]);
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const { data: conversations = [], isLoading } = useChatConversations();
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [messageText, setMessageText] = useState("");
@@ -130,7 +123,13 @@ export default function MessagesPage() {
     subdivisions.find((s) => s.id === id)?.name ?? (id ? `#${id}` : "—");
 
   const selectedConversation = conversations.find((c) => c.id === selectedId) ?? null;
-  const { data: messagesData, isLoading: messagesLoading } = useChatMessages(selectedId);
+  const {
+    data: messagesData,
+    isLoading: messagesLoading,
+    isFetching: messagesFetching,
+    isError: messagesError,
+    error: messagesQueryError,
+  } = useChatMessages(selectedId);
   const messages = messagesData?.messages ?? [];
   const { createDirect, createGroup, sendMessage, markRead, leaveConversation, editMessage, deleteMessage } =
     useChatMutations();
@@ -179,6 +178,15 @@ export default function MessagesPage() {
     setGroupTitle("");
     setGroupMemberIds([]);
   };
+
+  useEffect(() => {
+    queryClient.removeQueries({
+      predicate: (query) => {
+        const key = query.queryKey;
+        return Array.isArray(key) && key[0] === "/api/chat/conversations" && key.length === 3;
+      },
+    });
+  }, [queryClient]);
 
   useEffect(() => {
     if (conversationFromUrl != null) {
@@ -444,7 +452,12 @@ export default function MessagesPage() {
                     key={conversation.id}
                     conversation={conversation}
                     active={conversation.id === selectedId}
-                    onClick={() => setSelectedId(conversation.id)}
+                    onClick={() => {
+                      setSelectedId(conversation.id);
+                      void queryClient.invalidateQueries({
+                        queryKey: [chatMessagesQueryKey(conversation.id)],
+                      });
+                    }}
                   />
                 ))
               )}
@@ -474,10 +487,30 @@ export default function MessagesPage() {
                   </Button>
                 </div>
                 <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-muted/20">
-                  {messagesLoading ? (
+                  {messagesLoading || (messagesFetching && messages.length === 0) ? (
                     <p className="text-sm text-muted-foreground">Загрузка сообщений...</p>
+                  ) : messagesError ? (
+                    <p className="text-sm text-destructive">
+                      {parseApiErrorMessage(messagesQueryError, "Не удалось загрузить сообщения")}
+                    </p>
                   ) : messages.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">Нет сообщений. Напишите первое.</p>
+                    <div className="text-sm text-muted-foreground space-y-2">
+                      <p>Нет сообщений. Напишите первое.</p>
+                      {selectedConversation?.lastMessage && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() =>
+                            queryClient.invalidateQueries({
+                              queryKey: [chatMessagesQueryKey(selectedId!)],
+                            })
+                          }
+                        >
+                          Обновить историю
+                        </Button>
+                      )}
+                    </div>
                   ) : (
                     messages.map((msg) => (
                       <ChatMessageBubble
@@ -729,7 +762,7 @@ function ChatMessageBubble({
               )}
             </div>
             <p className="text-[10px] text-muted-foreground mt-1">
-              {formatMessageTime(msg.createdAt)}
+              {formatChatDateTime(msg.createdAt)}
               {isEdited && <span className="ml-1">· изменено</span>}
             </p>
           </>
