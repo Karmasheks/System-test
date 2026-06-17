@@ -54,7 +54,7 @@ function TaskLinkButton({
       className="inline-flex items-center gap-1 text-left text-blue-600 dark:text-blue-400 hover:underline max-w-[220px]"
       onClick={() => onOpen(taskId)}
     >
-      <span className="truncate">{title}</span>
+      <span className="text-multiline">{title}</span>
       <ExternalLink className="h-3 w-3 shrink-0 opacity-70" />
     </button>
   );
@@ -185,7 +185,7 @@ function ServiceRequestTimeEntriesTable({ report }: { report: EmployeeWorkReport
             <TableCell>{entry.equipmentName}</TableCell>
             <TableCell className="whitespace-nowrap text-xs">{entry.workDate}</TableCell>
             <TableCell className="text-right font-medium">{entry.hours}</TableCell>
-            <TableCell className="max-w-[240px] text-xs text-muted-foreground truncate">
+            <TableCell className="max-w-[240px] text-xs text-muted-foreground text-multiline">
               {entry.comment?.trim() || "—"}
             </TableCell>
           </TableRow>
@@ -234,7 +234,7 @@ function CompletedTasksTable({
             </TableCell>
             <TableCell className="whitespace-nowrap text-xs">{fmtDateTime(task.completedAt)}</TableCell>
             <TableCell className="text-right font-medium">{formatActualHours(task.actualHours)}</TableCell>
-            <TableCell className="max-w-[200px] text-xs text-muted-foreground truncate">
+            <TableCell className="max-w-[200px] text-xs text-muted-foreground text-multiline">
               {task.completionComment || "—"}
             </TableCell>
           </TableRow>

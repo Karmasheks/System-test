@@ -102,7 +102,7 @@ function TaskRow({
               связана
             </Badge>
           )}
-          <span className="font-medium truncate min-w-0">{task.title}</span>
+          <span className="font-medium text-multiline min-w-0">{task.title}</span>
           <span className="text-[10px] text-muted-foreground shrink-0">
             {taskTypeLabel(task.taskType)}
           </span>
@@ -179,14 +179,14 @@ export function LinkedTaskTree({
         <div className="min-w-0">
           <p
             className={cn(
-              "text-[10px] font-semibold uppercase tracking-wide truncate",
+              "text-[10px] font-semibold uppercase tracking-wide text-multiline",
               accent ? "text-violet-900 dark:text-violet-200" : "text-muted-foreground"
             )}
           >
             {groupLabel}
           </p>
           {groupHint && (
-            <p className="text-[10px] text-muted-foreground truncate">{groupHint}</p>
+            <p className="text-[10px] text-muted-foreground text-multiline">{groupHint}</p>
           )}
         </div>
       </div>

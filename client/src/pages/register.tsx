@@ -9,10 +9,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Eye, EyeOff, UserPlus, User, BarChart2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 
 export default function Register() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const { refreshAuth } = useAuth();
   
   const [formData, setFormData] = useState({
     name: "",
@@ -104,6 +106,7 @@ export default function Register() {
 
       // Автоматический вход после регистрации
       localStorage.setItem("token", data.token);
+      await refreshAuth(data.user);
       setLocation("/dashboard");
 
     } catch (error: any) {

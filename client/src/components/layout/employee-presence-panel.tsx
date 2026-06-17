@@ -146,7 +146,7 @@ export function EmployeePresencePanel({
                 <div className="ml-3 flex-1 min-w-0">
                   <p
                     className={cn(
-                      "text-sm font-medium truncate",
+                      "text-sm font-medium text-multiline",
                       isMobile ? "text-gray-900 dark:text-white" : "text-white"
                     )}
                   >

@@ -34,11 +34,22 @@ export function LoginForm() {
     },
   });
 
+  const syncAutofillValues = () => {
+    const emailInput = document.querySelector<HTMLInputElement>("input[name='email']");
+    const passwordInput = document.querySelector<HTMLInputElement>("input[name='password']");
+    if (emailInput?.value) {
+      form.setValue("email", emailInput.value, { shouldValidate: true });
+    }
+    if (passwordInput?.value) {
+      form.setValue("password", passwordInput.value, { shouldValidate: true });
+    }
+  };
+
   const onSubmit = async (data: LoginFormValues) => {
     setIsLoading(true);
     try {
-      await login(data.email, data.password);
-      refreshAuth();
+      const auth = await login(data.email, data.password);
+      await refreshAuth(auth.user);
       setLocation("/dashboard");
     } catch (error: any) {
       console.error("Ошибка входа:", error);
@@ -62,7 +73,14 @@ export function LoginForm() {
       </CardHeader>
       <CardContent>
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              syncAutofillValues();
+              void form.handleSubmit(onSubmit)(event);
+            }}
+            className="space-y-4"
+          >
             <FormField
               control={form.control}
               name="email"

@@ -715,38 +715,31 @@ export default function Equipment() {
                             <td className="p-2 w-12">
                               <EquipmentImageThumbnail url={equipmentItem.imageUrls?.[0]} />
                             </td>
-                            <td className="p-2 min-w-0">
-                              <p className="font-medium line-clamp-2 break-words leading-snug">
+                            <td className="p-2 min-w-0 align-top">
+                              <p className="font-medium text-multiline">
                                 {equipmentItem.name}
                               </p>
                               <p className="text-xs text-muted-foreground font-mono">{equipmentItem.id}</p>
                             </td>
-                            <td className="p-2 text-muted-foreground truncate hidden md:table-cell">
+                            <td className="p-2 text-muted-foreground text-multiline hidden md:table-cell align-top">
                               {equipmentItem.type}
                             </td>
-                            <td className="p-2 text-muted-foreground truncate hidden lg:table-cell">
+                            <td className="p-2 text-muted-foreground text-multiline hidden lg:table-cell align-top">
                               {equipmentSubdivisionLabel(equipmentItem)}
                             </td>
-                            <td className="p-2">
+                            <td className="p-2 align-top">
                               <EquipmentStatusBadge status={equipmentItem.status} compact />
                             </td>
-                            <td className="p-2 hidden sm:table-cell">
+                            <td className="p-2 hidden sm:table-cell align-top">
                               <div className="flex gap-1 flex-wrap">
                                 {equipmentItem.maintenancePeriods?.length ? (
-                                  <>
-                                    {getPeriodBadge(equipmentItem.maintenancePeriods[0])}
-                                    {equipmentItem.maintenancePeriods.length > 1 && (
-                                      <span className="text-xs text-muted-foreground">
-                                        +{equipmentItem.maintenancePeriods.length - 1}
-                                      </span>
-                                    )}
-                                  </>
+                                  equipmentItem.maintenancePeriods.map((period) => getPeriodBadge(period))
                                 ) : (
                                   <span className="text-xs text-muted-foreground">—</span>
                                 )}
                               </div>
                             </td>
-                            <td className="p-2 text-muted-foreground truncate hidden xl:table-cell">
+                            <td className="p-2 text-muted-foreground text-multiline hidden xl:table-cell">
                               {formatEquipmentResponsible(equipmentItem.responsible)}
                             </td>
                             <td className="p-2" onClick={(e) => e.stopPropagation()}>

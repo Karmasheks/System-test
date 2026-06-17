@@ -40,7 +40,7 @@ export function ListSearchInput({
   }
 
   return (
-    <div className={cn("min-w-[200px]", className)}>
+    <div className={cn("w-full min-w-0", className)}>
       <Label>{label}</Label>
       {control}
     </div>

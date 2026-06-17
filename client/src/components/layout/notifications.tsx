@@ -524,7 +524,7 @@ export function NotificationsDropdown() {
                             : 'Обычное'}
                       </Badge>
                     </div>
-                    <p className="text-xs text-muted-foreground mt-1 truncate">{notification.description}</p>
+                    <p className="text-xs text-muted-foreground mt-1 text-multiline">{notification.description}</p>
                     {notification.equipmentId && (
                       <p className="text-xs text-muted-foreground/80 mt-1">ID: {notification.equipmentId}</p>
                     )}

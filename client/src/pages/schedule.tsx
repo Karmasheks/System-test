@@ -925,7 +925,7 @@ export default function Schedule() {
                                 </Badge>
                               </div>
                               {task.title && (
-                                <p className="text-xs text-muted-foreground truncate mb-1">
+                                <p className="text-xs text-muted-foreground text-multiline mb-1">
                                   {task.title}
                                 </p>
                               )}

@@ -203,3 +203,9 @@
 .with-sidebar-pl {
   transition: margin-left 300ms ease, padding-left 300ms ease;
 }
+
+@layer utilities {
+  .text-multiline {
+    @apply min-w-0 break-words leading-snug whitespace-normal;
+  }
+}

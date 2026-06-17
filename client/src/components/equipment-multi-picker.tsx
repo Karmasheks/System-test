@@ -91,7 +91,7 @@ export function EquipmentMultiPicker({
               value.length === 0 && "text-muted-foreground"
             )}
           >
-            <span className="truncate">{triggerLabel}</span>
+            <span className="text-multiline">{triggerLabel}</span>
             <ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
           </Button>
         </PopoverTrigger>
@@ -128,7 +128,7 @@ export function EquipmentMultiPicker({
                     onCheckedChange={(c) => toggle(eq.id, c === true)}
                   />
                   <span className="min-w-0">
-                    <span className="font-medium block truncate">{eq.name}</span>
+                    <span className="font-medium block text-multiline">{eq.name}</span>
                     <span className="text-xs text-muted-foreground">
                       {eq.id}
                       {eq.subdivisionName ? ` · ${eq.subdivisionName}` : ""}
@@ -147,7 +147,7 @@ export function EquipmentMultiPicker({
             const eq = equipmentById.get(id);
             return (
               <Badge key={id} variant="secondary" className="text-xs gap-1 pr-1 max-w-full">
-                <span className="truncate">{eq?.name ?? id}</span>
+                <span className="text-multiline">{eq?.name ?? id}</span>
                 {!disabled && (
                   <button
                     type="button"

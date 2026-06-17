@@ -193,7 +193,7 @@ export default function SuppliersPage() {
                       <TableCell className="text-sm max-w-[160px]">
                         {equipmentLabels(normalizeEquipmentIds(s), allEquipment)}
                       </TableCell>
-                      <TableCell className="text-sm max-w-[140px] truncate" title={s.notes ?? undefined}>
+                      <TableCell className="text-sm max-w-[140px] text-multiline" title={s.notes ?? undefined}>
                         {s.notes?.trim() || "—"}
                       </TableCell>
                       <TableCell>{s.phone ?? "—"}</TableCell>

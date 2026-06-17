@@ -92,12 +92,12 @@ function TaskMetaChips<T extends TaskListItemData>({
         {taskTypeLabel(task.taskType, task.maintenanceType)}
       </Badge>
       {task.equipmentId && (
-        <Badge variant="secondary" className="text-xs max-w-[180px] truncate">
+        <Badge variant="secondary" className="text-xs max-w-[180px] text-multiline">
           {equipmentName(task.equipmentId)}
         </Badge>
       )}
       {task.subdivisionId && (
-        <Badge variant="outline" className="text-xs max-w-[140px] truncate">
+        <Badge variant="outline" className="text-xs max-w-[140px] text-multiline">
           {subdivisionName(task.subdivisionId)}
         </Badge>
       )}
@@ -151,7 +151,7 @@ function TaskListCardShell<T extends TaskListItemData>({
         {chips}
         {tree}
         {task.description && (
-          <p className="text-sm text-muted-foreground line-clamp-2 px-1">{task.description}</p>
+          <p className="text-sm text-muted-foreground text-multiline px-1">{task.description}</p>
         )}
         <TaskMetaFooter task={task} />
       </CardContent>

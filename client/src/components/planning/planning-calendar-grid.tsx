@@ -278,7 +278,7 @@ export function PlanningCalendarGrid({ subdivisionId }: Props) {
                         <div className="text-[10px] text-muted-foreground">{row.orderNumber}</div>
                       )}
                     </td>
-                    <td className="p-2 truncate max-w-[200px]">{row.productName ?? "—"}</td>
+                    <td className="p-2 text-multiline max-w-[200px]">{row.productName ?? "—"}</td>
                     <td className="p-2 font-mono">{row.productSapCode ?? "—"}</td>
                     <td className="p-2 font-mono">{row.pfNumber ?? "—"}</td>
                     <td className="p-2 text-center tabular-nums">

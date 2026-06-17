@@ -1041,7 +1041,7 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
                 </Button>
               )}
               <div className="min-w-0 flex-1">
-                <DialogTitle className="text-base font-bold leading-snug truncate">
+                <DialogTitle className="text-base font-bold leading-snug text-multiline">
                   {editingTask
                     ? `#${editingTask.id} · ${form.watch("title") || editingTask.title}`
                     : "Новая задача"}
@@ -1087,7 +1087,7 @@ export function TaskDialogProvider({ children }: { children: ReactNode }) {
                     <Badge variant="outline" className="text-[10px] h-5">
                       {taskPriorityLabel(form.watch("priority"))}
                     </Badge>
-                    <Badge variant="secondary" className="text-[10px] h-5 max-w-[140px] truncate">
+                    <Badge variant="secondary" className="text-[10px] h-5 max-w-[140px] text-multiline">
                       {taskTypeLabel(form.watch("taskType"), form.watch("taskTypeCustom"))}
                     </Badge>
                     {linkedServiceRequestId && (

@@ -322,11 +322,12 @@ export default function MessagesPage() {
   };
 
   const renderUserPickerList = (mode: "direct" | "group") => (
-    <div className="space-y-3">
+    <div className="space-y-3 min-w-0 w-full">
       <ListSearchInput
         value={userSearch}
         onChange={setUserSearch}
         placeholder="Поиск сотрудника..."
+        className="w-full min-w-0"
       />
       {showUserSubdivisionFilter && (
         <SubdivisionFilterSelect
@@ -335,9 +336,10 @@ export default function MessagesPage() {
           subdivisions={availableSubdivisions}
           showAll={systemAdmin || availableSubdivisions.length > 1}
           label="Подразделение"
+          className="w-full min-w-0"
         />
       )}
-      <div className="max-h-64 overflow-y-auto space-y-1 rounded-md border">
+      <div className="max-h-64 overflow-y-auto overflow-x-hidden space-y-1 rounded-md border w-full min-w-0">
         {usersLoading ? (
           <p className="p-4 text-sm text-muted-foreground">Загрузка сотрудников...</p>
         ) : usersError ? (
@@ -349,15 +351,18 @@ export default function MessagesPage() {
             <button
               key={u.id}
               type="button"
-              className="flex w-full items-center gap-2 rounded-md p-2 hover:bg-muted text-left disabled:opacity-50"
+              className="flex w-full items-start gap-2 rounded-md p-2 hover:bg-muted text-left disabled:opacity-50"
               disabled={createDirect.isPending}
               onClick={() => handleCreateDirect(u.id)}
             >
-              <UserAvatar name={u.name} avatarUrl={u.avatar} className="h-8 w-8 shrink-0" />
-              <div className="min-w-0">
-                <p className="font-medium truncate">{u.name}</p>
-                <p className="text-xs text-muted-foreground truncate">
-                  {u.position ?? "Сотрудник"} · {subdivisionLabel(u, subdivisionName)}
+              <UserAvatar name={u.name} avatarUrl={u.avatar} className="h-8 w-8 shrink-0 mt-0.5" />
+              <div className="min-w-0 flex-1 space-y-0.5">
+                <p className="font-medium leading-snug break-words">{u.name}</p>
+                {u.position && (
+                  <p className="text-xs text-muted-foreground leading-snug break-words">{u.position}</p>
+                )}
+                <p className="text-xs text-muted-foreground leading-snug break-words">
+                  {subdivisionLabel(u, subdivisionName)}
                 </p>
               </div>
             </button>
@@ -366,16 +371,20 @@ export default function MessagesPage() {
           pickableUsers.map((u) => (
             <label
               key={u.id}
-              className="flex items-center gap-3 p-2 rounded-md hover:bg-muted cursor-pointer"
+              className="flex items-start gap-3 p-2 rounded-md hover:bg-muted cursor-pointer"
             >
               <Checkbox
                 checked={groupMemberIds.includes(u.id)}
                 onCheckedChange={() => toggleGroupMember(u.id)}
+                className="mt-1 shrink-0"
               />
-              <UserAvatar name={u.name} avatarUrl={u.avatar} className="h-8 w-8 shrink-0" />
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium truncate">{u.name}</p>
-                <p className="text-xs text-muted-foreground truncate">
+              <UserAvatar name={u.name} avatarUrl={u.avatar} className="h-8 w-8 shrink-0 mt-0.5" />
+              <div className="min-w-0 flex-1 space-y-0.5">
+                <p className="text-sm font-medium leading-snug break-words">{u.name}</p>
+                {u.position && (
+                  <p className="text-xs text-muted-foreground leading-snug break-words">{u.position}</p>
+                )}
+                <p className="text-xs text-muted-foreground leading-snug break-words">
                   {subdivisionLabel(u, subdivisionName)}
                 </p>
               </div>
@@ -447,7 +456,7 @@ export default function MessagesPage() {
               <>
                 <div className="border-b p-3 flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <h2 className="font-semibold truncate">{selectedConversation.displayTitle}</h2>
+                    <h2 className="font-semibold text-multiline">{selectedConversation.displayTitle}</h2>
                     <p className="text-xs text-muted-foreground">
                       {selectedConversation.type === "group"
                         ? `${selectedConversation.members.length} участников`
@@ -524,11 +533,11 @@ export default function MessagesPage() {
         }}
         modal
       >
-        <DialogContent className="max-w-md" blockOutsideClose>
+        <DialogContent className="max-w-md w-[calc(100%-2rem)] overflow-hidden" blockOutsideClose>
           <DialogHeader>
             <DialogTitle>Новый диалог</DialogTitle>
           </DialogHeader>
-          {renderUserPickerList("direct")}
+          <div className="min-w-0 overflow-hidden">{renderUserPickerList("direct")}</div>
         </DialogContent>
       </Dialog>
 
@@ -540,11 +549,11 @@ export default function MessagesPage() {
         }}
         modal
       >
-        <DialogContent className="max-w-md" blockOutsideClose>
+        <DialogContent className="max-w-md w-[calc(100%-2rem)] overflow-hidden" blockOutsideClose>
           <DialogHeader>
             <DialogTitle>Новая группа</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
+          <div className="space-y-4 min-w-0 overflow-hidden">
             <div className="space-y-2">
               <Label>Название</Label>
               <Input
@@ -757,12 +766,12 @@ function ConversationListItem({
       />
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
-          <p className="font-medium truncate text-sm">{conversation.displayTitle}</p>
+          <p className="font-medium text-multiline text-sm">{conversation.displayTitle}</p>
           {conversation.unreadCount > 0 && (
             <Badge className="shrink-0 h-5 min-w-5 px-1 text-[10px]">{conversation.unreadCount}</Badge>
           )}
         </div>
-        <p className="text-xs text-muted-foreground truncate">{preview}</p>
+        <p className="text-xs text-muted-foreground text-multiline">{preview}</p>
       </div>
     </button>
   );

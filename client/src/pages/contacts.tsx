@@ -285,7 +285,7 @@ export default function ContactsPage() {
                       <TableCell className="text-sm max-w-[160px]">
                         {equipmentLabels(normalizeEquipmentIds(c), allEquipment)}
                       </TableCell>
-                      <TableCell className="text-sm max-w-[140px] truncate" title={c.notes ?? undefined}>
+                      <TableCell className="text-sm max-w-[140px] text-multiline" title={c.notes ?? undefined}>
                         {c.notes?.trim() || "—"}
                       </TableCell>
                       <TableCell>{maskSensitiveValue(showPhones, c.phone)}</TableCell>

@@ -197,7 +197,7 @@ export function UserStatusSelector({
               />
             </div>
             <div className="flex-1 text-left min-w-0">
-              <div className="text-sm font-medium text-white truncate">{userName}</div>
+              <div className="text-sm font-medium text-white text-multiline">{userName}</div>
               <div className="mt-0.5">
                 {getPresenceBadges({
                   status: currentStatus,
@@ -207,7 +207,7 @@ export function UserStatusSelector({
                 })}
               </div>
               {expiryHint && (
-                <p className="text-[10px] text-gray-400 mt-1 truncate" title={expiryHint}>
+                <p className="text-[10px] text-gray-400 mt-1 text-multiline" title={expiryHint}>
                   {expiryHint}
                 </p>
               )}

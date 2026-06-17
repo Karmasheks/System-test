@@ -56,7 +56,7 @@ function ModuleLevelRow({
   return (
     <div className="flex items-center justify-between gap-3 rounded-md border p-2.5 text-sm bg-card">
       <div className="min-w-0">
-        <p className="font-medium truncate">{label}</p>
+        <p className="font-medium text-multiline">{label}</p>
         <p className="text-xs text-muted-foreground">{section}</p>
       </div>
       <Select value={level} onValueChange={(v) => onChange(v as AccessLevel)} disabled={disabled}>

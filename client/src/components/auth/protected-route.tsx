@@ -12,13 +12,15 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
   const [, setLocation] = useLocation();
   const token = getToken();
 
+  const sessionPending = token && !user && !authError;
+
   useEffect(() => {
-    if (!isLoading && !authError && (!token || !user)) {
+    if (!isLoading && !sessionPending && !authError && (!token || !user)) {
       setLocation("/login");
     }
-  }, [token, user, isLoading, authError, setLocation]);
+  }, [token, user, isLoading, sessionPending, authError, setLocation]);
 
-  if (isLoading) {
+  if (isLoading || sessionPending) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
         <div className="text-center">

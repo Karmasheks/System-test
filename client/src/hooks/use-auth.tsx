@@ -3,6 +3,7 @@ import { getToken, logout } from "@/lib/auth";
 import { useQuery } from "@tanstack/react-query";
 import { User } from "@shared/schema";
 import { isTransientServerError, isUnauthorizedError } from "@/lib/api-errors";
+import { queryClient } from "@/lib/queryClient";
 
 interface AuthContextType {
   user: User | null;
@@ -10,7 +11,7 @@ interface AuthContextType {
   authError: string | null;
   logout: () => Promise<void>;
   isAuthenticated: () => boolean;
-  refreshAuth: () => void;
+  refreshAuth: (knownUser?: User) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -19,7 +20,7 @@ const AuthContext = createContext<AuthContextType>({
   authError: null,
   logout: async () => {},
   isAuthenticated: () => false,
-  refreshAuth: () => {},
+  refreshAuth: async () => {},
 });
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -97,7 +98,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, [token, refetch]);
 
-  const isLoading = isInitializing || (!!token && (isLoadingUser || isFetching) && !user);
+  const storedToken = getToken();
+  const sessionToken = token ?? storedToken;
+  const isLoading =
+    isInitializing ||
+    Boolean(sessionToken && !user && !authError);
 
   const handleLogout = async () => {
     await logout();
@@ -108,13 +113,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return !!token && !!user;
   };
 
-  const refreshAuth = () => {
+  const refreshAuth = async (knownUser?: User): Promise<void> => {
     const newToken = getToken();
     setToken(newToken);
     setAuthError(null);
-    if (newToken) {
-      setIsInitializing(true);
-      void refetch().finally(() => setIsInitializing(false));
+
+    if (!newToken) {
+      return;
+    }
+
+    if (knownUser) {
+      queryClient.setQueryData(["/api/auth/me"], knownUser);
+      return;
+    }
+
+    setIsInitializing(true);
+    try {
+      await refetch();
+    } finally {
+      setIsInitializing(false);
     }
   };
 

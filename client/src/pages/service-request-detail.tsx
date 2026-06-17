@@ -262,7 +262,7 @@ export default function ServiceRequestDetailPage() {
               <Badge variant="secondary" className="text-[10px] h-5">
                 {PRIORITY_LABELS[request.priority] ?? request.priority}
               </Badge>
-              <span className="text-xs text-muted-foreground truncate min-w-0 flex-1">
+              <span className="text-xs text-muted-foreground text-multiline min-w-0 flex-1">
                 {request.equipmentName}
               </span>
               {workProgress && workProgress.subtasksTotal > 0 && (

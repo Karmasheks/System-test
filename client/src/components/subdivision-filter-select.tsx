@@ -46,7 +46,7 @@ export function SubdivisionFilterSelect({
   }
 
   return (
-    <div className={className}>
+    <div className={cn("w-full min-w-0", className)}>
       <Label>{label}</Label>
       {select}
     </div>

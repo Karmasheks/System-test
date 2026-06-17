@@ -66,7 +66,7 @@ export function Sidebar() {
             </div>
             {!isCollapsed && (
               <div className="ml-3 min-w-0">
-                <h1 className="text-lg font-semibold text-white truncate">StarLine</h1>
+                <h1 className="text-lg font-semibold text-white text-multiline">StarLine</h1>
               </div>
             )}
           </div>

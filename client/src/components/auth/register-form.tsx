@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { register } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 import { Link, useLocation } from "wouter";
 import { Eye, EyeOff, UserPlus } from "lucide-react";
 
@@ -27,6 +28,7 @@ export function RegisterForm() {
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const { toast } = useToast();
+  const { refreshAuth } = useAuth();
   const [_, setLocation] = useLocation();
 
   const form = useForm<RegisterFormValues>({
@@ -42,11 +44,12 @@ export function RegisterForm() {
   const onSubmit = async (data: RegisterFormValues) => {
     setIsLoading(true);
     try {
-      await register(data.name, data.email, data.password, data.confirmPassword);
+      const auth = await register(data.name, data.email, data.password, data.confirmPassword);
       toast({
         title: "Регистрация успешна",
         description: "Ваш аккаунт был создан",
       });
+      await refreshAuth(auth.user);
       setLocation("/dashboard");
     } catch (error: any) {
       console.error("Ошибка регистрации:", error);

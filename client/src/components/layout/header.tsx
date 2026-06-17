@@ -143,8 +143,8 @@ export function Header() {
                       className="h-10 w-10"
                     />
                     <div className="flex flex-col space-y-1 leading-none min-w-0">
-                      <p className="font-medium truncate">{user?.name || "Пользователь"}</p>
-                      <p className="truncate text-sm text-muted-foreground">
+                      <p className="font-medium text-multiline">{user?.name || "Пользователь"}</p>
+                      <p className="text-multiline text-sm text-muted-foreground">
                         {user?.email || "admin@example.com"}
                       </p>
                     </div>

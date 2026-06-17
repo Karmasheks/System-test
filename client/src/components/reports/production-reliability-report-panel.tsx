@@ -342,7 +342,7 @@ export function ProductionReliabilityReportPanel() {
                         <TableCell>
                           {f.source === "service_request" ? "Заявка" : "Простой"}
                         </TableCell>
-                        <TableCell className="max-w-[280px] truncate">{f.title}</TableCell>
+                        <TableCell className="max-w-[280px] text-multiline">{f.title}</TableCell>
                         <TableCell>{f.repairMinutes}</TableCell>
                         <TableCell>
                           {f.resolvedAt ? formatRuDateTime(f.resolvedAt) : "—"}

@@ -237,7 +237,7 @@ export function SubdivisionsPanel() {
 
                   <>
 
-                    <span className="flex-1 truncate">{s.name}</span>
+                    <span className="flex-1 text-multiline">{s.name}</span>
 
                     <Button
 

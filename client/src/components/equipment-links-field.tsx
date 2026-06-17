@@ -169,7 +169,7 @@ export function EquipmentLinksField({
               >
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <p className="font-medium truncate">
+                    <p className="font-medium text-multiline">
                       {item?.name ?? link.linkedEquipmentId}
                     </p>
                     {item?.status && <EquipmentStatusBadge status={item.status} compact />}

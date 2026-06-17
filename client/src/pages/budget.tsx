@@ -857,7 +857,7 @@ export default function BudgetPage() {
                       <TableCell>
                         <Badge variant="outline">{budgetCategoryLabel(e.category)}</Badge>
                       </TableCell>
-                      <TableCell className="max-w-[200px] truncate">{bindingLabel(e)}</TableCell>
+                      <TableCell className="max-w-[200px] text-multiline">{bindingLabel(e)}</TableCell>
                       <TableCell>{supplierName(e.supplierId) ?? "—"}</TableCell>
                       <TableCell>{maskSensitiveValue(showAmounts, e.amount.toLocaleString("ru") + " ₽")}</TableCell>
                       <TableCell className="text-right" onClick={(ev) => ev.stopPropagation()}>

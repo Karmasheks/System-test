@@ -1020,7 +1020,7 @@ export default function DailyInspection() {
                   <Card key={eq.id} className="hover:shadow-md transition-shadow">
                     <CardHeader className="pb-1 px-3 pt-2">
                       <div className="flex flex-col space-y-1">
-                        <CardTitle className="text-xs font-medium truncate">{eq.name}</CardTitle>
+                        <CardTitle className="text-xs font-medium text-multiline">{eq.name}</CardTitle>
                         <Badge variant="outline" className="text-xs self-start">{eq.type}</Badge>
                       </div>
                     </CardHeader>

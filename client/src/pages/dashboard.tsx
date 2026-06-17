@@ -136,10 +136,10 @@ function DashKpi({
     >
       <div className="flex items-center gap-1.5 mb-1 min-w-0">
         <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        <span className="text-[11px] font-medium text-muted-foreground leading-snug line-clamp-2">{label}</span>
+        <span className="text-[11px] font-medium text-muted-foreground leading-snug text-multiline">{label}</span>
       </div>
       <p className={cn("text-lg font-bold tabular-nums leading-tight", valueClassName)}>{value}</p>
-      {hint && <p className="text-[10px] text-muted-foreground mt-0.5 leading-snug line-clamp-2">{hint}</p>}
+      {hint && <p className="text-[10px] text-muted-foreground mt-0.5 leading-snug text-multiline">{hint}</p>}
     </Wrapper>
   );
 }
@@ -166,8 +166,8 @@ function ScheduledWorkRow({
     >
       <div className="flex justify-between gap-2">
         <div className="min-w-0">
-          <p className="font-medium truncate">{task.title}</p>
-          <p className="text-xs text-muted-foreground truncate">
+          <p className="font-medium text-multiline">{task.title}</p>
+          <p className="text-xs text-muted-foreground text-multiline">
             {equipmentLabel} · {taskTypeLabel(task.taskType, task.maintenanceType)}
           </p>
         </div>
@@ -780,7 +780,7 @@ export default function Dashboard() {
                   )}
                 >
                   <div className="min-w-0">
-                    <p className="font-medium truncate">{alert.part?.name}</p>
+                    <p className="font-medium text-multiline">{alert.part?.name}</p>
                     <p className="text-xs text-muted-foreground">
                       {warehouseAlertLabel(alert.alertType)} · {alert.part?.quantity ?? 0} / мин {alert.part?.minStock ?? 0}
                     </p>
@@ -958,7 +958,7 @@ export default function Dashboard() {
                               .slice(0, 6)
                               .map(([category, count]) => (
                                 <div key={category} className="flex justify-between text-xs gap-2">
-                                  <span className="truncate">{category}</span>
+                                  <span className="text-multiline">{category}</span>
                                   <Badge variant="outline" className="shrink-0 h-5 text-[10px]">
                                     {count}
                                   </Badge>
@@ -975,7 +975,7 @@ export default function Dashboard() {
                           <div className="space-y-1">
                             {Object.entries(maintenanceTypesThisMonth).map(([type, count]) => (
                               <div key={type} className="flex justify-between text-xs gap-2">
-                                <span className="truncate">{type}</span>
+                                <span className="text-multiline">{type}</span>
                                 <Badge variant="outline" className="shrink-0 h-5 text-[10px]">
                                   {count}
                                 </Badge>
@@ -1014,7 +1014,7 @@ export default function Dashboard() {
                               className={cn("h-3.5 w-3.5 shrink-0 mt-0.5", activity.color)}
                             />
                             <div className="min-w-0">
-                              <p className="text-xs font-medium leading-snug line-clamp-2">
+                              <p className="text-xs font-medium leading-snug text-multiline">
                                 {activity.message}
                               </p>
                               <p className="text-[10px] text-muted-foreground">{activity.time}</p>

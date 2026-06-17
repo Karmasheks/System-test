@@ -171,7 +171,7 @@ function EquipmentImagePreview({ url, index }: { url: string; index: number }) {
       {failed ? (
         <div className="w-full h-full flex flex-col items-center justify-center gap-2 p-2 text-center">
           <ImageIcon className="h-8 w-8 text-gray-400" />
-          <span className="text-xs text-blue-600 break-all line-clamp-3">{url}</span>
+          <span className="text-xs text-blue-600 break-all text-multiline">{url}</span>
         </div>
       ) : (
         <img

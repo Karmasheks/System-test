@@ -48,7 +48,7 @@ export function SubdivisionMultiPicker({
                 disabled={disabled}
                 onCheckedChange={(c) => toggle(s.id, c === true)}
               />
-              <span className="truncate">{s.name}</span>
+              <span className="text-multiline">{s.name}</span>
             </label>
           ))
         )}

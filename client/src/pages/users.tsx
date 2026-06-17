@@ -152,7 +152,14 @@ export default function Users() {
       .filter(Boolean)
       .join(" · ");
 
-    return { primary, workCount: workIds.length, managed, full };
+    return {
+      primary,
+      workNames: workNames.length > 0 ? workNames : [primary],
+      workCount: workIds.length,
+      managed,
+      full,
+      viewAllSubdivisions: item.viewAllSubdivisions ?? false,
+    };
   };
 
   const userMatchesSubdivisionFilter = (
@@ -857,8 +864,8 @@ export default function Users() {
                             }
                           }}
                         >
-                          <td className="px-2 py-2">
-                            <div className="flex items-center gap-2 min-w-0">
+                          <td className="px-2 py-2 align-top">
+                            <div className="flex items-start gap-2 min-w-0">
                               <UserAvatar
                                 name={item.name}
                                 avatarUrl={item.avatar}
@@ -866,22 +873,22 @@ export default function Users() {
                                 fallbackClassName="text-[10px]"
                               />
                               <div className="min-w-0">
-                                <div className="font-medium text-gray-900 dark:text-white truncate leading-tight" title={item.name}>
+                                <div className="font-medium text-gray-900 dark:text-white text-multiline leading-tight" title={item.name}>
                                   {item.name}
                                 </div>
-                                <div className="text-[10px] text-gray-500 dark:text-gray-400 truncate leading-tight" title={item.position || "Сотрудник"}>
+                                <div className="text-[10px] text-gray-500 dark:text-gray-400 text-multiline leading-tight" title={item.position || "Сотрудник"}>
                                   {item.position || "Сотрудник"}
                                 </div>
                               </div>
                             </div>
                           </td>
-                          <td className="px-2 py-2 text-gray-900 dark:text-white">
-                            <span className="block truncate leading-tight" title={item.email}>
+                          <td className="px-2 py-2 text-gray-900 dark:text-white align-top">
+                            <span className="block text-multiline leading-tight">
                               {maskSensitiveValue(showUserEmails, item.email)}
                             </span>
                           </td>
-                          <td className="px-2 py-2">
-                            <Badge className={`${getRoleBadgeColor(item.role)} text-[10px] px-1.5 py-0 font-normal leading-4 max-w-full truncate inline-block`} title={getRoleDisplayName(item.role, item.isSuperAdmin)}>
+                          <td className="px-2 py-2 align-top">
+                            <Badge className={`${getRoleBadgeColor(item.role)} text-[10px] px-1.5 py-0 font-normal leading-4 max-w-full text-multiline inline-block whitespace-normal`}>
                               {getRoleDisplayName(item.role, item.isSuperAdmin)}
                             </Badge>
                             {item.isSuperAdmin && (
@@ -902,39 +909,22 @@ export default function Users() {
                               })()}
                             </div>
                           </td>
-                          <td className="px-2 py-2 text-gray-900 dark:text-white">
-                            <div className="min-w-0" title={subdivision.full}>
-                              <p className="truncate leading-tight font-medium">
-                                {subdivision.primary}
-                              </p>
-                              {(item.viewAllSubdivisions ||
-                                subdivision.workCount > 1 ||
-                                subdivision.managed.length > 0) && (
-                                <div className="flex flex-wrap gap-0.5 mt-0.5">
-                                  {subdivision.workCount > 1 && (
-                                    <Badge
-                                      variant="outline"
-                                      className="text-[9px] px-1 py-0 h-3.5 font-normal"
-                                      title={subdivision.full.split(" · ")[0]}
-                                    >
-                                      +{subdivision.workCount - 1}
-                                    </Badge>
-                                  )}
-                                  {item.viewAllSubdivisions && (
-                                    <Badge variant="outline" className="text-[9px] px-1 py-0 h-3.5 font-normal">
-                                      все
-                                    </Badge>
-                                  )}
-                                  {subdivision.managed.length > 0 && (
-                                    <Badge
-                                      variant="outline"
-                                      className="text-[9px] px-1 py-0 h-3.5 font-normal max-w-full truncate"
-                                      title={formatManagedSubdivisions(subdivision.managed)}
-                                    >
-                                      адм. {subdivision.managed.length}
-                                    </Badge>
-                                  )}
-                                </div>
+                          <td className="px-2 py-2 text-gray-900 dark:text-white align-top">
+                            <div className="min-w-0 space-y-0.5">
+                              {subdivision.workNames.map((name, idx) => (
+                                <p key={`${name}-${idx}`} className="text-xs text-multiline font-medium">
+                                  {name}
+                                </p>
+                              ))}
+                              {subdivision.viewAllSubdivisions && (
+                                <p className="text-[10px] text-muted-foreground text-multiline">
+                                  Видит все подразделения
+                                </p>
+                              )}
+                              {subdivision.managed.length > 0 && (
+                                <p className="text-[10px] text-muted-foreground text-multiline">
+                                  Админ: {formatManagedSubdivisions(subdivision.managed)}
+                                </p>
                               )}
                             </div>
                           </td>

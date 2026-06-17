@@ -183,7 +183,7 @@ export function BudgetReportPanel() {
                 ) : (
                   byEquipmentPag.pageItems.map((row) => (
                     <div key={row.equipmentId ?? row.equipmentName} className="flex justify-between text-sm gap-2">
-                      <span className="truncate">{row.equipmentName}</span>
+                      <span className="text-multiline">{row.equipmentName}</span>
                       <span className="font-medium shrink-0">{row.total.toLocaleString("ru-RU")} ₽</span>
                     </div>
                   ))

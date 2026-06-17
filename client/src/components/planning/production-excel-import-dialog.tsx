@@ -246,7 +246,7 @@ export function ProductionExcelImportDialog({ open, onOpenChange, subdivisionId 
                       </TableCell>
                       <TableCell>{row.resolved?.quantity ?? row.raw.quantity ?? "—"}</TableCell>
                       <TableCell>{row.resolved?.subdivisionName ?? "—"}</TableCell>
-                      <TableCell className="text-xs text-destructive max-w-[200px] truncate">
+                      <TableCell className="text-xs text-destructive max-w-[200px] text-multiline">
                         {row.errors.map((e) => e.message).join("; ")}
                       </TableCell>
                     </TableRow>

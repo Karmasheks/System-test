@@ -81,7 +81,7 @@ export function PlanningConflictsTab({ subdivisionId }: Props) {
                     {CONFLICT_SEVERITY_LABELS[c.severity] ?? c.severity}
                   </Badge>
                 </TableCell>
-                <TableCell className="max-w-md truncate" title={c.message}>
+                <TableCell className="max-w-md text-multiline" title={c.message}>
                   {c.message}
                 </TableCell>
                 <TableCell>{c.orderId ?? "—"}</TableCell>

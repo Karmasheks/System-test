@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "./db";
 import {
   chatConversations,
@@ -234,7 +234,7 @@ export async function listConversationsForUser(userId: number): Promise<Conversa
       .where(
         and(
           eq(chatMessages.conversationId, row.conversationId),
-          sql`${chatMessages.createdAt} > ${lastRead}`
+          gt(chatMessages.createdAt, lastRead)
         )
       );
     unreadMap.set(row.conversationId, unreadRows[0]?.count ?? 0);
