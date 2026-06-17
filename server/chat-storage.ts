@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { db } from "./db";
 import {
   chatConversations,
@@ -212,10 +212,16 @@ export async function listConversationsForUser(userId: number): Promise<Conversa
         eq(chatConversationMembers.conversationId, chatMessages.conversationId),
         eq(chatConversationMembers.userId, userId),
         isNull(chatConversationMembers.leftAt),
+        ne(chatMessages.senderId, userId),
         sql`(${chatConversationMembers.lastReadAt} IS NULL OR ${chatMessages.createdAt} > ${chatConversationMembers.lastReadAt})`
       )
     )
-    .where(inArray(chatMessages.conversationId, conversationIds))
+    .where(
+      and(
+        inArray(chatMessages.conversationId, conversationIds),
+        isNull(chatMessages.deletedAt)
+      )
+    )
     .groupBy(chatMessages.conversationId);
 
   const unreadMap = new Map(unreadRows.map((row) => [row.conversationId, row.count]));
@@ -597,9 +603,18 @@ export async function leaveConversation(conversationId: number, userId: number):
 }
 
 export async function markConversationRead(conversationId: number, userId: number): Promise<void> {
+  const [latest] = await db
+    .select({ createdAt: chatMessages.createdAt })
+    .from(chatMessages)
+    .where(and(eq(chatMessages.conversationId, conversationId), isNull(chatMessages.deletedAt)))
+    .orderBy(desc(chatMessages.createdAt))
+    .limit(1);
+
+  const readAt = latest?.createdAt ?? new Date();
+
   await db
     .update(chatConversationMembers)
-    .set({ lastReadAt: new Date() })
+    .set({ lastReadAt: readAt })
     .where(
       and(
         eq(chatConversationMembers.conversationId, conversationId),

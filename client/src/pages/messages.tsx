@@ -28,6 +28,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { UserAvatar } from "@/components/user-avatar";
+import { ChatUnreadBadge } from "@/components/chat-unread-badge";
 import { MessageSquare, Pencil, Plus, Send, Trash2, Users } from "lucide-react";
 import {
   useChatConversations,
@@ -199,11 +200,10 @@ export default function MessagesPage() {
   }, [conversations, selectedId, conversationFromUrl]);
 
   useEffect(() => {
-    if (selectedId != null) {
-      markRead.mutate(selectedId);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- mark read when switching conversation
-  }, [selectedId]);
+    if (selectedId == null || messagesLoading) return;
+    markRead.mutate(selectedId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mark read when opening dialog or new messages arrive
+  }, [selectedId, messagesLoading, messagesData?.messages]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -454,6 +454,7 @@ export default function MessagesPage() {
                     active={conversation.id === selectedId}
                     onClick={() => {
                       setSelectedId(conversation.id);
+                      markRead.mutate(conversation.id);
                       void queryClient.invalidateQueries({
                         queryKey: [chatMessagesQueryKey(conversation.id)],
                       });
@@ -800,9 +801,7 @@ function ConversationListItem({
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
           <p className="font-medium text-multiline text-sm">{conversation.displayTitle}</p>
-          {conversation.unreadCount > 0 && (
-            <Badge className="shrink-0 h-5 min-w-5 px-1 text-[10px]">{conversation.unreadCount}</Badge>
-          )}
+          <ChatUnreadBadge count={conversation.unreadCount} />
         </div>
         <p className="text-xs text-muted-foreground text-multiline">{preview}</p>
       </div>

@@ -47,6 +47,16 @@ export function chatMessagesQueryKey(conversationId: number): string {
   return `/api/chat/conversations/${conversationId}/messages`;
 }
 
+/** Диалоги, для которых клиент уже отправил mark-read — не показывать stale unread с сервера. */
+const pendingReadConversations = new Set<number>();
+
+function applyPendingRead(conversations: ChatConversation[]): ChatConversation[] {
+  if (pendingReadConversations.size === 0) return conversations;
+  return conversations.map((c) =>
+    pendingReadConversations.has(c.id) ? { ...c, unreadCount: 0 } : c
+  );
+}
+
 function normalizeMessagesResponse(data: unknown): ChatMessagesPage {
   if (Array.isArray(data)) {
     return { messages: [], total: 0 };
@@ -79,6 +89,14 @@ export function useChatConversations(enabled = true) {
   return useQuery<ChatConversation[]>({
     queryKey: ["/api/chat/conversations"],
     enabled,
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/chat/conversations");
+      const data = (await res.json()) as ChatConversation[];
+      for (const c of data) {
+        if (c.unreadCount === 0) pendingReadConversations.delete(c.id);
+      }
+      return applyPendingRead(data);
+    },
     refetchInterval: 30000,
     staleTime: 5000,
   });
@@ -134,6 +152,7 @@ export function useChatMutations() {
       return { ...current, messages };
     });
     patchConversationLastMessage(conversationId, message);
+    patchConversationUnread(conversationId, 0);
   };
 
   const invalidate = (conversationId?: number) => {
@@ -186,8 +205,26 @@ export function useChatMutations() {
   const markRead = useMutation({
     mutationFn: async (conversationId: number) => {
       await apiRequest("POST", `/api/chat/conversations/${conversationId}/read`, {});
+      return conversationId;
     },
-    onSuccess: (_, conversationId) => patchConversationUnread(conversationId, 0),
+    onMutate: async (conversationId) => {
+      pendingReadConversations.add(conversationId);
+      await queryClient.cancelQueries({ queryKey: conversationsKey });
+      const previous = queryClient.getQueryData<ChatConversation[]>(conversationsKey);
+      patchConversationUnread(conversationId, 0);
+      return { previous };
+    },
+    onSuccess: (conversationId) => {
+      patchConversationUnread(conversationId, 0);
+    },
+    onError: (_err, conversationId, context) => {
+      pendingReadConversations.delete(conversationId);
+      if (context?.previous) {
+        queryClient.setQueryData(conversationsKey, context.previous);
+      } else {
+        void queryClient.invalidateQueries({ queryKey: conversationsKey });
+      }
+    },
   });
 
   const leaveConversation = useMutation({

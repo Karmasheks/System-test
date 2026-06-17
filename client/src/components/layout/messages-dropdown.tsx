@@ -13,6 +13,7 @@ import {
 import { useAuth } from "@/hooks/use-auth";
 import { useChatConversations } from "@/hooks/use-chat";
 import { UserAvatar } from "@/components/user-avatar";
+import { ChatUnreadBadge } from "@/components/chat-unread-badge";
 
 import { formatChatDateTime } from "@/lib/chat-datetime";
 
@@ -36,12 +37,10 @@ export function MessagesDropdown() {
         >
           <MessageSquare className="h-5 w-5" />
           {unreadTotal > 0 && (
-            <Badge
-              variant="destructive"
-              className="absolute -top-1 -right-1 h-5 min-w-5 px-1 flex items-center justify-center text-xs"
-            >
-              {unreadTotal > 99 ? "99+" : unreadTotal}
-            </Badge>
+            <ChatUnreadBadge
+              count={unreadTotal}
+              className="absolute -top-1 -right-1 bg-destructive text-destructive-foreground"
+            />
           )}
         </Button>
       </DropdownMenuTrigger>
@@ -84,11 +83,7 @@ export function MessagesDropdown() {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-2">
                         <p className="text-sm font-medium text-multiline">{conversation.displayTitle}</p>
-                        {conversation.unreadCount > 0 && (
-                          <Badge variant="destructive" className="shrink-0 h-5 min-w-5 px-1 text-xs">
-                            {conversation.unreadCount > 99 ? "99+" : conversation.unreadCount}
-                          </Badge>
-                        )}
+                        <ChatUnreadBadge count={conversation.unreadCount} />
                       </div>
                       <p className="text-xs text-muted-foreground text-multiline mt-0.5">{preview}</p>
                       {conversation.lastMessage && (
