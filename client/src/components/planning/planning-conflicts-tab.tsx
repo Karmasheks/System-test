@@ -12,6 +12,8 @@ import { useToast } from "@/hooks/use-toast";
 import { useAccessControl } from "@/hooks/use-access-control";
 import { useProductionConflicts, useProductionMutations } from "@/hooks/use-production-planning";
 import { CONFLICT_SEVERITY_LABELS } from "@/lib/production-planning-constants";
+import { ListPaginationControls } from "@/components/list-pagination-controls";
+import { useListPagination } from "@/hooks/use-list-pagination";
 
 type Props = {
   subdivisionId: number;
@@ -25,6 +27,16 @@ export function PlanningConflictsTab({ subdivisionId }: Props) {
   const { data: conflicts = [], isLoading } = useProductionConflicts(subdivisionId);
   const { resolveConflict } = useProductionMutations();
 
+  const {
+    page,
+    setPage,
+    pageItems: conflictPageItems,
+    totalPages,
+    total: conflictsTotal,
+    from,
+    to,
+  } = useListPagination(conflicts, 25, String(subdivisionId));
+
   const handleResolve = async (id: number) => {
     try {
       await resolveConflict.mutateAsync(id);
@@ -35,32 +47,33 @@ export function PlanningConflictsTab({ subdivisionId }: Props) {
   };
 
   return (
-    <div className="rounded-md border">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Тип</TableHead>
-            <TableHead>Важность</TableHead>
-            <TableHead>Сообщение</TableHead>
-            <TableHead>Заказ</TableHead>
-            <TableHead className="w-[100px]" />
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {isLoading ? (
+    <div>
+      <div className="rounded-md border">
+        <Table>
+          <TableHeader>
             <TableRow>
-              <TableCell colSpan={5} className="text-center text-muted-foreground">
-                Загрузка…
-              </TableCell>
+              <TableHead>Тип</TableHead>
+              <TableHead>Важность</TableHead>
+              <TableHead>Сообщение</TableHead>
+              <TableHead>Заказ</TableHead>
+              <TableHead className="w-[100px]" />
             </TableRow>
-          ) : conflicts.length === 0 ? (
-            <TableRow>
-              <TableCell colSpan={5} className="text-center text-muted-foreground">
-                Нет активных конфликтов
-              </TableCell>
-            </TableRow>
-          ) : (
-            conflicts.map((c) => (
+          </TableHeader>
+          <TableBody>
+            {isLoading ? (
+              <TableRow>
+                <TableCell colSpan={5} className="text-center text-muted-foreground">
+                  Загрузка…
+                </TableCell>
+              </TableRow>
+            ) : conflictsTotal === 0 ? (
+              <TableRow>
+                <TableCell colSpan={5} className="text-center text-muted-foreground">
+                  Нет активных конфликтов
+                </TableCell>
+              </TableRow>
+            ) : (
+              conflictPageItems.map((c) => (
               <TableRow key={c.id}>
                 <TableCell>{c.conflictType}</TableCell>
                 <TableCell>
@@ -84,6 +97,15 @@ export function PlanningConflictsTab({ subdivisionId }: Props) {
           )}
         </TableBody>
       </Table>
+      </div>
+      <ListPaginationControls
+        page={page}
+        totalPages={totalPages}
+        total={conflictsTotal}
+        from={from}
+        to={to}
+        onPageChange={setPage}
+      />
     </div>
   );
 }

@@ -7,7 +7,7 @@ import { useAccessControl } from "@/hooks/use-access-control";
 import { useSubdivisionFilter } from "@/hooks/use-subdivision-filter";
 import { SubdivisionFilterSelect } from "@/components/subdivision-filter-select";
 import { SubdivisionsPanel } from "@/components/admin/subdivisions-panel";
-import { equipmentIdsInScope } from "@/lib/subdivision-filter";
+import { equipmentIdsInScope, filterBySubdivisionScope, filterRemarksBySubdivisionScope } from "@/lib/subdivision-filter";
 import { mobileTabsTriggerClass } from "@/lib/mobile-tabs";
 import { cn } from "@/lib/utils";
 import type { Task } from "@/types/api";
@@ -58,6 +58,8 @@ import { EmployeeWorkReportPanel } from "@/components/reports/employee-work-repo
 import { BudgetReportPanel } from "@/components/reports/budget-report-panel";
 import { WarehouseReportPanel } from "@/components/reports/warehouse-report-panel";
 import { ProductionReliabilityReportPanel } from "@/components/reports/production-reliability-report-panel";
+import { ListPaginationControls } from "@/components/list-pagination-controls";
+import { useListPagination } from "@/hooks/use-list-pagination";
 
 export default function Reports() {
   const { user, isLoading, isAuthenticated } = useAuth();
@@ -104,20 +106,15 @@ export default function Reports() {
     [equipmentWithSubdivision, filterSubdivisionId]
   );
 
-  const scopedTasks = useMemo(() => {
-    if (filterSubdivisionId == null) return tasks;
-    return tasks.filter((t) => t.subdivisionId === filterSubdivisionId);
-  }, [tasks, filterSubdivisionId]);
-
-  const scopedRemarks = useMemo(
-    () =>
-      remarks.filter(
-        (r) =>
-          scopedEquipmentIds.has(r.equipmentId) ||
-          (r as { subdivisionId?: number }).subdivisionId === filterSubdivisionId
-      ),
-    [remarks, scopedEquipmentIds, filterSubdivisionId]
+  const scopedTasks = useMemo(
+    () => filterBySubdivisionScope(tasks, filterSubdivisionId, scopedEquipmentIds),
+    [tasks, filterSubdivisionId, scopedEquipmentIds]
   );
+
+  const scopedRemarks = useMemo(() => {
+    if (filterSubdivisionId == null) return remarks;
+    return filterRemarksBySubdivisionScope(remarks, filterSubdivisionId, scopedEquipmentIds);
+  }, [remarks, scopedEquipmentIds, filterSubdivisionId]);
 
   const scopedMaintenanceTasks = useMemo(
     () =>
@@ -195,6 +192,11 @@ export default function Reports() {
     );
     return { total: filtered.length, statusCounts, typeDistribution, filtered };
   }, [scopedEquipment, equipmentFilter, statusFilter]);
+
+  const equipmentReportKey = `${equipmentFilter}|${statusFilter}|${filterSubdivisionId}`;
+  const equipmentPag = useListPagination(reportData.filtered, 25, equipmentReportKey);
+  const tasksPag = useListPagination(scopedTasks, 25, String(filterSubdivisionId));
+  const remarksPag = useListPagination(scopedRemarks, 25, String(filterSubdivisionId));
 
   const inspectionData = useMemo(() => {
     const today = new Date();
@@ -693,7 +695,7 @@ export default function Reports() {
                     <CardHeader>
                       <CardTitle>Список оборудования</CardTitle>
                       <CardDescription>
-                        Показано {reportData.filtered.length} из {equipmentData.length} единиц оборудования
+                        Показано {reportData.filtered.length} из {scopedEquipment.length} единиц оборудования
                       </CardDescription>
                     </CardHeader>
                     <CardContent>
@@ -710,7 +712,7 @@ export default function Reports() {
                             </tr>
                           </thead>
                           <tbody>
-                            {reportData.filtered.map((item) => (
+                            {equipmentPag.pageItems.map((item) => (
                               <tr key={item.id} className="border-b hover:bg-gray-50 dark:hover:bg-gray-800">
                                 <td className="p-2 font-mono text-sm">{item.id}</td>
                                 <td className="p-2 font-medium">{item.name}</td>
@@ -725,6 +727,14 @@ export default function Reports() {
                           </tbody>
                         </table>
                       </div>
+                      <ListPaginationControls
+                        page={equipmentPag.page}
+                        totalPages={equipmentPag.totalPages}
+                        total={equipmentPag.total}
+                        from={equipmentPag.from}
+                        to={equipmentPag.to}
+                        onPageChange={equipmentPag.setPage}
+                      />
                     </CardContent>
                   </Card>
                 </TabsContent>
@@ -966,7 +976,7 @@ export default function Reports() {
                       </CardHeader>
                       <CardContent>
                         <div className="space-y-3">
-                          {Array.isArray(tasks) && tasks.length > 0 ? tasks.map((task: any) => (
+                          {tasksPag.total > 0 ? tasksPag.pageItems.map((task: any) => (
                             <div key={task.id} className="border rounded-lg p-4 hover:bg-gray-50 dark:hover:bg-gray-800">
                               <div className="flex justify-between items-start">
                                 <div className="flex-1">
@@ -1009,6 +1019,14 @@ export default function Reports() {
                             </div>
                           )}
                         </div>
+                        <ListPaginationControls
+                          page={tasksPag.page}
+                          totalPages={tasksPag.totalPages}
+                          total={tasksPag.total}
+                          from={tasksPag.from}
+                          to={tasksPag.to}
+                          onPageChange={tasksPag.setPage}
+                        />
                       </CardContent>
                     </Card>
                   </div>
@@ -1031,7 +1049,7 @@ export default function Reports() {
                               <FileText className="h-5 w-5 text-blue-600" />
                               <span className="font-medium">Всего замечаний</span>
                             </div>
-                            <span className="text-2xl font-bold text-blue-600">{remarks.length}</span>
+                            <span className="text-2xl font-bold text-blue-600">{scopedRemarks.length}</span>
                           </div>
                           
                           <div className="flex justify-between items-center p-3 bg-red-50 dark:bg-red-950 rounded-lg">
@@ -1040,7 +1058,7 @@ export default function Reports() {
                               <span className="font-medium">Открытые</span>
                             </div>
                             <span className="text-2xl font-bold text-red-600">
-                              {remarks.filter(r => r.status === 'open').length}
+                              {scopedRemarks.filter(r => r.status === 'open').length}
                             </span>
                           </div>
                           
@@ -1050,7 +1068,7 @@ export default function Reports() {
                               <span className="font-medium">В работе</span>
                             </div>
                             <span className="text-2xl font-bold text-orange-600">
-                              {remarks.filter(r => r.status === 'in_progress').length}
+                              {scopedRemarks.filter(r => r.status === 'in_progress').length}
                             </span>
                           </div>
                           
@@ -1060,7 +1078,7 @@ export default function Reports() {
                               <span className="font-medium">Решены</span>
                             </div>
                             <span className="text-2xl font-bold text-green-600">
-                              {remarks.filter(r => r.status === 'resolved').length}
+                              {scopedRemarks.filter(r => r.status === 'resolved').length}
                             </span>
                           </div>
                         </div>
@@ -1080,11 +1098,11 @@ export default function Reports() {
                             <div className="flex justify-between items-center">
                               <span className="text-sm font-medium">Ежедневные осмотры</span>
                               <span className="text-sm font-bold">
-                                {remarks.filter(r => r.source === 'daily_inspection').length}
+                                {scopedRemarks.filter(r => r.source === 'daily_inspection').length}
                               </span>
                             </div>
                             <Progress 
-                              value={remarks.length > 0 ? (remarks.filter(r => r.source === 'daily_inspection').length / remarks.length) * 100 : 0} 
+                              value={scopedRemarks.length > 0 ? (scopedRemarks.filter(r => r.source === 'daily_inspection').length / scopedRemarks.length) * 100 : 0} 
                               className="h-3"
                             />
                           </div>
@@ -1093,11 +1111,11 @@ export default function Reports() {
                             <div className="flex justify-between items-center">
                               <span className="text-sm font-medium">Техническое обслуживание</span>
                               <span className="text-sm font-bold">
-                                {remarks.filter(r => r.source === 'maintenance').length}
+                                {scopedRemarks.filter(r => r.source === 'maintenance').length}
                               </span>
                             </div>
                             <Progress 
-                              value={remarks.length > 0 ? (remarks.filter(r => r.source === 'maintenance').length / remarks.length) * 100 : 0} 
+                              value={scopedRemarks.length > 0 ? (scopedRemarks.filter(r => r.source === 'maintenance').length / scopedRemarks.length) * 100 : 0} 
                               className="h-3"
                             />
                           </div>
@@ -1106,11 +1124,11 @@ export default function Reports() {
                             <div className="flex justify-between items-center">
                               <span className="text-sm font-medium">Ручной ввод</span>
                               <span className="text-sm font-bold">
-                                {remarks.filter(r => r.source === 'manual' || !r.source).length}
+                                {scopedRemarks.filter(r => r.source === 'manual' || !r.source).length}
                               </span>
                             </div>
                             <Progress 
-                              value={remarks.length > 0 ? (remarks.filter(r => r.source === 'manual' || !r.source).length / remarks.length) * 100 : 0} 
+                              value={scopedRemarks.length > 0 ? (scopedRemarks.filter(r => r.source === 'manual' || !r.source).length / scopedRemarks.length) * 100 : 0} 
                               className="h-3"
                             />
                           </div>
@@ -1140,7 +1158,7 @@ export default function Reports() {
                       </CardHeader>
                       <CardContent>
                         <div className="space-y-3">
-                          {remarks.length > 0 ? remarks.map((remark: any) => (
+                          {remarksPag.total > 0 ? remarksPag.pageItems.map((remark: any) => (
                             <div key={remark.id} className="border rounded-lg p-4 hover:bg-gray-50 dark:hover:bg-gray-800">
                               <div className="flex justify-between items-start">
                                 <div className="flex-1">
@@ -1182,6 +1200,14 @@ export default function Reports() {
                             </div>
                           )}
                         </div>
+                        <ListPaginationControls
+                          page={remarksPag.page}
+                          totalPages={remarksPag.totalPages}
+                          total={remarksPag.total}
+                          from={remarksPag.from}
+                          to={remarksPag.to}
+                          onPageChange={remarksPag.setPage}
+                        />
                       </CardContent>
                     </Card>
                   </div>

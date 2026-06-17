@@ -11,6 +11,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import type { Equipment, InspectionChecklist, DailyInspection, InsertDailyInspection } from '../../../shared/schema';
 import { Separator } from "@/components/ui/separator";
 import { Label } from "@/components/ui/label";
+import { ListPaginationControls } from "@/components/list-pagination-controls";
+import { useListPagination } from "@/hooks/use-list-pagination";
 import { 
   Calendar,
   Search, 
@@ -838,6 +840,17 @@ export default function DailyInspection() {
     return matchesSearch && matchesCategory && matchesStatus;
   });
 
+  const inspectionFilterKey = `${searchFilter}-${categoryFilter}-${statusFilter}`;
+  const {
+    page: inspectionPage,
+    setPage: setInspectionPage,
+    pageItems: paginatedInspectionEquipment,
+    totalPages: inspectionTotalPages,
+    total: inspectionFilteredTotal,
+    from: inspectionFrom,
+    to: inspectionTo,
+  } = useListPagination(filteredEquipment, 25, inspectionFilterKey);
+
   const getStatusText = (status: string) => {
     switch (status) {
       case 'not_started': return 'Не начат';
@@ -976,7 +989,7 @@ export default function DailyInspection() {
                 </div>
               </div>
               <p className="text-xs text-muted-foreground">
-                Для осмотра: {filteredEquipment.length} из {inspectableEquipment.length}
+                Для осмотра: {inspectionFilteredTotal} из {inspectableEquipment.length}
                 {excludedFromInspectionCount > 0 && (
                   <span>
                     {" "}
@@ -988,7 +1001,7 @@ export default function DailyInspection() {
 
             {/* Список оборудования */}
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-3 gap-2">
-              {filteredEquipment.length === 0 && (
+              {inspectionFilteredTotal === 0 && (
                 <div className="col-span-full py-8 text-center text-sm text-muted-foreground border rounded-lg bg-muted/20">
                   Нет оборудования для осмотра
                   {excludedFromInspectionCount > 0
@@ -996,7 +1009,7 @@ export default function DailyInspection() {
                     : ""}
                 </div>
               )}
-              {filteredEquipment.map((eq) => {
+              {paginatedInspectionEquipment.map((eq) => {
                 const inspection = equipmentInspections[eq.id];
                 const statusColor = inspection?.status === 'completed' ? 'green' : 
                                   inspection?.status === 'in_progress' ? 'yellow' : 'gray';
@@ -1072,7 +1085,16 @@ export default function DailyInspection() {
               })}
             </div>
 
-            {filteredEquipment.length === 0 && (
+            <ListPaginationControls
+              page={inspectionPage}
+              totalPages={inspectionTotalPages}
+              total={inspectionFilteredTotal}
+              from={inspectionFrom}
+              to={inspectionTo}
+              onPageChange={setInspectionPage}
+            />
+
+            {inspectionFilteredTotal === 0 && (
               <div className="text-center py-12">
                 <AlertCircle className="w-12 h-12 text-gray-400 mx-auto mb-4" />
                 <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">

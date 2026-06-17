@@ -54,6 +54,8 @@ import {
 } from "lucide-react";
 import type { BudgetEntry, Task } from "@shared/schema";
 import { matchesListSearch } from "@/lib/list-search";
+import { ListPaginationControls } from "@/components/list-pagination-controls";
+import { useListPagination } from "@/hooks/use-list-pagination";
 import { ListSearchInput } from "@/components/list-search-input";
 
 const formDialogClass =
@@ -91,7 +93,11 @@ export default function BudgetPage() {
   };
 
   const { data: entries = [], isLoading } = useBudgetEntries(filters);
-  const { data: summary } = useBudgetSummary(equipmentFilter !== "all" ? equipmentFilter : undefined);
+  const { data: summary } = useBudgetSummary(
+    equipmentFilter !== "all" ? equipmentFilter : undefined,
+    filterSubdivisionId,
+    { enabled: filterSubdivisionId != null || equipmentFilter !== "all" }
+  );
   const { create, update, remove } = useBudgetMutations();
   const { create: createBudgetCategory } = useBudgetCategoryMutations();
   const { create: createSupplier } = useSupplierMutations();
@@ -447,6 +453,17 @@ export default function BudgetPage() {
     );
   }, [entries, searchQuery, suppliers, warehouseParts]);
 
+  const entriesFilterKey = `${searchQuery}-${categoryFilter}-${from}-${to}`;
+  const {
+    page: entriesPage,
+    setPage: setEntriesPage,
+    pageItems: paginatedEntries,
+    totalPages: entriesTotalPages,
+    total: entriesTotal,
+    from: entriesFrom,
+    to: entriesTo,
+  } = useListPagination(displayedEntries, 25, entriesFilterKey);
+
   const renderFormFields = () => (
     <div className="grid gap-3">
       <div>
@@ -799,14 +816,15 @@ export default function BudgetPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Расходы ({displayedEntries.length})</CardTitle>
+            <CardTitle>Расходы ({entriesTotal})</CardTitle>
           </CardHeader>
           <CardContent>
             {isLoading ? (
               <p>Загрузка…</p>
-            ) : displayedEntries.length === 0 ? (
+            ) : entriesTotal === 0 ? (
               <p className="text-muted-foreground">Расходов не найдено</p>
             ) : (
+              <div>
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -820,7 +838,7 @@ export default function BudgetPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {displayedEntries.map((e) => (
+                  {paginatedEntries.map((e) => (
                     <TableRow
                       key={e.id}
                       role="button"
@@ -856,6 +874,15 @@ export default function BudgetPage() {
                   ))}
                 </TableBody>
               </Table>
+              <ListPaginationControls
+                page={entriesPage}
+                totalPages={entriesTotalPages}
+                total={entriesTotal}
+                from={entriesFrom}
+                to={entriesTo}
+                onPageChange={setEntriesPage}
+              />
+              </div>
             )}
           </CardContent>
         </Card>

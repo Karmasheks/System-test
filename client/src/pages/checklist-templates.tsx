@@ -31,6 +31,8 @@ import {
 import { TO_REQUEST_TYPES } from "@shared/service-request-constants";
 import { ArrowLeft, ListChecks, Plus, Trash2 } from "lucide-react";
 import type { ChecklistTemplate } from "@shared/schema";
+import { ListPaginationControls } from "@/components/list-pagination-controls";
+import { useListPagination } from "@/hooks/use-list-pagination";
 
 export default function ChecklistTemplatesPage() {
   const { user } = useAuth();
@@ -58,6 +60,16 @@ export default function ChecklistTemplatesPage() {
 
   const typeLabel = (code: string) =>
     meta?.types?.find((t: { code: string; label: string }) => t.code === code)?.label ?? code;
+
+  const {
+    page,
+    setPage,
+    pageItems: paginatedTemplates,
+    totalPages,
+    total: templatesTotal,
+    from,
+    to,
+  } = useListPagination(templates as ChecklistTemplate[], 25);
 
   const handleCreate = async () => {
     if (!form.category.trim() || !form.itemText.trim()) {
@@ -209,12 +221,13 @@ export default function ChecklistTemplatesPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-lg">Список ({templates.length})</CardTitle>
+              <CardTitle className="text-lg">Список ({templatesTotal})</CardTitle>
             </CardHeader>
             <CardContent>
               {isLoading ? (
                 <p className="text-gray-500">Загрузка…</p>
               ) : (
+                <div>
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -227,7 +240,7 @@ export default function ChecklistTemplatesPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {(templates as ChecklistTemplate[]).map((t) => (
+                    {paginatedTemplates.map((t) => (
                       <TableRow key={t.id}>
                         <TableCell>{typeLabel(t.requestType)}</TableCell>
                         <TableCell className="text-sm text-gray-500">
@@ -254,6 +267,15 @@ export default function ChecklistTemplatesPage() {
                     ))}
                   </TableBody>
                 </Table>
+                <ListPaginationControls
+                  page={page}
+                  totalPages={totalPages}
+                  total={templatesTotal}
+                  from={from}
+                  to={to}
+                  onPageChange={setPage}
+                />
+                </div>
               )}
             </CardContent>
           </Card>

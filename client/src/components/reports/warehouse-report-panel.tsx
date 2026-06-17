@@ -25,6 +25,8 @@ import { useToast } from "@/hooks/use-toast";
 import { useSubdivisionFilter } from "@/hooks/use-subdivision-filter";
 import { SubdivisionFilterSelect } from "@/components/subdivision-filter-select";
 import { cn } from "@/lib/utils";
+import { ListPaginationControls } from "@/components/list-pagination-controls";
+import { useListPagination } from "@/hooks/use-list-pagination";
 
 function stockStatusLabel(status: string) {
   if (status === "zero") return "Нет на складе";
@@ -89,6 +91,10 @@ export function WarehouseReportPanel() {
   const isFetching = partsFetching || reportFetching;
   const canExportStock = !partsLoading && !partsError;
   const canExportPeriodReport = !!report && !reportError;
+
+  const partsPag = useListPagination(parts, 25, String(filterSubdivisionId));
+  const movementsPag = useListPagination(report?.movements ?? [], 25, `${period.from}|${period.to}|${filterSubdivisionId}`);
+  const alertsPag = useListPagination(report?.alerts ?? [], 25, `${period.from}|${period.to}|${filterSubdivisionId}`);
 
   const handleRefresh = () => {
     void refetchParts();
@@ -307,21 +313,22 @@ export function WarehouseReportPanel() {
                   файл будет содержать заголовки и сводку с нулевыми значениями.
                 </p>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Запчасть</TableHead>
-                      <TableHead>Категория</TableHead>
-                      <TableHead className="text-right">Остаток</TableHead>
-                      <TableHead className="text-right">Резерв</TableHead>
-                      <TableHead className="text-right">Доступно</TableHead>
-                      <TableHead className="text-right">Мин.</TableHead>
-                      <TableHead>Статус</TableHead>
-                      <TableHead>Подразделение</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {parts.map((part) => {
+                <div>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Запчасть</TableHead>
+                        <TableHead>Категория</TableHead>
+                        <TableHead className="text-right">Остаток</TableHead>
+                        <TableHead className="text-right">Резерв</TableHead>
+                        <TableHead className="text-right">Доступно</TableHead>
+                        <TableHead className="text-right">Мин.</TableHead>
+                        <TableHead>Статус</TableHead>
+                        <TableHead>Подразделение</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {partsPag.pageItems.map((part) => {
                       const stockStatus = warehouseStockStatusFromPart(part);
                       return (
                         <TableRow key={part.id}>
@@ -344,6 +351,15 @@ export function WarehouseReportPanel() {
                     })}
                   </TableBody>
                 </Table>
+                <ListPaginationControls
+                  page={partsPag.page}
+                  totalPages={partsPag.totalPages}
+                  total={partsPag.total}
+                  from={partsPag.from}
+                  to={partsPag.to}
+                  onPageChange={partsPag.setPage}
+                />
+                </div>
               )}
             </CardContent>
           </Card>
@@ -357,21 +373,22 @@ export function WarehouseReportPanel() {
                 <p className="text-sm text-muted-foreground py-4">
                   Движения за период не загрузились. Остатки и выгрузка позиций доступны выше.
                 </p>
-              ) : !report || report.movements.length === 0 ? (
+              ) : movementsPag.total === 0 ? (
                 <p className="text-sm text-muted-foreground py-4">Движений не было</p>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Дата</TableHead>
-                      <TableHead>Запчасть</TableHead>
-                      <TableHead>Тип</TableHead>
-                      <TableHead className="text-right">Кол-во</TableHead>
-                      <TableHead>Исполнитель</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {report.movements.map((m) => (
+                <div>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Дата</TableHead>
+                        <TableHead>Запчасть</TableHead>
+                        <TableHead>Тип</TableHead>
+                        <TableHead className="text-right">Кол-во</TableHead>
+                        <TableHead>Исполнитель</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {movementsPag.pageItems.map((m) => (
                       <TableRow key={m.id}>
                         <TableCell className="text-xs whitespace-nowrap">
                           {formatRuDateTime(m.createdAt)}
@@ -388,27 +405,37 @@ export function WarehouseReportPanel() {
                     ))}
                   </TableBody>
                 </Table>
+                <ListPaginationControls
+                  page={movementsPag.page}
+                  totalPages={movementsPag.totalPages}
+                  total={movementsPag.total}
+                  from={movementsPag.from}
+                  to={movementsPag.to}
+                  onPageChange={movementsPag.setPage}
+                />
+                </div>
               )}
             </CardContent>
           </Card>
 
-          {report && report.alerts.length > 0 && (
+          {alertsPag.total > 0 && (
             <Card>
               <CardHeader>
                 <CardTitle className="text-lg">Активные алерты</CardTitle>
               </CardHeader>
               <CardContent>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Запчасть</TableHead>
-                      <TableHead>Тип</TableHead>
-                      <TableHead className="text-right">Остаток</TableHead>
-                      <TableHead className="text-right">Мин.</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {report.alerts.map((a) => (
+                <div>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Запчасть</TableHead>
+                        <TableHead>Тип</TableHead>
+                        <TableHead className="text-right">Остаток</TableHead>
+                        <TableHead className="text-right">Мин.</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {alertsPag.pageItems.map((a) => (
                       <TableRow key={a.id}>
                         <TableCell>{a.partName}</TableCell>
                         <TableCell>{warehouseAlertLabel(a.alertType)}</TableCell>
@@ -418,6 +445,15 @@ export function WarehouseReportPanel() {
                     ))}
                   </TableBody>
                 </Table>
+                <ListPaginationControls
+                  page={alertsPag.page}
+                  totalPages={alertsPag.totalPages}
+                  total={alertsPag.total}
+                  from={alertsPag.from}
+                  to={alertsPag.to}
+                  onPageChange={alertsPag.setPage}
+                />
+                </div>
               </CardContent>
             </Card>
           )}

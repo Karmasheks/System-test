@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { Helmet } from "react-helmet";
 import { useAuth } from "@/hooks/use-auth";
 import { useLocation, useSearch } from "wouter";
@@ -29,6 +29,15 @@ import { useRemarksData } from "@/hooks/use-remarks-data";
 import { badgeGreen, badgeBlue, badgeYellow, badgeRed, badgePurple, badgeGray } from "@/lib/badge-colors";
 import { format } from "date-fns";
 import { ru } from "date-fns/locale";
+import { ListPaginationControls } from "@/components/list-pagination-controls";
+import { useListPagination } from "@/hooks/use-list-pagination";
+import { useSubdivisionFilter } from "@/hooks/use-subdivision-filter";
+import { SubdivisionFilterSelect } from "@/components/subdivision-filter-select";
+import { useEquipmentApi } from "@/hooks/use-equipment-api";
+import {
+  equipmentIdsInScope,
+  filterRemarksBySubdivisionScope,
+} from "@/lib/subdivision-filter";
 
 export default function Remarks() {
   const { user, isLoading, isAuthenticated } = useAuth();
@@ -39,10 +48,18 @@ export default function Remarks() {
   const { 
     remarks, 
     updateRemark, 
-    addRemarkNote, 
-    getOpenRemarksCount, 
-    getCriticalRemarksCount 
+    addRemarkNote,
   } = useRemarksData();
+  const {
+    filterValue,
+    setFilterValue,
+    filterSubdivisionId,
+    availableSubdivisions,
+    showFilter,
+    filterLabel,
+    allowAllOption,
+  } = useSubdivisionFilter();
+  const { equipment: equipmentList } = useEquipmentApi();
 
   const [searchFilter, setSearchFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -72,6 +89,64 @@ export default function Remarks() {
     setIsViewDialogOpen(true);
   }, [search, remarks]);
 
+  const scopedEquipmentIds = useMemo(
+    () =>
+      equipmentIdsInScope(
+        equipmentList.map((e) => ({ id: e.id, subdivisionId: e.subdivisionId })),
+        filterSubdivisionId,
+        null
+      ),
+    [equipmentList, filterSubdivisionId]
+  );
+
+  const scopedRemarks = useMemo(() => {
+    if (filterSubdivisionId == null) return remarks;
+    return filterRemarksBySubdivisionScope(remarks, filterSubdivisionId, scopedEquipmentIds);
+  }, [remarks, filterSubdivisionId, scopedEquipmentIds]);
+
+  const filteredRemarks = useMemo(
+    () =>
+      scopedRemarks.filter((remark) => {
+        const matchesSearch =
+          searchFilter === "" ||
+          remark.title.toLowerCase().includes(searchFilter.toLowerCase()) ||
+          remark.description.toLowerCase().includes(searchFilter.toLowerCase()) ||
+          remark.equipmentName.toLowerCase().includes(searchFilter.toLowerCase());
+
+        const matchesStatus = statusFilter === "all" || remark.status === statusFilter;
+        const matchesPriority = priorityFilter === "all" || remark.priority === priorityFilter;
+        const matchesType = typeFilter === "all" || remark.type === typeFilter;
+
+        return matchesSearch && matchesStatus && matchesPriority && matchesType;
+      }),
+    [scopedRemarks, searchFilter, statusFilter, priorityFilter, typeFilter]
+  );
+
+  const remarksFilterKey = `${filterValue}|${searchFilter}|${statusFilter}|${priorityFilter}|${typeFilter}`;
+  const {
+    page,
+    setPage,
+    pageItems: remarkPageItems,
+    totalPages,
+    total: remarksTotal,
+    from,
+    to,
+  } = useListPagination(filteredRemarks, 25, remarksFilterKey);
+
+  const stats = useMemo(
+    () => ({
+      total: scopedRemarks.length,
+      open: scopedRemarks.filter((r) => r.status === "open" || r.status === "in_progress").length,
+      inProgress: scopedRemarks.filter((r) => r.status === "in_progress").length,
+      resolved: scopedRemarks.filter((r) => r.status === "resolved").length,
+      critical: scopedRemarks.filter(
+        (r) =>
+          r.priority === "critical" && r.status !== "resolved" && r.status !== "closed"
+      ).length,
+    }),
+    [scopedRemarks]
+  );
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
@@ -86,20 +161,6 @@ export default function Remarks() {
   if (!isAuthenticated()) {
     return null;
   }
-
-  // Фильтрация замечаний
-  const filteredRemarks = remarks.filter((remark) => {
-    const matchesSearch = searchFilter === "" || 
-      remark.title.toLowerCase().includes(searchFilter.toLowerCase()) ||
-      remark.description.toLowerCase().includes(searchFilter.toLowerCase()) ||
-      remark.equipmentName.toLowerCase().includes(searchFilter.toLowerCase());
-    
-    const matchesStatus = statusFilter === "all" || remark.status === statusFilter;
-    const matchesPriority = priorityFilter === "all" || remark.priority === priorityFilter;
-    const matchesType = typeFilter === "all" || remark.type === typeFilter;
-
-    return matchesSearch && matchesStatus && matchesPriority && matchesType;
-  });
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -166,14 +227,6 @@ export default function Remarks() {
     });
   };
 
-  const stats = {
-    total: remarks.length,
-    open: getOpenRemarksCount(),
-    inProgress: remarks.filter(r => r.status === 'in_progress').length,
-    resolved: remarks.filter(r => r.status === 'resolved').length,
-    critical: getCriticalRemarksCount()
-  };
-
   return (
     <>
       <Helmet>
@@ -182,13 +235,25 @@ export default function Remarks() {
 
       <main className="p-4 lg:p-6 w-full max-w-full">
         <div className="w-full max-w-full">
-              <div className="mb-6">
-                <h1 className="text-2xl lg:text-3xl font-bold text-gray-900 dark:text-white mb-2">
-                  Управление замечаниями
-                </h1>
-                <p className="text-gray-600 dark:text-gray-400">
-                  Централизованное управление замечаниями из ежедневных осмотров и технического обслуживания
-                </p>
+              <div className="mb-6 flex flex-wrap justify-between items-start gap-3">
+                <div>
+                  <h1 className="text-2xl lg:text-3xl font-bold text-gray-900 dark:text-white mb-2">
+                    Управление замечаниями
+                  </h1>
+                  <p className="text-gray-600 dark:text-gray-400">
+                    Централизованное управление замечаниями из ежедневных осмотров и технического обслуживания
+                    {filterSubdivisionId != null && ` · ${filterLabel}`}
+                  </p>
+                </div>
+                {showFilter && (
+                  <SubdivisionFilterSelect
+                    value={filterValue}
+                    onChange={setFilterValue}
+                    subdivisions={availableSubdivisions}
+                    showAll={allowAllOption}
+                    className="w-full sm:w-52"
+                  />
+                )}
               </div>
 
               {/* Статистика */}
@@ -331,12 +396,12 @@ export default function Remarks() {
               <Card>
                 <CardHeader>
                   <CardTitle>
-                    Список замечаний ({filteredRemarks.length})
+                    Список замечаний ({remarksTotal})
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4">
-                    {filteredRemarks.map((remark) => (
+                    {remarkPageItems.map((remark) => (
                       <div 
                         key={remark.id}
                         className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800"
@@ -401,7 +466,7 @@ export default function Remarks() {
                       </div>
                     ))}
 
-                    {filteredRemarks.length === 0 && (
+                    {remarksTotal === 0 && (
                       <div className="text-center py-8">
                         <FileText className="mx-auto h-12 w-12 text-gray-400" />
                         <h3 className="mt-2 text-sm font-medium text-gray-900 dark:text-gray-100">
@@ -413,6 +478,14 @@ export default function Remarks() {
                       </div>
                     )}
                   </div>
+                  <ListPaginationControls
+                    page={page}
+                    totalPages={totalPages}
+                    total={remarksTotal}
+                    from={from}
+                    to={to}
+                    onPageChange={setPage}
+                  />
                 </CardContent>
               </Card>
             </div>

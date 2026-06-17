@@ -102,8 +102,13 @@ export default function Equipment() {
     return [...new Set([...fromDb, ...fromItems])].sort((a, b) => a.localeCompare(b, "ru"));
   }, [equipmentTypesList, equipment]);
 
+  const subdivisionEquipment = useMemo(
+    () => filterItemsBySubdivision(equipment, filterSubdivisionId),
+    [equipment, filterSubdivisionId]
+  );
+
   const filteredEquipment = useMemo(() => {
-    let list = filterItemsBySubdivision(equipment, filterSubdivisionId);
+    let list = subdivisionEquipment;
     if (typeFilter !== "all") {
       list = list.filter((e) => e.type === typeFilter);
     }
@@ -530,7 +535,7 @@ export default function Equipment() {
                       <Settings className="h-6 w-6 text-blue-600" />
                       <div className="ml-3">
                         <p className="text-xs font-medium text-gray-600 dark:text-gray-400">Всего</p>
-                        <p className="text-xl font-bold text-gray-900 dark:text-gray-100">{equipment.length}</p>
+                        <p className="text-xl font-bold text-gray-900 dark:text-gray-100">{subdivisionEquipment.length}</p>
                       </div>
                     </div>
                   </CardContent>
@@ -543,7 +548,7 @@ export default function Equipment() {
                       <div className="ml-3">
                         <p className="text-xs font-medium text-gray-600 dark:text-gray-400">Активно</p>
                         <p className="text-xl font-bold text-gray-900 dark:text-gray-100">
-                          {equipment.filter((eq) => eq.status === "active").length}
+                          {subdivisionEquipment.filter((eq) => eq.status === "active").length}
                         </p>
                       </div>
                     </div>
@@ -557,7 +562,7 @@ export default function Equipment() {
                       <div className="ml-3">
                         <p className="text-xs font-medium text-gray-600 dark:text-gray-400">На ТО</p>
                         <p className="text-xl font-bold text-gray-900 dark:text-gray-100">
-                          {equipment.filter((eq) => eq.status === "maintenance").length}
+                          {subdivisionEquipment.filter((eq) => eq.status === "maintenance").length}
                         </p>
                       </div>
                     </div>
@@ -571,7 +576,7 @@ export default function Equipment() {
                       <div className="ml-3">
                         <p className="text-xs font-medium text-gray-600 dark:text-gray-400">В ремонте</p>
                         <p className="text-xl font-bold text-gray-900 dark:text-gray-100">
-                          {equipment.filter((eq) => eq.status === "repair").length}
+                          {subdivisionEquipment.filter((eq) => eq.status === "repair").length}
                         </p>
                       </div>
                     </div>
@@ -585,7 +590,7 @@ export default function Equipment() {
                       <div className="ml-3">
                         <p className="text-xs font-medium text-gray-600 dark:text-gray-400">Неактивно</p>
                         <p className="text-xl font-bold text-gray-900 dark:text-gray-100">
-                          {equipment.filter((eq) => eq.status === "inactive").length}
+                          {subdivisionEquipment.filter((eq) => eq.status === "inactive").length}
                         </p>
                       </div>
                     </div>
@@ -674,7 +679,7 @@ export default function Equipment() {
                       </Button>
                     </div>
                     <p className="text-sm text-muted-foreground pb-2">
-                      Показано: {filteredTotal} из {equipment.length}
+                      Показано: {filteredTotal} из {subdivisionEquipment.length}
                       {totalPages > 1 && ` · страница ${page} из ${totalPages}`}
                     </p>
                   </div>

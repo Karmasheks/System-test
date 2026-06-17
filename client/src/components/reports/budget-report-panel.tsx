@@ -18,6 +18,8 @@ import { exportBudgetReport, type ReportFileFormat } from "@/lib/specialized-rep
 import { formatRuDate } from "@/lib/export-utils";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import { ListPaginationControls } from "@/components/list-pagination-controls";
+import { useListPagination } from "@/hooks/use-list-pagination";
 
 export function BudgetReportPanel() {
   const { toast } = useToast();
@@ -38,6 +40,17 @@ export function BudgetReportPanel() {
     period.from,
     period.to,
     equipmentId
+  );
+
+  const entriesPag = useListPagination(
+    report?.entries ?? [],
+    25,
+    `${period.from}|${period.to}|${equipmentFilter}`
+  );
+  const byEquipmentPag = useListPagination(
+    report?.byEquipment ?? [],
+    25,
+    `${period.from}|${period.to}|${equipmentFilter}`
   );
 
   const handleExport = async (format: ReportFileFormat) => {
@@ -165,16 +178,25 @@ export function BudgetReportPanel() {
                 <CardTitle className="text-lg">По оборудованию</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 max-h-64 overflow-y-auto">
-                {report.byEquipment.length === 0 ? (
+                {byEquipmentPag.total === 0 ? (
                   <p className="text-sm text-muted-foreground">Нет данных</p>
                 ) : (
-                  report.byEquipment.map((row) => (
+                  byEquipmentPag.pageItems.map((row) => (
                     <div key={row.equipmentId ?? row.equipmentName} className="flex justify-between text-sm gap-2">
                       <span className="truncate">{row.equipmentName}</span>
                       <span className="font-medium shrink-0">{row.total.toLocaleString("ru-RU")} ₽</span>
                     </div>
                   ))
                 )}
+                <ListPaginationControls
+                  page={byEquipmentPag.page}
+                  totalPages={byEquipmentPag.totalPages}
+                  total={byEquipmentPag.total}
+                  from={byEquipmentPag.from}
+                  to={byEquipmentPag.to}
+                  onPageChange={byEquipmentPag.setPage}
+                  className="pt-2"
+                />
               </CardContent>
             </Card>
           </div>
@@ -185,37 +207,47 @@ export function BudgetReportPanel() {
               <CardDescription>{period.label}</CardDescription>
             </CardHeader>
             <CardContent>
-              {report.entries.length === 0 ? (
+              {entriesPag.total === 0 ? (
                 <p className="text-sm text-muted-foreground py-4">Записи за период не найдены</p>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Дата</TableHead>
-                      <TableHead>Название</TableHead>
-                      <TableHead>Категория</TableHead>
-                      <TableHead>Оборудование</TableHead>
-                      <TableHead className="text-right">Сумма</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {report.entries.map((entry) => (
-                      <TableRow key={entry.id}>
-                        <TableCell className="whitespace-nowrap text-xs">
-                          {formatRuDate(entry.expenseDate)}
-                        </TableCell>
-                        <TableCell>{entry.title}</TableCell>
-                        <TableCell>
-                          <Badge variant="outline">{budgetCategoryLabel(entry.category)}</Badge>
-                        </TableCell>
-                        <TableCell className="text-xs">{entry.equipmentName ?? "—"}</TableCell>
-                        <TableCell className="text-right font-medium">
-                          {entry.amount.toLocaleString("ru-RU")} ₽
-                        </TableCell>
+                <div>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Дата</TableHead>
+                        <TableHead>Название</TableHead>
+                        <TableHead>Категория</TableHead>
+                        <TableHead>Оборудование</TableHead>
+                        <TableHead className="text-right">Сумма</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                    </TableHeader>
+                    <TableBody>
+                      {entriesPag.pageItems.map((entry) => (
+                        <TableRow key={entry.id}>
+                          <TableCell className="whitespace-nowrap text-xs">
+                            {formatRuDate(entry.expenseDate)}
+                          </TableCell>
+                          <TableCell>{entry.title}</TableCell>
+                          <TableCell>
+                            <Badge variant="outline">{budgetCategoryLabel(entry.category)}</Badge>
+                          </TableCell>
+                          <TableCell className="text-xs">{entry.equipmentName ?? "—"}</TableCell>
+                          <TableCell className="text-right font-medium">
+                            {entry.amount.toLocaleString("ru-RU")} ₽
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                  <ListPaginationControls
+                    page={entriesPag.page}
+                    totalPages={entriesPag.totalPages}
+                    total={entriesPag.total}
+                    from={entriesPag.from}
+                    to={entriesPag.to}
+                    onPageChange={entriesPag.setPage}
+                  />
+                </div>
               )}
             </CardContent>
           </Card>

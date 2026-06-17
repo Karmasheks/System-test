@@ -48,6 +48,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { matchesListSearch } from "@/lib/list-search";
 import { ListSearchInput } from "@/components/list-search-input";
+import { ListPaginationControls } from "@/components/list-pagination-controls";
+import { useListPagination } from "@/hooks/use-list-pagination";
 import {
   DEFAULT_ROLE_ACCESS_PROFILES,
   MODULE_DEFINITIONS,
@@ -292,6 +294,16 @@ export default function Users() {
       ]);
     });
   }, [filteredUsersList, searchQuery, sortedRoleProfiles, subdivisions]);
+
+  const {
+    page: usersPage,
+    setPage: setUsersPage,
+    pageItems: paginatedUsers,
+    totalPages: usersTotalPages,
+    total: usersTotal,
+    from: usersFrom,
+    to: usersTo,
+  } = useListPagination(displayUsersList, 25, searchQuery);
 
   const isKnownRoleKey = (roleKey: string) =>
     sortedRoleProfiles.some((p) => p.role === (roleKey?.trim() || "viewer"));
@@ -740,7 +752,7 @@ export default function Users() {
                 )}
                 {(searchQuery.trim() || filterSubdivisionId != null) && (
                   <p className="text-xs text-muted-foreground pb-2">
-                    Показано {displayUsersList.length} из {Array.isArray(usersList) ? usersList.length : 0}
+                    Показано {usersTotal} из {Array.isArray(usersList) ? usersList.length : 0}
                   </p>
                 )}
               </div>
@@ -766,6 +778,7 @@ export default function Users() {
                     </span>
                   </div>
                 ) : (
+                  <div>
                   <div className="overflow-x-auto">
                   <table className="w-full table-fixed text-xs divide-y divide-gray-200 dark:divide-gray-700">
                     <colgroup>
@@ -799,7 +812,7 @@ export default function Users() {
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200 dark:bg-gray-800 dark:divide-gray-700">
-                      {displayUsersList.map((item: any) => {
+                      {paginatedUsers.map((item: any) => {
                         const subdivision = getSubdivisionCell(item);
                         return (
                         <tr
@@ -921,6 +934,16 @@ export default function Users() {
                       })}
                     </tbody>
                   </table>
+                  </div>
+                  <ListPaginationControls
+                    page={usersPage}
+                    totalPages={usersTotalPages}
+                    total={usersTotal}
+                    from={usersFrom}
+                    to={usersTo}
+                    onPageChange={setUsersPage}
+                    className="px-4 pb-4"
+                  />
                   </div>
                 )}
               </div>

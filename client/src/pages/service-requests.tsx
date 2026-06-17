@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Helmet } from "react-helmet";
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
@@ -41,6 +41,15 @@ import { serviceRequestStatusColors } from "@/lib/badge-colors";
 import { format } from "date-fns";
 import { getIsoWeek } from "@shared/iso-week";
 import { ru } from "date-fns/locale";
+import { ListPaginationControls } from "@/components/list-pagination-controls";
+import { useListPagination } from "@/hooks/use-list-pagination";
+import { useSubdivisionFilter } from "@/hooks/use-subdivision-filter";
+import { SubdivisionFilterSelect } from "@/components/subdivision-filter-select";
+import {
+  equipmentIdsInScope,
+  filterBySubdivisionScope,
+  filterItemsBySubdivision,
+} from "@/lib/subdivision-filter";
 
 const statusColors: Partial<Record<ServiceRequestStatus, string>> = serviceRequestStatusColors;
 
@@ -58,6 +67,16 @@ export default function ServiceRequestsPage() {
     urgency: "3",
     budgetEntryId: "",
   });
+
+  const {
+    filterValue,
+    setFilterValue,
+    filterSubdivisionId,
+    availableSubdivisions,
+    showFilter,
+    filterLabel,
+    allowAllOption,
+  } = useSubdivisionFilter();
 
   const { data: requests = [], isLoading } = useServiceRequests(
     statusFilter !== "all" ? { status: statusFilter } : undefined
@@ -79,7 +98,64 @@ export default function ServiceRequestsPage() {
   const typeLabel = (code: string) =>
     meta?.types?.find((t: { code: string; label: string }) => t.code === code)?.label ?? code;
 
-  const activeEquipment = allEquipment.filter((e) => e.status !== "decommissioned");
+  const scopedEquipmentIds = useMemo(
+    () =>
+      equipmentIdsInScope(
+        allEquipment.map((e) => ({ id: e.id, subdivisionId: e.subdivisionId })),
+        filterSubdivisionId,
+        null
+      ),
+    [allEquipment, filterSubdivisionId]
+  );
+
+  const scopedRequests = useMemo(
+    () => filterBySubdivisionScope(requests, filterSubdivisionId, scopedEquipmentIds),
+    [requests, filterSubdivisionId, scopedEquipmentIds]
+  );
+
+  const activeEquipment = useMemo(
+    () =>
+      filterItemsBySubdivision(
+        allEquipment.filter((e) => e.status !== "decommissioned"),
+        filterSubdivisionId
+      ),
+    [allEquipment, filterSubdivisionId]
+  );
+
+  const {
+    page: requestsPage,
+    setPage: setRequestsPage,
+    pageItems: paginatedRequests,
+    totalPages: requestsTotalPages,
+    total: requestsTotal,
+    from: requestsFrom,
+    to: requestsTo,
+  } = useListPagination(scopedRequests, 25, `${statusFilter}|${filterValue}`);
+
+  const planningRequestsRaw = (planning?.requests ?? []) as Array<{
+    id: number;
+    equipmentName: string;
+    equipmentId?: string;
+    assigneeId?: number | null;
+    assigneeName?: string | null;
+    plannedWeek?: string | null;
+    status: string;
+    subdivisionId?: number | null;
+  }>;
+
+  const planningRequests = useMemo(
+    () => filterBySubdivisionScope(planningRequestsRaw, filterSubdivisionId, scopedEquipmentIds),
+    [planningRequestsRaw, filterSubdivisionId, scopedEquipmentIds]
+  );
+  const {
+    page: planPage,
+    setPage: setPlanPage,
+    pageItems: paginatedPlanRequests,
+    totalPages: planTotalPages,
+    total: planTotal,
+    from: planFrom,
+    to: planTo,
+  } = useListPagination(planningRequests, 25, `${planWeek}|${filterValue}`);
 
   const handlePlanningReschedule = async (request: {
     id: number;
@@ -141,7 +217,16 @@ export default function ServiceRequestsPage() {
               <ClipboardList className="h-8 w-8 text-blue-600" />
               <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Сервисные заявки</h1>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap items-center gap-3">
+              {showFilter && (
+                <SubdivisionFilterSelect
+                  value={filterValue}
+                  onChange={setFilterValue}
+                  subdivisions={availableSubdivisions}
+                  showAll={allowAllOption}
+                  className="w-full sm:w-52"
+                />
+              )}
               {(user?.role === "admin" || user?.role === "manager") && (
                 <Link href="/service-requests/templates">
                   <Button variant="outline">Шаблоны ТО</Button>
@@ -304,14 +389,15 @@ export default function ServiceRequestsPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Список ({requests.length})</CardTitle>
+              <CardTitle>Список ({requestsTotal})</CardTitle>
             </CardHeader>
             <CardContent>
               {isLoading ? (
                 <p className="text-muted-foreground">Загрузка...</p>
-              ) : requests.length === 0 ? (
+              ) : scopedRequests.length === 0 ? (
                 <p className="text-muted-foreground">Заявок нет</p>
               ) : (
+                <div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
@@ -325,7 +411,7 @@ export default function ServiceRequestsPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {requests.map((r) => (
+                      {paginatedRequests.map((r) => (
                         <tr
                           key={r.id}
                           className="border-b hover:bg-muted/50 cursor-pointer"
@@ -353,6 +439,15 @@ export default function ServiceRequestsPage() {
                       ))}
                     </tbody>
                   </table>
+                </div>
+                <ListPaginationControls
+                  page={requestsPage}
+                  totalPages={requestsTotalPages}
+                  total={requestsTotal}
+                  from={requestsFrom}
+                  to={requestsTo}
+                  onPageChange={setRequestsPage}
+                />
                 </div>
               )}
             </CardContent>
@@ -397,15 +492,7 @@ export default function ServiceRequestsPage() {
                   <CardTitle>Заявки по неделе</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  {(planning?.requests ?? []).map(
-                    (r: {
-                      id: number;
-                      equipmentName: string;
-                      assigneeId?: number | null;
-                      assigneeName?: string | null;
-                      plannedWeek?: string | null;
-                      status: string;
-                    }) => (
+                  {paginatedPlanRequests.map((r) => (
                       <div key={r.id} className="border rounded-md p-3 space-y-2">
                         <div className="flex justify-between text-sm">
                           <Link href={`/service-requests/${r.id}`} className="text-blue-600 font-medium">
@@ -469,11 +556,18 @@ export default function ServiceRequestsPage() {
                           </Button>
                         </div>
                       </div>
-                    )
-                  )}
-                  {(planning?.requests ?? []).length === 0 && (
+                    ))}
+                  {planTotal === 0 && (
                     <p className="text-muted-foreground">Нет запланированных заявок</p>
                   )}
+                  <ListPaginationControls
+                    page={planPage}
+                    totalPages={planTotalPages}
+                    total={planTotal}
+                    from={planFrom}
+                    to={planTo}
+                    onPageChange={setPlanPage}
+                  />
                 </CardContent>
               </Card>
             </TabsContent>

@@ -43,6 +43,8 @@ import {
 import { Plus, Upload, ArrowRightCircle } from "lucide-react";
 import type { ProductionOrder } from "@shared/schema";
 import { ProductionExcelImportDialog } from "@/components/planning/production-excel-import-dialog";
+import { ListPaginationControls } from "@/components/list-pagination-controls";
+import { useListPagination } from "@/hooks/use-list-pagination";
 
 type Props = {
   subdivisionId: number;
@@ -79,6 +81,17 @@ export function PlanningOrdersTab({ subdivisionId }: Props) {
       ),
     [allEquipment, subdivisionId]
   );
+
+  const ordersFilterKey = `${statusFilter}|${priorityFilter}`;
+  const {
+    page,
+    setPage,
+    pageItems: orderPageItems,
+    totalPages,
+    total: ordersTotal,
+    from,
+    to,
+  } = useListPagination(orders, 25, ordersFilterKey);
 
   const { createOrder, updateOrderStatus, createPlanningDemand } = useProductionMutations();
 
@@ -244,34 +257,35 @@ export function PlanningOrdersTab({ subdivisionId }: Props) {
         )}
       </div>
 
-      <div className="rounded-md border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>№</TableHead>
-              <TableHead>Изделие</TableHead>
-              <TableHead>Запрошено</TableHead>
-              <TableHead>Выполнено</TableHead>
-              <TableHead>Статус</TableHead>
-              <TableHead>Приоритет</TableHead>
-              <TableHead className="w-[100px]" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {isLoading ? (
+      <div>
+        <div className="rounded-md border">
+          <Table>
+            <TableHeader>
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground">
-                  Загрузка…
-                </TableCell>
+                <TableHead>№</TableHead>
+                <TableHead>Изделие</TableHead>
+                <TableHead>Запрошено</TableHead>
+                <TableHead>Выполнено</TableHead>
+                <TableHead>Статус</TableHead>
+                <TableHead>Приоритет</TableHead>
+                <TableHead className="w-[100px]" />
               </TableRow>
-            ) : orders.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground">
-                  Нет заказов
-                </TableCell>
-              </TableRow>
-            ) : (
-              orders.map((o) => {
+            </TableHeader>
+            <TableBody>
+              {isLoading ? (
+                <TableRow>
+                  <TableCell colSpan={7} className="text-center text-muted-foreground">
+                    Загрузка…
+                  </TableCell>
+                </TableRow>
+              ) : ordersTotal === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={7} className="text-center text-muted-foreground">
+                    Нет заказов
+                  </TableCell>
+                </TableRow>
+              ) : (
+                orderPageItems.map((o) => {
                 const product = products.find((p) => p.id === o.productId);
                 return (
                   <TableRow key={o.id}>
@@ -305,6 +319,15 @@ export function PlanningOrdersTab({ subdivisionId }: Props) {
             )}
           </TableBody>
         </Table>
+        </div>
+        <ListPaginationControls
+          page={page}
+          totalPages={totalPages}
+          total={ordersTotal}
+          from={from}
+          to={to}
+          onPageChange={setPage}
+        />
       </div>
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>

@@ -47,6 +47,8 @@ import { SubdivisionsPanel } from "@/components/admin/subdivisions-panel";
 import {
   equipmentIdsInScope,
   filterItemsBySubdivision,
+  filterBySubdivisionScope,
+  filterRemarksBySubdivisionScope,
 } from "@/lib/subdivision-filter";
 
 function computeTaskStats(tasks: Task[]): TaskStats {
@@ -237,8 +239,8 @@ export default function Dashboard() {
   );
 
   const scopedTasks = useMemo(
-    () => filterItemsBySubdivision(tasks, filterSubdivisionId),
-    [tasks, filterSubdivisionId]
+    () => filterBySubdivisionScope(tasks, filterSubdivisionId, scopedEquipmentIds),
+    [tasks, filterSubdivisionId, scopedEquipmentIds]
   );
 
   const scopedTaskStats = useMemo(() => {
@@ -246,15 +248,10 @@ export default function Dashboard() {
     return computeTaskStats(scopedTasks);
   }, [filterSubdivisionId, taskStats, scopedTasks]);
 
-  const scopedRemarks = useMemo(
-    () =>
-      remarks.filter(
-        (r) =>
-          scopedEquipmentIds.has(r.equipmentId) ||
-          (r as { subdivisionId?: number }).subdivisionId === filterSubdivisionId
-      ),
-    [remarks, scopedEquipmentIds, filterSubdivisionId]
-  );
+  const scopedRemarks = useMemo(() => {
+    if (filterSubdivisionId == null) return remarks;
+    return filterRemarksBySubdivisionScope(remarks, filterSubdivisionId, scopedEquipmentIds);
+  }, [remarks, scopedEquipmentIds, filterSubdivisionId]);
 
   const maintenanceTasks = useMemo(
     () =>
@@ -270,8 +267,8 @@ export default function Dashboard() {
   );
 
   const scopedServiceRequests = useMemo(
-    () => filterItemsBySubdivision(serviceRequests, filterSubdivisionId),
-    [serviceRequests, filterSubdivisionId]
+    () => filterBySubdivisionScope(serviceRequests, filterSubdivisionId, scopedEquipmentIds),
+    [serviceRequests, filterSubdivisionId, scopedEquipmentIds]
   );
 
   const scopedWarehouseAlerts = useMemo(

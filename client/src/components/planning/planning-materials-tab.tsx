@@ -36,6 +36,8 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useState } from "react";
+import { ListPaginationControls } from "@/components/list-pagination-controls";
+import { useListPagination } from "@/hooks/use-list-pagination";
 
 type Props = {
   subdivisionId: number;
@@ -90,6 +92,27 @@ export function PlanningMaterialsTab({ subdivisionId }: Props) {
     (s) => s.quantity - s.reservedQuantity < s.minStock
   );
 
+  const {
+    page: stocksPage,
+    setPage: setStocksPage,
+    pageItems: stockPageItems,
+    totalPages: stocksTotalPages,
+    total: stocksTotal,
+    from: stocksFrom,
+    to: stocksTo,
+  } = useListPagination(stocks, 25, String(subdivisionId));
+
+  const requirementItems = requirements?.requirements ?? [];
+  const {
+    page: reqPage,
+    setPage: setReqPage,
+    pageItems: reqPageItems,
+    totalPages: reqTotalPages,
+    total: reqTotal,
+    from: reqFrom,
+    to: reqTo,
+  } = useListPagination(requirementItems, 25, String(firstOrderId));
+
   return (
     <div className="space-y-6">
       {canEdit && (
@@ -120,34 +143,35 @@ export function PlanningMaterialsTab({ subdivisionId }: Props) {
 
       <div>
         <h3 className="text-sm font-medium mb-2">Остатки материалов</h3>
-        <div className="rounded-md border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Материал</TableHead>
-                <TableHead>Тип</TableHead>
-                <TableHead>SAP</TableHead>
-                <TableHead>Остаток</TableHead>
-                <TableHead>Резерв</TableHead>
-                <TableHead>Мин.</TableHead>
-                <TableHead>Склад</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {isLoading ? (
+        <div>
+          <div className="rounded-md border">
+            <Table>
+              <TableHeader>
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center text-muted-foreground">
-                    Загрузка…
-                  </TableCell>
+                  <TableHead>Материал</TableHead>
+                  <TableHead>Тип</TableHead>
+                  <TableHead>SAP</TableHead>
+                  <TableHead>Остаток</TableHead>
+                  <TableHead>Резерв</TableHead>
+                  <TableHead>Мин.</TableHead>
+                  <TableHead>Склад</TableHead>
                 </TableRow>
-              ) : stocks.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={7} className="text-center text-muted-foreground">
-                    Нет остатков
-                  </TableCell>
-                </TableRow>
-              ) : (
-                stocks.map((s) => {
+              </TableHeader>
+              <TableBody>
+                {isLoading ? (
+                  <TableRow>
+                    <TableCell colSpan={7} className="text-center text-muted-foreground">
+                      Загрузка…
+                    </TableCell>
+                  </TableRow>
+                ) : stocksTotal === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={7} className="text-center text-muted-foreground">
+                      Нет остатков
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  stockPageItems.map((s) => {
                   const avail = s.quantity - s.reservedQuantity;
                   const low = avail < s.minStock;
                   return (
@@ -173,6 +197,15 @@ export function PlanningMaterialsTab({ subdivisionId }: Props) {
               )}
             </TableBody>
           </Table>
+          </div>
+          <ListPaginationControls
+            page={stocksPage}
+            totalPages={stocksTotalPages}
+            total={stocksTotal}
+            from={stocksFrom}
+            to={stocksTo}
+            onPageChange={setStocksPage}
+          />
         </div>
       </div>
 
@@ -181,33 +214,43 @@ export function PlanningMaterialsTab({ subdivisionId }: Props) {
           <h3 className="text-sm font-medium mb-2">
             Потребность по заказу #{requirements.orderId} (остаток: {requirements.quantity})
           </h3>
-          <div className="rounded-md border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Материал</TableHead>
-                  <TableHead>Нужно</TableHead>
-                  <TableHead>Доступно</TableHead>
-                  <TableHead>Статус</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {requirements.requirements.map((r) => (
-                  <TableRow key={r.materialId}>
-                    <TableCell>{r.materialName}</TableCell>
-                    <TableCell>{r.required} {r.unit}</TableCell>
-                    <TableCell>{r.available}</TableCell>
-                    <TableCell>
-                      {r.sufficient ? (
-                        <Badge variant="outline">OK</Badge>
-                      ) : (
-                        <Badge variant="destructive">Нехватка</Badge>
-                      )}
-                    </TableCell>
+          <div>
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Материал</TableHead>
+                    <TableHead>Нужно</TableHead>
+                    <TableHead>Доступно</TableHead>
+                    <TableHead>Статус</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {reqPageItems.map((r) => (
+                    <TableRow key={r.materialId}>
+                      <TableCell>{r.materialName}</TableCell>
+                      <TableCell>{r.required} {r.unit}</TableCell>
+                      <TableCell>{r.available}</TableCell>
+                      <TableCell>
+                        {r.sufficient ? (
+                          <Badge variant="outline">OK</Badge>
+                        ) : (
+                          <Badge variant="destructive">Нехватка</Badge>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+            <ListPaginationControls
+              page={reqPage}
+              totalPages={reqTotalPages}
+              total={reqTotal}
+              from={reqFrom}
+              to={reqTo}
+              onPageChange={setReqPage}
+            />
           </div>
         </div>
       )}

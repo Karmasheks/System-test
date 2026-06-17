@@ -17,6 +17,8 @@ import { useEquipmentApi } from "@/hooks/use-equipment-api";
 import { DEFAULT_DOCUMENT_CATEGORIES, documentCategoryLabel } from "@shared/asset-constants";
 import { FileText, Plus, Trash2, ExternalLink } from "lucide-react";
 import type { Document } from "@shared/schema";
+import { ListPaginationControls } from "@/components/list-pagination-controls";
+import { useListPagination } from "@/hooks/use-list-pagination";
 
 export default function DocumentsPage() {
   const { toast } = useToast();
@@ -48,6 +50,17 @@ export default function DocumentsPage() {
       .filter((c) => !DEFAULT_DOCUMENT_CATEGORIES.some((d) => d.code === c.name))
       .map((c) => ({ code: c.name, label: c.name })),
   ];
+
+  const docsFilterKey = `${equipmentFilter}-${categoryFilter}`;
+  const {
+    page,
+    setPage,
+    pageItems: paginatedDocs,
+    totalPages,
+    total: docsTotal,
+    from,
+    to,
+  } = useListPagination(docs, 25, docsFilterKey);
 
   const reset = () => {
     setEdit(null);
@@ -144,9 +157,10 @@ export default function DocumentsPage() {
           </Card>
 
           <Card>
-            <CardHeader><CardTitle>Список ({docs.length})</CardTitle></CardHeader>
+            <CardHeader><CardTitle>Список ({docsTotal})</CardTitle></CardHeader>
             <CardContent>
               {isLoading ? <p>Загрузка…</p> : (
+                <div>
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -158,7 +172,7 @@ export default function DocumentsPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {docs.map((d) => (
+                    {paginatedDocs.map((d) => (
                       <TableRow key={d.id}>
                         <TableCell className="font-medium">{d.title}</TableCell>
                         <TableCell>{documentCategoryLabel(d.category, customCategories)}</TableCell>
@@ -176,13 +190,22 @@ export default function DocumentsPage() {
                     ))}
                   </TableBody>
                 </Table>
+                <ListPaginationControls
+                  page={page}
+                  totalPages={totalPages}
+                  total={docsTotal}
+                  from={from}
+                  to={to}
+                  onPageChange={setPage}
+                />
+                </div>
               )}
             </CardContent>
           </Card>
         </main>
 
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
+      <Dialog open={open} onOpenChange={setOpen} modal>
+        <DialogContent blockOutsideClose>
           <DialogHeader><DialogTitle>{edit ? "Редактировать" : "Новый документ"}</DialogTitle></DialogHeader>
           <div className="grid gap-3">
             <div><Label>Название *</Label><Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></div>

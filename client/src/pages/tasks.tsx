@@ -22,7 +22,7 @@ import {
 import { useAuth } from "@/hooks/use-auth";
 import { useAccessControl } from "@/hooks/use-access-control";
 import { useSubdivisions } from "@/hooks/use-subdivisions";
-import { filterItemsBySubdivision } from "@/lib/subdivision-filter";
+import { filterItemsBySubdivision, filterBySubdivisionScope, filterRemarksBySubdivisionScope, equipmentIdsInScope } from "@/lib/subdivision-filter";
 import { useSubdivisionFilter } from "@/hooks/use-subdivision-filter";
 import { SubdivisionFilterSelect } from "@/components/subdivision-filter-select";
 import { useToast } from "@/hooks/use-toast";
@@ -39,6 +39,8 @@ import type { Equipment } from "@shared/schema";
 import { buildTaskListGroups } from "@/lib/task-list-groups";
 import { matchesListSearch } from "@/lib/list-search";
 import { ListSearchInput } from "@/components/list-search-input";
+import { ListPaginationControls } from "@/components/list-pagination-controls";
+import { useListPagination } from "@/hooks/use-list-pagination";
 import { TaskListGroupCard } from "@/components/tasks/task-list-group-card";
 
 type Task = TaskRecord & {
@@ -313,9 +315,29 @@ export default function TasksPage() {
     return eq ? eq.name : id;
   };
 
+  const scopedEquipmentIds = useMemo(
+    () =>
+      equipmentIdsInScope(
+        equipment.map((e) => ({ id: e.id, subdivisionId: e.subdivisionId })),
+        filterSubdivisionId,
+        null
+      ),
+    [equipment, filterSubdivisionId]
+  );
+
   const scopedTasks = useMemo(
-    () => filterItemsBySubdivision(categoryTasks, filterSubdivisionId),
-    [categoryTasks, filterSubdivisionId]
+    () => filterBySubdivisionScope(categoryTasks, filterSubdivisionId, scopedEquipmentIds),
+    [categoryTasks, filterSubdivisionId, scopedEquipmentIds]
+  );
+
+  const scopedRemarks = useMemo(
+    () => filterRemarksBySubdivisionScope(remarks, filterSubdivisionId, scopedEquipmentIds),
+    [remarks, filterSubdivisionId, scopedEquipmentIds]
+  );
+
+  const scopedRequests = useMemo(
+    () => filterBySubdivisionScope(requests, filterSubdivisionId, scopedEquipmentIds),
+    [requests, filterSubdivisionId, scopedEquipmentIds]
   );
 
   const filteredTasks = scopedTasks.filter((task: Task) => {
@@ -338,12 +360,23 @@ export default function TasksPage() {
     return statusMatch && priorityMatch && searchMatch;
   });
 
+  const tasksFilterKey = `${section}-${scope}-${tasksFilter}-${filterPriority}-${searchQuery}-${filterValue}`;
+  const {
+    page: tasksPage,
+    setPage: setTasksPage,
+    pageItems: paginatedTasks,
+    totalPages: tasksTotalPages,
+    total: tasksTotal,
+    from: tasksFrom,
+    to: tasksTo,
+  } = useListPagination(filteredTasks, 25, tasksFilterKey);
+
   const taskDisplayGroups = useMemo(
-    () => buildTaskListGroups(filteredTasks),
-    [filteredTasks]
+    () => buildTaskListGroups(paginatedTasks),
+    [paginatedTasks]
   );
 
-  const filteredRemarks = remarks.filter((remark) => {
+  const filteredRemarks = scopedRemarks.filter((remark) => {
     const statusMatch = remarksFilter === "all" || remark.status === remarksFilter;
     const searchMatch = matchesListSearch(searchQuery, [
       remark.title,
@@ -356,9 +389,20 @@ export default function TasksPage() {
     return statusMatch && searchMatch;
   });
 
+  const remarksFilterKey = `${remarksFilter}-${searchQuery}-${filterValue}`;
+  const {
+    page: remarksPage,
+    setPage: setRemarksPage,
+    pageItems: paginatedRemarks,
+    totalPages: remarksTotalPages,
+    total: remarksTotal,
+    from: remarksFrom,
+    to: remarksTo,
+  } = useListPagination(filteredRemarks, 25, remarksFilterKey);
+
   const displayedRequests = useMemo(
     () =>
-      requests.filter((r) =>
+      scopedRequests.filter((r) =>
         matchesListSearch(searchQuery, [
           r.id,
           r.equipmentName,
@@ -370,17 +414,28 @@ export default function TasksPage() {
           r.problemDescription,
         ])
       ),
-    [requests, searchQuery, meta]
+    [scopedRequests, searchQuery, meta]
   );
 
+  const requestsFilterKey = `${requestsFilter}-${searchQuery}-${filterValue}`;
+  const {
+    page: requestsPage,
+    setPage: setRequestsPage,
+    pageItems: paginatedRequests,
+    totalPages: requestsTotalPages,
+    total: requestsTotal,
+    from: requestsFrom,
+    to: requestsTo,
+  } = useListPagination(displayedRequests, 25, requestsFilterKey);
+
   const myTaskStats = useMemo(() => {
-    const total = categoryTasks.length;
-    const completed = categoryTasks.filter((t) => t.status === "completed").length;
-    const pending = categoryTasks.filter((t) => t.status === "pending").length;
-    const inProgress = categoryTasks.filter((t) => t.status === "in_progress").length;
-    const overdue = categoryTasks.filter((t) => isOverdue(t)).length;
+    const total = scopedTasks.length;
+    const completed = scopedTasks.filter((t) => t.status === "completed").length;
+    const pending = scopedTasks.filter((t) => t.status === "pending").length;
+    const inProgress = scopedTasks.filter((t) => t.status === "in_progress").length;
+    const overdue = scopedTasks.filter((t) => isOverdue(t)).length;
     return { total, completed, pending, inProgress, overdue };
-  }, [categoryTasks]);
+  }, [scopedTasks]);
 
   // Счетчики для активных элементов
 
@@ -566,6 +621,14 @@ export default function TasksPage() {
                         ))
                       )}
                     </div>
+                    <ListPaginationControls
+                      page={tasksPage}
+                      totalPages={tasksTotalPages}
+                      total={tasksTotal}
+                      from={tasksFrom}
+                      to={tasksTo}
+                      onPageChange={setTasksPage}
+                    />
             </>
           )}
 
@@ -611,12 +674,12 @@ export default function TasksPage() {
 
               <Card>
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-base">Найдено: {displayedRequests.length}</CardTitle>
+                  <CardTitle className="text-base">Найдено: {requestsTotal}</CardTitle>
                 </CardHeader>
                 <CardContent>
                         {requestsLoading ? (
                           <p className="text-muted-foreground">Загрузка...</p>
-                        ) : displayedRequests.length === 0 ? (
+                        ) : paginatedRequests.length === 0 ? (
                           <p className="text-muted-foreground">Заявок не найдено</p>
                         ) : (
                           <div className="overflow-x-auto">
@@ -633,7 +696,7 @@ export default function TasksPage() {
                                 </tr>
                               </thead>
                               <tbody>
-                                {displayedRequests.map((r) => (
+                                {paginatedRequests.map((r) => (
                                   <tr
                                     key={r.id}
                                     className="border-b hover:bg-muted/50 cursor-pointer"
@@ -668,6 +731,14 @@ export default function TasksPage() {
                             </table>
                           </div>
                         )}
+                        <ListPaginationControls
+                          page={requestsPage}
+                          totalPages={requestsTotalPages}
+                          total={requestsTotal}
+                          from={requestsFrom}
+                          to={requestsTo}
+                          onPageChange={setRequestsPage}
+                        />
                       </CardContent>
                     </Card>
             </div>
@@ -717,7 +788,7 @@ export default function TasksPage() {
               </div>
 
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                      {filteredRemarks.length === 0 ? (
+                      {remarksTotal === 0 ? (
                         <div className="col-span-full text-center py-8">
                           <p className="text-gray-500 dark:text-gray-400">
                             {remarksFilter === 'all' ? 'Замечаний не найдено' : 
@@ -727,7 +798,7 @@ export default function TasksPage() {
                           </p>
                         </div>
                       ) : (
-                        filteredRemarks.map((remark: any) => (
+                        paginatedRemarks.map((remark: any) => (
                           <Card key={remark.id} className="relative">
                             <CardHeader className="pb-3">
                               <div className="flex items-start justify-between">
@@ -811,6 +882,14 @@ export default function TasksPage() {
                         ))
                       )}
                     </div>
+                    <ListPaginationControls
+                      page={remarksPage}
+                      totalPages={remarksTotalPages}
+                      total={remarksTotal}
+                      from={remarksFrom}
+                      to={remarksTo}
+                      onPageChange={setRemarksPage}
+                    />
             </div>
           )}
         </div>

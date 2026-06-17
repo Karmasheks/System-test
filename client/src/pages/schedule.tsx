@@ -42,7 +42,7 @@ import { useTaskDialog } from "@/hooks/use-task-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   equipmentIdsInScope,
-  filterItemsBySubdivision,
+  filterBySubdivisionScope,
 } from "@/lib/subdivision-filter";
 import { equipmentOptionLabel } from "@/lib/equipment-label";
 import {
@@ -140,8 +140,8 @@ export default function Schedule() {
   );
 
   const scopedTasks = useMemo(
-    () => filterItemsBySubdivision(tasks, filterSubdivisionId),
-    [tasks, filterSubdivisionId]
+    () => filterBySubdivisionScope(tasks, filterSubdivisionId, scopedEquipmentIds),
+    [tasks, filterSubdivisionId, scopedEquipmentIds]
   );
 
   const calEvents = useMemo(() => {

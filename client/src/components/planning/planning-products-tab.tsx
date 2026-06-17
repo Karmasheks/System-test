@@ -37,6 +37,8 @@ import {
 } from "@/hooks/use-production-planning";
 import { computeShiftNormFromCycle } from "@shared/production-norm-utils";
 import { Plus, Pencil, Trash2, Package } from "lucide-react";
+import { ListPaginationControls } from "@/components/list-pagination-controls";
+import { useListPagination } from "@/hooks/use-list-pagination";
 
 type Props = {
   subdivisionId: number;
@@ -65,6 +67,16 @@ export function PlanningProductsTab({ subdivisionId }: Props) {
       ),
     [allEquipment, subdivisionId]
   );
+
+  const {
+    page,
+    setPage,
+    pageItems: productPageItems,
+    totalPages,
+    total: productsTotal,
+    from,
+    to,
+  } = useListPagination(products, 25, `${subdivisionId}-${search}`);
 
   const {
     createProduct,
@@ -264,34 +276,35 @@ export function PlanningProductsTab({ subdivisionId }: Props) {
         )}
       </div>
 
-      <div className="rounded-md border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>SAP</TableHead>
-              <TableHead>Наименование</TableHead>
-              <TableHead>№ ПФ</TableHead>
-              <TableHead>Норма 11ч</TableHead>
-              <TableHead>Цикл</TableHead>
-              <TableHead>Гнёзд</TableHead>
-              <TableHead></TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {isLoading ? (
+      <div>
+        <div className="rounded-md border">
+          <Table>
+            <TableHeader>
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground">
-                  Загрузка…
-                </TableCell>
+                <TableHead>SAP</TableHead>
+                <TableHead>Наименование</TableHead>
+                <TableHead>№ ПФ</TableHead>
+                <TableHead>Норма 11ч</TableHead>
+                <TableHead>Цикл</TableHead>
+                <TableHead>Гнёзд</TableHead>
+                <TableHead></TableHead>
               </TableRow>
-            ) : products.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground">
-                  Нет изделий. Создайте изделие или из оснастки ПФ.
-                </TableCell>
-              </TableRow>
-            ) : (
-              products.map((p) => (
+            </TableHeader>
+            <TableBody>
+              {isLoading ? (
+                <TableRow>
+                  <TableCell colSpan={7} className="text-center text-muted-foreground">
+                    Загрузка…
+                  </TableCell>
+                </TableRow>
+              ) : productsTotal === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={7} className="text-center text-muted-foreground">
+                    Нет изделий. Создайте изделие или из оснастки ПФ.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                productPageItems.map((p) => (
                 <TableRow key={p.id}>
                   <TableCell className="font-mono">{p.sapCode}</TableCell>
                   <TableCell>{p.name}</TableCell>
@@ -313,6 +326,15 @@ export function PlanningProductsTab({ subdivisionId }: Props) {
             )}
           </TableBody>
         </Table>
+        </div>
+        <ListPaginationControls
+          page={page}
+          totalPages={totalPages}
+          total={productsTotal}
+          from={from}
+          to={to}
+          onPageChange={setPage}
+        />
       </div>
 
       <Dialog
