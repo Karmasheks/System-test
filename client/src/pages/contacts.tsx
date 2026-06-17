@@ -28,6 +28,8 @@ import { Plus, Trash2, UserCircle } from "lucide-react";
 import type { Contact } from "@shared/schema";
 import { matchesListSearch } from "@/lib/list-search";
 import { ListSearchInput } from "@/components/list-search-input";
+import { ListPaginationControls } from "@/components/list-pagination-controls";
+import { useListPagination } from "@/hooks/use-list-pagination";
 
 const formDialogClass =
   "max-w-lg w-[min(100vw-2rem,32rem)] max-h-[90vh] overflow-y-auto overflow-x-hidden p-4 sm:p-6";
@@ -68,6 +70,18 @@ export default function ContactsPage() {
       ]);
     });
   }, [contacts, filterSubdivisionId, searchQuery, suppliers, subdivisions, allEquipment]);
+
+  const listFilterKey = `${filterValue}-${searchQuery}`;
+  const {
+    page,
+    setPage,
+    pageItems: paginatedContacts,
+    totalPages,
+    total: filteredTotal,
+    from,
+    to,
+  } = useListPagination(filteredContacts, 25, listFilterKey);
+
   const { create, update, remove } = useContactMutations();
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState<Contact | null>(null);
@@ -170,7 +184,7 @@ export default function ContactsPage() {
         </div>
         <Card>
           <CardHeader className="flex flex-col gap-4">
-            <CardTitle>Список ({filteredContacts.length})</CardTitle>
+            <CardTitle>Список ({filteredTotal})</CardTitle>
             <div className="flex flex-wrap items-end gap-3">
               <ListSearchInput
                 value={searchQuery}
@@ -200,7 +214,7 @@ export default function ContactsPage() {
                   </p>
                 )}
                 <div className="md:hidden space-y-3">
-                  {filteredContacts.map((c) => (
+                  {paginatedContacts.map((c) => (
                     <div key={c.id} className="rounded-lg border p-3 space-y-2 bg-card">
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
@@ -261,7 +275,7 @@ export default function ContactsPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredContacts.map((c) => (
+                  {paginatedContacts.map((c) => (
                     <TableRow key={c.id}>
                       <TableCell className="font-medium">{c.name}</TableCell>
                       <TableCell>{c.company ?? "—"}</TableCell>
@@ -286,14 +300,22 @@ export default function ContactsPage() {
                   ))}
                 </TableBody>
               </Table>
+              <ListPaginationControls
+                page={page}
+                totalPages={totalPages}
+                total={filteredTotal}
+                from={from}
+                to={to}
+                onPageChange={setPage}
+              />
               </>
             )}
           </CardContent>
         </Card>
       </main>
 
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className={formDialogClass}>
+      <Dialog open={open} onOpenChange={setOpen} modal>
+        <DialogContent className={formDialogClass} blockOutsideClose>
           <DialogHeader>
             <DialogTitle>{edit ? "Редактировать контакт" : "Новый контакт"}</DialogTitle>
           </DialogHeader>

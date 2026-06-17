@@ -27,6 +27,8 @@ import { Building2, Plus, Trash2 } from "lucide-react";
 import type { Supplier } from "@shared/schema";
 import { matchesListSearch } from "@/lib/list-search";
 import { ListSearchInput } from "@/components/list-search-input";
+import { ListPaginationControls } from "@/components/list-pagination-controls";
+import { useListPagination } from "@/hooks/use-list-pagination";
 
 const formDialogClass =
   "max-w-lg w-[min(100vw-2rem,32rem)] max-h-[90vh] overflow-y-auto overflow-x-hidden p-4 sm:p-6";
@@ -63,6 +65,18 @@ export default function SuppliersPage() {
       ])
     );
   }, [suppliers, filterSubdivisionId, searchQuery, subdivisions, allEquipment]);
+
+  const listFilterKey = `${filterValue}-${searchQuery}`;
+  const {
+    page,
+    setPage,
+    pageItems: paginatedSuppliers,
+    totalPages,
+    total: filteredTotal,
+    from,
+    to,
+  } = useListPagination(filteredSuppliers, 25, listFilterKey);
+
   const { create, update, remove } = useSupplierMutations();
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState<Supplier | null>(null);
@@ -123,7 +137,7 @@ export default function SuppliersPage() {
         </div>
         <Card>
           <CardHeader className="flex flex-col gap-4">
-            <CardTitle>Список ({filteredSuppliers.length})</CardTitle>
+            <CardTitle>Список ({filteredTotal})</CardTitle>
             <div className="flex flex-wrap items-end gap-3">
               <ListSearchInput
                 value={searchQuery}
@@ -149,7 +163,8 @@ export default function SuppliersPage() {
               <>
                 {filterSubdivisionId != null && (
                   <p className="text-sm text-muted-foreground mb-3">
-                    Показано: {filteredSuppliers.length} из {suppliers.length}
+                    Показано: {filteredTotal} из {suppliers.length}
+                    {totalPages > 1 && ` · страница ${page} из ${totalPages}`}
                   </p>
                 )}
               <Table>
@@ -167,7 +182,7 @@ export default function SuppliersPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredSuppliers.map((s) => (
+                  {paginatedSuppliers.map((s) => (
                     <TableRow key={s.id}>
                       <TableCell className="font-medium">{s.name}</TableCell>
                       <TableCell>{s.contactPerson ?? "—"}</TableCell>
@@ -193,14 +208,22 @@ export default function SuppliersPage() {
                   ))}
                 </TableBody>
               </Table>
+              <ListPaginationControls
+                page={page}
+                totalPages={totalPages}
+                total={filteredTotal}
+                from={from}
+                to={to}
+                onPageChange={setPage}
+              />
               </>
             )}
           </CardContent>
         </Card>
       </main>
 
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className={formDialogClass}>
+      <Dialog open={open} onOpenChange={setOpen} modal>
+        <DialogContent className={formDialogClass} blockOutsideClose>
           <DialogHeader>
             <DialogTitle>{edit ? "Редактировать поставщика" : "Новый поставщик"}</DialogTitle>
           </DialogHeader>

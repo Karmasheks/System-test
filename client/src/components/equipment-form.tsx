@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -228,9 +229,10 @@ export default function EquipmentForm({ initialData, allEquipment, onSave, onCan
 
       <div>
         <Label htmlFor="description">Описание оборудования</Label>
-        <textarea
+        <Textarea
           id="description"
-          className="w-full min-h-[80px] px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+          className="min-h-[10rem] resize-y leading-relaxed"
+          rows={6}
           value={formData.description}
           onChange={handleDescriptionChange}
           placeholder="Введите описание оборудования (опционально)"

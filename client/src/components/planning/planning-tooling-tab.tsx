@@ -39,6 +39,8 @@ import {
 import { Plus, Wrench, PackagePlus } from "lucide-react";
 import { computeShiftNormFromCycle } from "@shared/production-norm-utils";
 import type { ProductionTooling } from "@shared/schema";
+import { ListPaginationControls } from "@/components/list-pagination-controls";
+import { useListPagination } from "@/hooks/use-list-pagination";
 
 type Props = {
   subdivisionId: number;
@@ -55,6 +57,15 @@ export function PlanningToolingTab({ subdivisionId }: Props) {
     search,
     false
   );
+  const {
+    page,
+    setPage,
+    pageItems: paginatedTooling,
+    totalPages,
+    total: toolingTotal,
+    from,
+    to,
+  } = useListPagination(tooling, 25, `${subdivisionId}-${search}`);
   const { data: products = [] } = useProductionProducts({ subdivisionId });
   const { createTooling, updateTooling, createProductFromTooling } = useProductionMutations();
 
@@ -235,7 +246,7 @@ export function PlanningToolingTab({ subdivisionId }: Props) {
                 </TableCell>
               </TableRow>
             ) : (
-              tooling.map((row) => (
+              paginatedTooling.map((row) => (
                 <TableRow key={row.id}>
                   <TableCell className="font-mono">{row.pfNumber}</TableCell>
                   <TableCell>{row.name}</TableCell>
@@ -276,9 +287,18 @@ export function PlanningToolingTab({ subdivisionId }: Props) {
           </TableBody>
         </Table>
       </div>
+      <ListPaginationControls
+        page={page}
+        totalPages={totalPages}
+        total={toolingTotal}
+        from={from}
+        to={to}
+        onPageChange={setPage}
+        className="px-1"
+      />
 
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-lg">
+      <Dialog open={open} onOpenChange={setOpen} modal>
+        <DialogContent className="max-w-lg" blockOutsideClose>
           <DialogHeader>
             <DialogTitle>
               {editing ? "Редактировать оснастку" : "Новая ПФ / оснастка"}
@@ -369,8 +389,8 @@ export function PlanningToolingTab({ subdivisionId }: Props) {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={productOpen} onOpenChange={setProductOpen}>
-        <DialogContent>
+      <Dialog open={productOpen} onOpenChange={setProductOpen} modal>
+        <DialogContent blockOutsideClose>
           <DialogHeader>
             <DialogTitle>Создать изделие из ПФ</DialogTitle>
           </DialogHeader>

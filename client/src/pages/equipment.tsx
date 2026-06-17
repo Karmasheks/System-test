@@ -46,6 +46,8 @@ import { SubdivisionFilterSelect } from "@/components/subdivision-filter-select"
 import { filterItemsBySubdivision } from "@/lib/subdivision-filter";
 import { matchesListSearch } from "@/lib/list-search";
 import { ListSearchInput } from "@/components/list-search-input";
+import { ListPaginationControls } from "@/components/list-pagination-controls";
+import { useListPagination } from "@/hooks/use-list-pagination";
 import { EquipmentCommentsPanel } from "@/components/equipment-comments-panel";
 import { EquipmentProductionPlanPanel } from "@/components/equipment-production-plan-panel";
 import { mobileTabsTriggerClass } from "@/lib/mobile-tabs";
@@ -127,6 +129,17 @@ export default function Equipment() {
     }
     return list;
   }, [equipment, typeFilter, statusFilter, filterSubdivisionId, searchQuery, subdivisions]);
+
+  const listFilterKey = `${filterValue}-${typeFilter}-${statusFilter}-${searchQuery}`;
+  const {
+    page,
+    setPage,
+    pageItems: paginatedEquipment,
+    totalPages,
+    total: filteredTotal,
+    from,
+    to,
+  } = useListPagination(filteredEquipment, 25, listFilterKey);
 
   const createEquipmentMutation = useMutation({
     mutationFn: async (newEquipment: any) => {
@@ -466,14 +479,14 @@ export default function Equipment() {
 
                 <div className="flex gap-2">
                   <SubdivisionsPanel />
-                  <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
+                  <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen} modal>
                     <DialogTrigger asChild>
                       <Button onClick={openAddDialog} className="bg-blue-600 hover:bg-blue-700 text-white">
                         <PlusCircle className="h-4 w-4 mr-2" />
                         Добавить оборудование
                       </Button>
                     </DialogTrigger>
-                    <DialogContent className={equipmentFormDialogClass}>
+                    <DialogContent className={equipmentFormDialogClass} blockOutsideClose>
                     <DialogHeader>
                       <DialogTitle>Добавить новое оборудование</DialogTitle>
                       <DialogDescription>
@@ -661,7 +674,8 @@ export default function Equipment() {
                       </Button>
                     </div>
                     <p className="text-sm text-muted-foreground pb-2">
-                      Показано: {filteredEquipment.length} из {equipment.length}
+                      Показано: {filteredTotal} из {equipment.length}
+                      {totalPages > 1 && ` · страница ${page} из ${totalPages}`}
                     </p>
                   </div>
                   <div className="min-w-0">
@@ -679,7 +693,7 @@ export default function Equipment() {
                         </tr>
                       </thead>
                       <tbody>
-                        {filteredEquipment.map((equipmentItem) => (
+                        {paginatedEquipment.map((equipmentItem) => (
                           <tr
                             key={equipmentItem.id}
                             role="button"
@@ -754,14 +768,22 @@ export default function Equipment() {
                         ))}
                       </tbody>
                     </table>
+                    <ListPaginationControls
+                      page={page}
+                      totalPages={totalPages}
+                      total={filteredTotal}
+                      from={from}
+                      to={to}
+                      onPageChange={setPage}
+                    />
                   </div>
                 </CardContent>
               </Card>
         </div>
       </main>
 
-      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent className={equipmentFormDialogClass}>
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen} modal>
+        <DialogContent className={equipmentFormDialogClass} blockOutsideClose>
           <DialogHeader>
             <DialogTitle>Редактировать оборудование</DialogTitle>
             <DialogDescription>Измените информацию об оборудовании и настройки периодичности ТО</DialogDescription>

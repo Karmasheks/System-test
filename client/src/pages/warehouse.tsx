@@ -41,6 +41,8 @@ import {
   filterMovements,
   WarehouseMovementItem,
 } from "@/components/warehouse-movement-item";
+import { ListPaginationControls } from "@/components/list-pagination-controls";
+import { useListPagination } from "@/hooks/use-list-pagination";
 import {
   Package,
   Plus,
@@ -210,6 +212,16 @@ export default function WarehousePage() {
     search: search || undefined,
     lowStock: lowStockOnly,
   });
+  const partsFilterKey = `${filterValue}-${categoryFilter}-${search}-${lowStockOnly}`;
+  const {
+    page: partsPage,
+    setPage: setPartsPage,
+    pageItems: paginatedParts,
+    totalPages: partsTotalPages,
+    total: partsTotal,
+    from: partsFrom,
+    to: partsTo,
+  } = useListPagination(parts, 25, partsFilterKey);
   const { data: activity = [] } = useWarehouseActivity(30);
   const { data: tasks = [] } = useQuery<{ id: number; title: string }[]>({
     queryKey: ["/api/tasks"],
@@ -529,7 +541,7 @@ export default function WarehousePage() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Позиции ({parts.length})</CardTitle>
+              <CardTitle>Позиции ({partsTotal})</CardTitle>
             </CardHeader>
             <CardContent>
               {isLoading ? (
@@ -537,6 +549,7 @@ export default function WarehousePage() {
               ) : parts.length === 0 ? (
                 <p className="text-muted-foreground">Запчастей не найдено</p>
               ) : (
+                <div>
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -550,7 +563,7 @@ export default function WarehousePage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {parts.map((part) => (
+                    {paginatedParts.map((part) => (
                       <TableRow
                         key={part.id}
                         role="button"
@@ -588,6 +601,15 @@ export default function WarehousePage() {
                     ))}
                   </TableBody>
                 </Table>
+                <ListPaginationControls
+                  page={partsPage}
+                  totalPages={partsTotalPages}
+                  total={partsTotal}
+                  from={partsFrom}
+                  to={partsTo}
+                  onPageChange={setPartsPage}
+                />
+                </div>
               )}
             </CardContent>
           </Card>
@@ -622,8 +644,8 @@ export default function WarehousePage() {
       </div>
 
       {/* Create / Edit dialog */}
-      <Dialog open={formOpen} onOpenChange={setFormOpen}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+      <Dialog open={formOpen} onOpenChange={setFormOpen} modal>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto" blockOutsideClose>
           <DialogHeader>
             <DialogTitle>{edit ? "Редактировать запчасть" : "Новая запчасть"}</DialogTitle>
           </DialogHeader>
