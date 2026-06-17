@@ -955,7 +955,6 @@ export default function Dashboard() {
                           <div className="space-y-1">
                             {Object.entries(equipmentData.categories)
                               .sort(([, a], [, b]) => b - a)
-                              .slice(0, 6)
                               .map(([category, count]) => (
                                 <div key={category} className="flex justify-between text-xs gap-2">
                                   <span className="text-multiline">{category}</span>
