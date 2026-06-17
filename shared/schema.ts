@@ -33,6 +33,8 @@ export const users = pgTable("users", {
   lastLoginAt: timestamp("last_login_at"),
   vacationPeriods: jsonb("vacation_periods").$type<VacationPeriod[] | null>().default([]),
   isActive: boolean("is_active").notNull().default(true),
+  /** Главный супер-администратор: назначает системных и админов подразделений, его роль неизменяема */
+  isSuperAdmin: boolean("is_super_admin").notNull().default(false),
   useCustomPermissions: boolean("use_custom_permissions").notNull().default(false),
   permissionOverrides: jsonb("permission_overrides").$type<UserPermissionOverrides | null>(),
   telegramChatId: text("telegram_chat_id"),
@@ -500,6 +502,45 @@ export const notifications = pgTable("notifications", {
   scheduledFor: timestamp("scheduled_for"), // When to show the notification
   createdAt: timestamp("created_at").notNull().defaultNow(),
   readAt: timestamp("read_at"),
+});
+
+export const chatConversations = pgTable("chat_conversations", {
+  id: serial("id").primaryKey(),
+  type: text("type").notNull(), // direct | group
+  title: text("title"),
+  createdById: integer("created_by_id").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const chatConversationMembers = pgTable(
+  "chat_conversation_members",
+  {
+    id: serial("id").primaryKey(),
+    conversationId: integer("conversation_id").notNull(),
+    userId: integer("user_id").notNull(),
+    role: text("role").notNull().default("member"), // member | admin
+    joinedAt: timestamp("joined_at").notNull().defaultNow(),
+    lastReadAt: timestamp("last_read_at"),
+    leftAt: timestamp("left_at"),
+  },
+  (table) => ({
+    uniqueMember: unique("chat_conversation_members_unique").on(
+      table.conversationId,
+      table.userId
+    ),
+  })
+);
+
+export const chatMessages = pgTable("chat_messages", {
+  id: serial("id").primaryKey(),
+  conversationId: integer("conversation_id").notNull(),
+  senderId: integer("sender_id").notNull(),
+  body: text("body").notNull(),
+  messageKind: text("message_kind").notNull().default("user"), // user | leave
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  editedAt: timestamp("edited_at"),
+  deletedAt: timestamp("deleted_at"),
 });
 
 export const warehouseCategories = pgTable("warehouse_categories", {
@@ -1328,6 +1369,19 @@ export const insertRemarkSchema = createInsertSchema(remarks).omit({ id: true })
 export const insertInspectionChecklistSchema = createInsertSchema(inspectionChecklists).omit({ id: true });
 export const insertDailyInspectionSchema = createInsertSchema(dailyInspections).omit({ id: true });
 export const insertNotificationSchema = createInsertSchema(notifications).omit({ id: true });
+export const insertChatConversationSchema = createInsertSchema(chatConversations).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export const insertChatConversationMemberSchema = createInsertSchema(chatConversationMembers).omit({
+  id: true,
+  joinedAt: true,
+});
+export const insertChatMessageSchema = createInsertSchema(chatMessages).omit({
+  id: true,
+  createdAt: true,
+});
 export const insertContactSchema = createInsertSchema(contacts)
   .omit({ id: true, createdAt: true })
   .extend({
@@ -1753,6 +1807,12 @@ export type InsertInspectionChecklist = z.infer<typeof insertInspectionChecklist
 export type DailyInspection = typeof dailyInspections.$inferSelect;
 export type InsertDailyInspection = z.infer<typeof insertDailyInspectionSchema>;
 export type Notification = typeof notifications.$inferSelect;
+export type ChatConversation = typeof chatConversations.$inferSelect;
+export type ChatConversationMember = typeof chatConversationMembers.$inferSelect;
+export type ChatMessage = typeof chatMessages.$inferSelect;
+export type InsertChatConversation = z.infer<typeof insertChatConversationSchema>;
+export type InsertChatConversationMember = z.infer<typeof insertChatConversationMemberSchema>;
+export type InsertChatMessage = z.infer<typeof insertChatMessageSchema>;
 export type InsertNotification = z.infer<typeof insertNotificationSchema>;
 export type Login = z.infer<typeof loginSchema>;
 export type Register = z.infer<typeof registerSchema>;

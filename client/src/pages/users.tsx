@@ -64,8 +64,9 @@ import {
 
 export default function Users() {
   const { user, isLoading, isAuthenticated } = useAuth();
-  const { isFieldVisible, isSystemAdmin, canManageUsers, permissions } = useAccessControl();
+  const { isFieldVisible, isSystemAdmin, canManageUsers, canAssignAdminPrivileges, permissions } = useAccessControl();
   const systemAdmin = isSystemAdmin();
+  const superAdmin = canAssignAdminPrivileges();
   const managedSubdivisionFilter = systemAdmin
     ? undefined
     : (permissions?.managedSubdivisionIds ?? []);
@@ -504,6 +505,14 @@ export default function Users() {
   };
 
   const handleEditDialogOpen = (userItem: any) => {
+    if (userItem.isSuperAdmin && !superAdmin) {
+      toast({
+        title: "Недостаточно прав",
+        description: "Главного администратора может редактировать только он сам",
+        variant: "destructive",
+      });
+      return;
+    }
     setSelectedUser(userItem);
     setFormData({
       id: userItem.id,
@@ -557,6 +566,14 @@ export default function Users() {
   };
 
   const handleDeleteDialogOpen = (user: any) => {
+    if (user.isSuperAdmin) {
+      toast({
+        title: "Недостаточно прав",
+        description: "Главного администратора не можно удалить",
+        variant: "destructive",
+      });
+      return;
+    }
     setSelectedUser(user);
     setDeleteDialogOpen(true);
   };
@@ -581,11 +598,14 @@ export default function Users() {
     }
   };
 
-  const getRoleDisplayName = (role: string) => getRoleDisplayLabel(role);
+  const getRoleDisplayName = (role: string, isSuperAdminUser?: boolean) => {
+    if (isSuperAdminUser) return "Главный администратор";
+    return getRoleDisplayLabel(role);
+  };
 
   const roleSelectOptions = (() => {
     let options = sortedRoleProfiles;
-    if (!systemAdmin) {
+    if (!superAdmin) {
       options = options.filter((p) => p.role !== "admin" && !isSubdivisionAdminRole(p.role));
     }
     const extra = formData.role?.trim();
@@ -650,7 +670,15 @@ export default function Users() {
     );
   };
 
-  const renderRoleSelect = () => (
+  const renderRoleSelect = () => {
+    if (selectedUser?.isSuperAdmin) {
+      return (
+        <p className="text-sm rounded-md border p-2 bg-muted/30">
+          Главный администратор — роль не может быть изменена
+        </p>
+      );
+    }
+    return (
     <Select value={formData.role} onValueChange={handleRoleChange}>
       <SelectTrigger>
         <SelectValue />
@@ -664,7 +692,7 @@ export default function Users() {
             </SelectItem>
           ))}
         </SelectGroup>
-        {systemAdmin && subdivisionAdminRoleOptions.length > 0 && (
+        {superAdmin && subdivisionAdminRoleOptions.length > 0 && (
           <SelectGroup>
             <SelectLabel>Администраторы подразделений</SelectLabel>
             {subdivisionAdminRoleOptions.map((profile) => (
@@ -676,7 +704,8 @@ export default function Users() {
         )}
       </SelectContent>
     </Select>
-  );
+    );
+  };
 
   if (!canManageUsers()) {
     return (
@@ -852,9 +881,14 @@ export default function Users() {
                             </span>
                           </td>
                           <td className="px-2 py-2">
-                            <Badge className={`${getRoleBadgeColor(item.role)} text-[10px] px-1.5 py-0 font-normal leading-4 max-w-full truncate inline-block`} title={getRoleDisplayName(item.role)}>
-                              {getRoleDisplayName(item.role)}
+                            <Badge className={`${getRoleBadgeColor(item.role)} text-[10px] px-1.5 py-0 font-normal leading-4 max-w-full truncate inline-block`} title={getRoleDisplayName(item.role, item.isSuperAdmin)}>
+                              {getRoleDisplayName(item.role, item.isSuperAdmin)}
                             </Badge>
+                            {item.isSuperAdmin && (
+                              <Badge className="ml-1 text-[9px] px-1 py-0 h-3.5 font-normal bg-red-600 text-white">
+                                супер
+                              </Badge>
+                            )}
                           </td>
                           <td className="px-2 py-2">
                             <div className="scale-90 origin-left">
@@ -1024,7 +1058,7 @@ export default function Users() {
                 className="col-span-3"
               />
             </div>
-            {systemAdmin && formData.role !== "admin" && (
+            {superAdmin && formData.role !== "admin" && (
               <div className="col-span-full">
                 <ManagedSubdivisionsEditor
                   value={formData.managedSubdivisionIds}
@@ -1175,7 +1209,7 @@ export default function Users() {
               </div>
             </TabsContent>
             <TabsContent value="access" className="space-y-4 pt-4">
-              {systemAdmin && formData.role !== "admin" && (
+              {superAdmin && formData.role !== "admin" && (
                 <div className="flex items-start gap-3 rounded-md border p-4">
                   <Checkbox
                     id="edit-view-all-subdivisions"
@@ -1195,7 +1229,7 @@ export default function Users() {
                 </div>
               )}
 
-              {systemAdmin && formData.role !== "admin" && (
+              {superAdmin && formData.role !== "admin" && (
                 <ManagedSubdivisionsEditor
                   value={formData.managedSubdivisionIds}
                   onChange={(managedSubdivisionIds) =>
@@ -1315,7 +1349,7 @@ export default function Users() {
               <div>
                 <Label className="text-sm font-medium">Роль:</Label>
                 <Badge className={getRoleBadgeColor(selectedUser?.role || '')}>
-                  {getRoleDisplayName(selectedUser?.role || '')}
+                  {getRoleDisplayName(selectedUser?.role || '', selectedUser?.isSuperAdmin)}
                 </Badge>
               </div>
               <div>

@@ -42,6 +42,7 @@ function modules(
     "warehouse",
     "budget",
     "documents",
+    "production_planning",
     "users",
     "reports",
   ];
@@ -68,13 +69,14 @@ export function buildSubdivisionAdminRoleProfile(
     maintenance: "edit",
     tasks: "edit",
     service_requests: "edit",
-    contacts: "view",
-    suppliers: "view",
+    contacts: "edit",
+    suppliers: "edit",
     warehouse: "edit",
-    budget: "view",
-    documents: "view",
+    budget: "edit",
+    documents: "edit",
+    production_planning: "edit",
     users: "edit",
-    reports: "view",
+    reports: "edit",
   });
 
   return {

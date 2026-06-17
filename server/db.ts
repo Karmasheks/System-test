@@ -38,6 +38,9 @@ export async function initializeDatabase() {
     if (issuedParts > 0) {
       console.log(`Issued warehouse write-offs for ${issuedParts} closed service request reservation(s)`);
     }
+
+    const { bootstrapSchema } = await import("./schema-bootstrap");
+    await bootstrapSchema(connectionString!);
     
     // Seeding disabled - real data restored manually
     // await seedInitialData();

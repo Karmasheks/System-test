@@ -121,11 +121,14 @@ import {
 } from "./equipment-types-service";
 import { registerSubdivisionRoutes } from "./subdivision-routes";
 import { registerProductionRoutes } from "./production-routes";
+import { registerChatRoutes } from "./chat-routes";
+import { isSuperAdminUser } from "@shared/super-admin";
 import {
   canActorManageUser,
   filterUsersForActor,
   sanitizeUserWritePayload,
   usersAdminGuard,
+  assertSuperAdminTargetEditable,
 } from "./subdivision-admin-middleware";
 import { applySubdivisionAdminRoleFields } from "./subdivision-admin-role-service";
 import { isSubdivisionAdminRole } from "@shared/subdivision-admin-roles";
@@ -143,6 +146,7 @@ import {
   subdivisionForbidden,
 } from "./subdivision-scope-middleware";
 import { filterBySubdivisionScope } from "@shared/subdivision-scope";
+import { canAssignAdminPrivileges } from "@shared/super-admin";
 import { addPresenceSubscriber, notifyPresenceUpdated } from "./presence-events";
 import {
   loginSchema,
@@ -1485,13 +1489,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(
         allUsers
           .filter((u) => u.isActive)
-          .map(({ id, name, email, role, avatar, position }) => ({
+          .map(({ id, name, email, role, avatar, position, subdivisionId, extraSubdivisionIds }) => ({
             id,
             name,
             email,
             role,
             avatar,
             position,
+            subdivisionId,
+            extraSubdivisionIds,
           }))
       );
     } catch (error: any) {
@@ -1703,7 +1709,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Hash password
       const hashedPassword = await bcrypt.hash(userData.password, 10);
       
-      if (!isSystemAdmin(actor.role)) {
+      if (!canAssignAdminPrivileges(actor)) {
         userData.managedSubdivisionIds = [];
         const workSubIds = [
           userData.subdivisionId,
@@ -1768,7 +1774,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message });
       }
 
-      if (!isSystemAdmin(actor.role)) {
+      try {
+        assertSuperAdminTargetEditable(actor, targetUser, updateData);
+      } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : "Недостаточно прав";
+        return res.status(403).json({ message });
+      }
+
+      if (!canAssignAdminPrivileges(actor)) {
         delete updateData.managedSubdivisionIds;
       } else {
         const effectiveRole =
@@ -1850,6 +1863,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       if (!canActorManageUser(actor, targetUser)) {
         return res.status(403).json({ message: "Недостаточно прав для удаления этого пользователя" });
+      }
+      if (isSuperAdminUser(targetUser)) {
+        return res.status(403).json({ message: "Главного администратора не можно удалить" });
       }
 
       const deleted = await storage.deleteUser(userId);
@@ -2811,6 +2827,7 @@ app.delete("/api/maintenance/:id", authenticate, requireRole(writeRoles), async 
   registerPermissionsRoutes(app, authenticate, requireRole);
   registerSubdivisionRoutes(app, authenticate, requireRole);
   registerProductionRoutes(app, authenticate);
+  registerChatRoutes(app, authenticate);
 
   try {
     await ensureDefaultRoleProfiles();

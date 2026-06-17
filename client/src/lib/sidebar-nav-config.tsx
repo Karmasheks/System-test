@@ -15,10 +15,11 @@ import {
   Factory,
 } from "lucide-react";
 import type { SidebarNavKey } from "@shared/user-ui-preferences";
+import type { AppModule } from "@shared/permissions-constants";
 
 export type SidebarNavItemDef = {
   id: SidebarNavKey;
-  module: SidebarNavKey;
+  module: AppModule;
   alsoModule?: string;
   name: string;
   href: string;

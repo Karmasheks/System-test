@@ -171,6 +171,7 @@ export interface EffectivePermissions {
   managedSubdivisionIds: number[];
   isSubdivisionAdmin: boolean;
   isSystemAdmin: boolean;
+  isSuperAdmin: boolean;
 }
 
 export interface ModuleDefinition {

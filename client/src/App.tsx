@@ -19,6 +19,7 @@ import Budget from "@/pages/budget";
 import Warehouse from "@/pages/warehouse";
 import Documents from "@/pages/documents";
 import Planning from "@/pages/planning";
+import Messages from "@/pages/messages";
 import { MobileSidebarProvider } from "@/hooks/use-mobile-sidebar";
 import { AuthProvider } from "@/hooks/use-auth";
 import { UserStatusProvider } from "@/hooks/use-user-status";
@@ -50,6 +51,7 @@ function ProtectedAppRoutes() {
           <LegacyRouteRedirect to="/schedule" />
         </Route>
         <Route path="/tasks" component={Tasks} />
+        <Route path="/messages" component={Messages} />
         <Route path="/service-requests" component={ServiceRequests} />
         <Route path="/service-requests/templates" component={ChecklistTemplates} />
         <Route path="/service-requests/:id" component={ServiceRequestDetail} />

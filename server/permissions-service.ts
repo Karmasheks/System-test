@@ -26,6 +26,7 @@ import {
   resolveSubdivisionScope,
 } from "@shared/subdivision-scope";
 import { isSubdivisionAdminRole } from "@shared/subdivision-admin-roles";
+import { isSuperAdminUser } from "@shared/super-admin";
 
 const MODULE_KEYS = MODULE_DEFINITIONS.map((m) => m.key);
 
@@ -255,6 +256,7 @@ export function resolveEffectivePermissions(
     | "extraSubdivisionIds"
     | "managedSubdivisionIds"
     | "viewAllSubdivisions"
+    | "isSuperAdmin"
   >,
   roleProfile: RoleAccessProfile
 ): EffectivePermissions {
@@ -307,6 +309,24 @@ export function resolveEffectivePermissions(
   }
 
   const managedSubdivisionIds = resolveManagedSubdivisionIds(user);
+  const isSubAdmin =
+    role !== "admin" &&
+    (managedSubdivisionIds.length > 0 || isSubdivisionAdminRole(role));
+
+  if (isSubAdmin) {
+    modules = fullModuleMap(
+      Object.fromEntries(MODULE_KEYS.map((k) => [k, "edit"])) as Record<AppModule, AccessLevel>
+    );
+    hiddenFields = [];
+    hiddenDashboardBlocks = [];
+    taskCapabilities = {
+      create: true,
+      viewCreated: true,
+      process: true,
+      convertToServiceRequest: true,
+    };
+  }
+
   const subdivisionScope = resolveSubdivisionScope({
     role: user.role,
     subdivisionId: user.subdivisionId,
@@ -315,7 +335,7 @@ export function resolveEffectivePermissions(
     permissionOverrides: user.permissionOverrides as UserPermissionOverrides | null,
   });
 
-  if (role !== "admin" && managedSubdivisionIds.length > 0) {
+  if (role !== "admin" && managedSubdivisionIds.length > 0 && !isSubAdmin) {
     modules = { ...modules, users: modules.users === "none" ? "edit" : modules.users };
   }
 
@@ -330,9 +350,9 @@ export function resolveEffectivePermissions(
     primarySubdivisionId: user.subdivisionId ?? null,
     extraSubdivisionIds: normalizeExtraSubdivisionIds(user.extraSubdivisionIds),
     managedSubdivisionIds,
-    isSubdivisionAdmin:
-      role !== "admin" && (managedSubdivisionIds.length > 0 || isSubdivisionAdminRole(role)),
+    isSubdivisionAdmin: isSubAdmin,
     isSystemAdmin: role === "admin",
+    isSuperAdmin: isSuperAdminUser(user),
   };
 }
 
@@ -346,6 +366,7 @@ export async function getEffectivePermissionsForUser(
     | "extraSubdivisionIds"
     | "managedSubdivisionIds"
     | "viewAllSubdivisions"
+    | "isSuperAdmin"
   >
 ): Promise<EffectivePermissions> {
   const profile = await getRoleAccessProfile(user.role);

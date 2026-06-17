@@ -15,6 +15,7 @@ import { useMyWorkParams } from "@/hooks/use-my-work-params";
 import { cn } from "@/lib/utils";
 import { Menu, User, LogOut, Plus } from "lucide-react";
 import { NotificationsDropdown } from "./notifications";
+import { MessagesDropdown } from "./messages-dropdown";
 import { MobileSidebar } from "./mobile-sidebar";
 import { UserAvatar } from "@/components/user-avatar";
 
@@ -104,6 +105,7 @@ export function Header() {
               <Plus className="w-4 h-4" />
             </Button>
             )}
+            <MessagesDropdown />
             <NotificationsDropdown />
 
             <Link href="/profile" className="lg:hidden">

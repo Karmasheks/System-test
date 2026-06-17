@@ -102,6 +102,10 @@ export function useAccessControl() {
 
   const isSubdivisionAdmin = (): boolean => !!permissions?.isSubdivisionAdmin;
 
+  const isSuperAdmin = (): boolean => !!permissions?.isSuperAdmin;
+
+  const canAssignAdminPrivileges = (): boolean => isSuperAdmin();
+
   const canManageUsers = (): boolean => {
     if (!user) return false;
     if (isSystemAdmin()) return true;
@@ -125,6 +129,8 @@ export function useAccessControl() {
     canAccessSubdivisionId,
     isSystemAdmin,
     isSubdivisionAdmin,
+    isSuperAdmin,
+    canAssignAdminPrivileges,
     canManageUsers,
     canManageSubdivision,
     canViewModule,
