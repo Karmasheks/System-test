@@ -42,11 +42,18 @@ const auth = gitAuthEnv();
 run("git push origin main");
 pushAmvera("main", auth);
 
-if (!pushAmvera("main:master", auth)) {
+const masterPushed = pushAmvera("main:master", auth);
+if (!masterPushed) {
   console.log("[deploy-amvera] master расходится с main — force-with-lease...");
   if (!pushAmvera("main:master --force-with-lease", auth)) {
     console.error("[deploy-amvera] FATAL: не удалось обновить amvera/master");
     process.exit(1);
+  }
+} else {
+  // Amvera часто деплоит master; при «up-to-date» master мог остаться на старом коммите.
+  console.log("[deploy-amvera] Синхронизация amvera/master с main (force-with-lease)...");
+  if (!pushAmvera("main:master --force-with-lease", auth)) {
+    console.warn("[deploy-amvera] force-with-lease на master не удался — проверьте ветку в панели Amvera");
   }
 }
 
