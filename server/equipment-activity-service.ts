@@ -1,11 +1,14 @@
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { db } from "./db";
 import {
   budgetEntries,
   dailyInspections,
   equipmentEventLog,
+  maintenanceRecords,
+  maintenanceStatusHistory,
   remarks,
   serviceRequests,
+  taskStatusHistory,
   tasks,
 } from "@shared/schema";
 import { STATUS_LABELS, type ServiceRequestStatus } from "@shared/service-request-constants";
@@ -13,6 +16,8 @@ import { TASK_SOURCE_LABELS, type TaskSourceType } from "@shared/task-source-con
 import { taskStatusLabel } from "@shared/task-status-constants";
 import { equipmentLinkTypeLabel } from "@shared/equipment-link-constants";
 import { equipmentStatusLabel } from "@shared/equipment-utils";
+import { maintenanceStatusLabel } from "@shared/maintenance-status-constants";
+import { formatMaintenanceDateRu } from "@shared/maintenance-scheduling-constants";
 import {
   getEquipmentEventsForEquipment,
   getEquipmentLinkEventsForEquipment,
@@ -175,32 +180,156 @@ export async function getEquipmentLinkHistory(equipmentId: string): Promise<Equi
 
 export async function getEquipmentActivity(equipmentId: string): Promise<EquipmentActivityItem[]> {
   await backfillMissingLinkEvents();
-  const [taskRows, srRows, remarkRows, inspRows, budgetRows, eventRows] = await Promise.all([
+  const [taskRows, srRows, remarkRows, inspRows, budgetRows, maintRows, eventRows] = await Promise.all([
     db.select().from(tasks).where(eq(tasks.equipmentId, equipmentId)),
     db.select().from(serviceRequests).where(eq(serviceRequests.equipmentId, equipmentId)),
     db.select().from(remarks).where(eq(remarks.equipmentId, equipmentId)),
     db.select().from(dailyInspections).where(eq(dailyInspections.equipmentId, equipmentId)),
     db.select().from(budgetEntries).where(eq(budgetEntries.equipmentId, equipmentId)),
+    db.select().from(maintenanceRecords).where(eq(maintenanceRecords.equipmentId, equipmentId)),
     getEquipmentEventsForEquipment(equipmentId),
   ]);
 
+  const maintIds = maintRows.map((m) => m.id);
+  const maintHistory =
+    maintIds.length > 0
+      ? await db
+          .select()
+          .from(maintenanceStatusHistory)
+          .where(inArray(maintenanceStatusHistory.maintenanceRecordId, maintIds))
+      : [];
+
+  const taskIds = taskRows.map((t) => t.id);
+  const taskHistoryRows =
+    taskIds.length > 0
+      ? await db
+          .select()
+          .from(taskStatusHistory)
+          .where(inArray(taskStatusHistory.taskId, taskIds))
+      : [];
+
+  const maintMap = new Map(maintRows.map((m) => [m.id, m]));
+  const taskByMaintenanceId = new Map<number, typeof tasks.$inferSelect>();
+  for (const row of taskRows) {
+    if (row.maintenanceId != null) {
+      taskByMaintenanceId.set(row.maintenanceId, row);
+    }
+    if (row.sourceType === "maintenance" && row.sourceId != null) {
+      taskByMaintenanceId.set(row.sourceId, row);
+    }
+  }
+
   const items: EquipmentActivityItem[] = [];
+
+  for (const row of maintRows) {
+    const links: EquipmentActivityLink[] = [];
+    const linkedTask = taskByMaintenanceId.get(row.id);
+    if (linkedTask) {
+      links.push({ type: "task", id: linkedTask.id, label: "Задача на ТО" });
+    }
+    items.push({
+      id: `maint-${row.id}`,
+      category: "maintenance",
+      entityId: row.id,
+      title: `ТО: ${row.maintenanceType}`,
+      subtitle: `Дата ТО: ${formatMaintenanceDateRu(new Date(row.scheduledDate))}`,
+      status: row.status,
+      statusLabel: maintenanceStatusLabel(row.status),
+      occurredAt: (row.updatedAt ?? row.createdAt).toISOString(),
+      actor: row.responsible,
+      href: "/schedule",
+      links,
+    });
+  }
+
+  for (const hist of maintHistory) {
+    const isPostpone =
+      hist.toStatus === "postponed" ||
+      (hist.comment?.includes("Перенос") ?? false) ||
+      hist.comment?.includes("Перенос ТО");
+    if (!isPostpone && hist.comment === "Создание записи ТО") {
+      items.push({
+        id: `maint-hist-${hist.id}`,
+        category: "maintenance",
+        entityId: hist.maintenanceRecordId,
+        title: hist.comment,
+        status: hist.toStatus,
+        statusLabel: maintenanceStatusLabel(hist.toStatus),
+        occurredAt: hist.createdAt.toISOString(),
+        actor: hist.changedByName,
+        href: "/schedule",
+        links: [],
+      });
+      continue;
+    }
+    if (!isPostpone) continue;
+
+    const links: EquipmentActivityLink[] = [];
+    const linkedTask = taskByMaintenanceId.get(hist.maintenanceRecordId);
+    if (linkedTask) {
+      links.push({ type: "task", id: linkedTask.id, label: "Задача на ТО" });
+    }
+    items.push({
+      id: `maint-hist-${hist.id}`,
+      category: "maintenance",
+      entityId: hist.maintenanceRecordId,
+      title: hist.comment ?? "Перенос ТО",
+      subtitle: hist.fromStatus
+        ? `${maintenanceStatusLabel(hist.fromStatus)} → ${maintenanceStatusLabel(hist.toStatus)}`
+        : undefined,
+      status: hist.toStatus,
+      statusLabel: "Перенос",
+      occurredAt: hist.createdAt.toISOString(),
+      actor: hist.changedByName,
+      href: "/schedule",
+      links,
+    });
+  }
 
   for (const row of taskRows) {
     const sourceLabel =
       TASK_SOURCE_LABELS[row.sourceType as TaskSourceType] ?? row.sourceType ?? "Задача";
+    const maint = row.maintenanceId ? maintMap.get(row.maintenanceId) : undefined;
+    let subtitle = sourceLabel;
+    if (row.taskType === "maintenance") {
+      const parts = [
+        row.maintenanceType ?? maint?.maintenanceType,
+        maint ? formatMaintenanceDateRu(new Date(maint.scheduledDate)) : null,
+      ].filter(Boolean);
+      if (parts.length > 0) subtitle = parts.join(" · ");
+    }
+    let statusLabel = taskStatusLabel(row.status);
+    if (maint?.status === "postponed") {
+      statusLabel = `${statusLabel} · перенос`;
+    }
     items.push({
       id: `task-${row.id}`,
       category: "task",
       entityId: row.id,
       title: row.title,
-      subtitle: sourceLabel,
+      subtitle,
       status: row.status,
-      statusLabel: taskStatusLabel(row.status),
+      statusLabel,
       occurredAt: (row.updatedAt ?? row.createdAt).toISOString(),
       actor: row.assigneeName ?? row.createdBy,
       href: `/tasks?task=${row.id}`,
       links: taskLinks(row),
+    });
+  }
+
+  for (const hist of taskHistoryRows) {
+    if (!hist.comment?.includes("Перенос")) continue;
+    items.push({
+      id: `task-hist-${hist.id}`,
+      category: "task",
+      entityId: hist.taskId,
+      title: hist.comment,
+      subtitle: "Задача на ТО",
+      statusLabel: "Перенос",
+      occurredAt: hist.createdAt.toISOString(),
+      actor: hist.changedByName,
+      href: `/tasks?task=${hist.taskId}`,
+      links: [],
     });
   }
 

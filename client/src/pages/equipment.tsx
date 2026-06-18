@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { Helmet } from "react-helmet";
-import { useLocation } from "wouter";
+import { useLocation, Link } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -35,7 +35,7 @@ import {
   formatEquipmentResponsible,
 } from "@shared/equipment-utils";
 import { EQUIPMENT_STATUSES, EQUIPMENT_STATUS_LABELS } from "@shared/equipment-status-constants";
-import type { Equipment } from "@shared/schema";
+import type { Equipment, MaintenanceRecord } from "@shared/schema";
 import { syncEquipmentLinksApi, useEquipmentLinks } from "@/hooks/use-equipment-links";
 import { equipmentLinkTypeLabel } from "@shared/equipment-link-constants";
 import { useTaskDialog, type TaskRecord } from "@/hooks/use-task-dialog";
@@ -50,6 +50,8 @@ import { ListPaginationControls } from "@/components/list-pagination-controls";
 import { useListPagination } from "@/hooks/use-list-pagination";
 import { EquipmentCommentsPanel } from "@/components/equipment-comments-panel";
 import { EquipmentProductionPlanPanel } from "@/components/equipment-production-plan-panel";
+import { format } from "date-fns";
+import { maintenanceStatusLabel } from "@shared/maintenance-status-constants";
 import { mobileTabsTriggerClass } from "@/lib/mobile-tabs";
 import { cn } from "@/lib/utils";
 
@@ -69,6 +71,9 @@ export default function Equipment() {
 
   const { data: equipmentRaw = [] } = useQuery<Equipment[]>({
     queryKey: ["/api/equipment"],
+  });
+  const { data: maintenanceRecords = [] } = useQuery<MaintenanceRecord[]>({
+    queryKey: ["/api/maintenance"],
   });
   const equipment = equipmentRaw.map((item) => normalizeEquipmentRecord(item));
   const { data: equipmentTypesList = [] } = useEquipmentTypes();
@@ -219,6 +224,43 @@ export default function Equipment() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [viewDialogOpen, setViewDialogOpen] = useState(false);
   const [selectedEquipment, setSelectedEquipment] = useState<any>(null);
+
+  useEffect(() => {
+    const refreshScheduleLinked = () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/maintenance"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/equipment"] });
+    };
+    window.addEventListener("equipmentUpdated", refreshScheduleLinked);
+    window.addEventListener("taskUpdated", refreshScheduleLinked);
+    return () => {
+      window.removeEventListener("equipmentUpdated", refreshScheduleLinked);
+      window.removeEventListener("taskUpdated", refreshScheduleLinked);
+    };
+  }, [queryClient]);
+
+  const selectedUpcomingMaintenance = useMemo(() => {
+    if (!selectedEquipment) return null;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return (
+      maintenanceRecords
+        .filter(
+          (r) =>
+            r.equipmentId === selectedEquipment.id &&
+            !["completed", "cancelled"].includes(r.status)
+        )
+        .filter((r) => {
+          const d = new Date(r.scheduledDate);
+          d.setHours(0, 0, 0, 0);
+          return d >= today;
+        })
+        .sort(
+          (a, b) =>
+            new Date(a.scheduledDate).getTime() - new Date(b.scheduledDate).getTime()
+        )[0] ?? null
+    );
+  }, [maintenanceRecords, selectedEquipment]);
+
   const { data: viewEquipmentLinks = [], isLoading: loadingViewLinks } = useEquipmentLinks(
     viewDialogOpen ? selectedEquipment?.id : undefined
   );
@@ -961,9 +1003,29 @@ export default function Equipment() {
                   </div>
                   <div>
                     <Label className="font-medium">Следующее ТО</Label>
-                    <p className="text-gray-600 dark:text-gray-400">
-                      {selectedEquipment.nextMaintenance || "Не указано"}
-                    </p>
+                    {selectedUpcomingMaintenance ? (
+                      <div className="text-gray-600 dark:text-gray-400 space-y-1 mt-0.5">
+                        <p>
+                          {format(new Date(selectedUpcomingMaintenance.scheduledDate), "dd.MM.yyyy")}
+                          · {selectedUpcomingMaintenance.maintenanceType}
+                        </p>
+                        {selectedUpcomingMaintenance.status === "postponed" && (
+                          <Badge variant="outline" className="text-[10px]">
+                            {maintenanceStatusLabel("postponed")}
+                          </Badge>
+                        )}
+                        <Link href="/schedule" className="text-xs text-blue-600 dark:text-blue-400 hover:underline">
+                          Календарь ТО
+                        </Link>
+                      </div>
+                    ) : (
+                      <p className="text-gray-600 dark:text-gray-400">
+                        {selectedEquipment.nextMaintenance &&
+                        selectedEquipment.nextMaintenance !== "-"
+                          ? selectedEquipment.nextMaintenance
+                          : "Не указано"}
+                      </p>
+                    )}
                   </div>
                 </div>
 

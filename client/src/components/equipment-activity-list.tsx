@@ -109,6 +109,13 @@ export function EquipmentActivityList({
                           {link.id > 0 ? ` #${link.id}` : ""}
                         </Badge>
                       </button>
+                    ) : link.type === "maintenance" ? (
+                      <Link key={`${link.type}-${link.id}-${link.label}`} href="/schedule">
+                        <Badge variant="secondary" className="text-[10px] hover:bg-secondary/80">
+                          {link.label}
+                          {link.id > 0 ? ` #${link.id}` : ""}
+                        </Badge>
+                      </Link>
                     ) : link.type === "service_request" ? (
                       <Link key={`${link.type}-${link.id}-${link.label}`} href={`/service-requests/${link.id}`}>
                         <Badge variant="secondary" className="text-[10px] hover:bg-secondary/80">

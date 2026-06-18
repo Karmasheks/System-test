@@ -28,12 +28,15 @@ import {
   getCalendarServiceRequestChipClass,
   getCalendarRemarkChipClass,
   getCalendarProductionChipClass,
+  getCalendarMaintenanceChipClass,
   calendarTaskTypeColors,
   calendarServiceRequestColors,
   calendarRemarkColors,
 } from "@/lib/calendar-event-colors";
 import { TASK_TYPES, taskTypeLabel, type TaskTypeCode } from "@shared/task-constants";
-import { MAINTENANCE_STATUSES, MAINTENANCE_STATUS_LABELS } from "@shared/maintenance-status-constants";
+import { MAINTENANCE_STATUSES, MAINTENANCE_STATUS_LABELS, maintenanceStatusLabel } from "@shared/maintenance-status-constants";
+import { MAINTENANCE_TASK_LEAD_DAYS } from "@shared/maintenance-scheduling-constants";
+import type { MaintenanceRecord } from "@shared/schema";
 import { useSubdivisionFilter } from "@/hooks/use-subdivision-filter";
 import { SubdivisionFilterSelect } from "@/components/subdivision-filter-select";
 import { SubdivisionPicker } from "@/components/subdivision-picker";
@@ -56,6 +59,18 @@ import { useProductionDisplayConfig } from "@/hooks/use-production-display-confi
 import { ProductionDisplaySettings } from "@/components/planning/production-display-settings";
 
 const SCHEDULE_PAGE_TITLE = "План ТО и задач";
+
+function isMaintenanceLinkedTask(task: Task): boolean {
+  return task.sourceType === "maintenance" && task.maintenanceId != null;
+}
+
+function mapMaintenanceFormStatus(status: string): string {
+  if (status === "completed") return "completed";
+  if (status === "in_progress") return "in_progress";
+  if (status === "postponed") return "postponed";
+  if (status === "cancelled") return "cancelled";
+  return "scheduled";
+}
 
 const scheduleDialogClass =
   "max-w-md max-h-[90vh] flex flex-col gap-0 p-0 overflow-hidden";
@@ -96,6 +111,9 @@ export default function Schedule() {
   const { data: tasks = [] } = useQuery<Task[]>({
     queryKey: ['/api/tasks'],
   });
+  const { data: maintenanceList = [] } = useQuery<MaintenanceRecord[]>({
+    queryKey: ["/api/maintenance"],
+  });
   const [currentDate, setCurrentDate] = useState(new Date());
   const [viewType, setViewType] = useState<'month' | 'year'>('month');
   const [eventFilter, setEventFilter] = useState<CalendarEventFilter>("all");
@@ -111,6 +129,10 @@ export default function Schedule() {
     priority: 'medium',
     notes: ''
   });
+  const [rescheduleTarget, setRescheduleTarget] = useState<MaintenanceRecord | null>(null);
+  const [rescheduleDate, setRescheduleDate] = useState("");
+  const [rescheduleReason, setRescheduleReason] = useState("");
+  const [rescheduleSaving, setRescheduleSaving] = useState(false);
   
 
   const monthStart = startOfMonth(currentDate);
@@ -142,6 +164,11 @@ export default function Schedule() {
   const scopedTasks = useMemo(
     () => filterBySubdivisionScope(tasks, filterSubdivisionId, scopedEquipmentIds),
     [tasks, filterSubdivisionId, scopedEquipmentIds]
+  );
+
+  const scopedMaintenance = useMemo(
+    () => filterBySubdivisionScope(maintenanceList, filterSubdivisionId, scopedEquipmentIds),
+    [maintenanceList, filterSubdivisionId, scopedEquipmentIds]
   );
 
   const calEvents = useMemo(() => {
@@ -200,9 +227,20 @@ export default function Schedule() {
 
   const getTasksForDay = (day: Date) => {
     const dayTasks = scopedTasks.filter(
-      (task) => task.dueDate && isSameDay(new Date(task.dueDate), day)
+      (task) =>
+        task.dueDate &&
+        isSameDay(new Date(task.dueDate), day) &&
+        !isMaintenanceLinkedTask(task)
     );
     return filterTasksByType(dayTasks);
+  };
+
+  const getMaintenanceForDay = (day: Date) => {
+    if (eventFilter !== "all" && eventFilter !== "maintenance") return [];
+    return scopedMaintenance.filter((record) => {
+      if (record.status === "cancelled") return false;
+      return isSameDay(new Date(record.scheduledDate), day);
+    });
   };
 
   const getServiceRequestsForDay = (day: Date) => {
@@ -245,10 +283,17 @@ export default function Schedule() {
 
   const getAllEventsForDay = (day: Date) => {
     const taskEvents = getTasksForDay(day);
+    const maintenanceEvents = getMaintenanceForDay(day);
     const serviceRequests = getServiceRequestsForDay(day);
     const remarkEvents = getRemarksForDay(day);
     const productionEvents = getProductionForDay(day);
-    return { tasks: taskEvents, serviceRequests, remarks: remarkEvents, production: productionEvents };
+    return {
+      tasks: taskEvents,
+      maintenance: maintenanceEvents,
+      serviceRequests,
+      remarks: remarkEvents,
+      production: productionEvents,
+    };
   };
 
   const getTasksForMonth = (month: Date) => {
@@ -262,7 +307,7 @@ export default function Schedule() {
     const monthStart = startOfMonth(month);
     const monthEnd = endOfMonth(month);
     const monthTasks = scopedTasks.filter((task) => {
-      if (!task.dueDate) return false;
+      if (!task.dueDate || isMaintenanceLinkedTask(task)) return false;
       const d = new Date(task.dueDate);
       return d >= monthStart && d <= monthEnd;
     });
@@ -323,6 +368,56 @@ export default function Schedule() {
     setIsAddDialogOpen(true);
   };
 
+  const invalidateScheduleQueries = async () => {
+    await queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
+    await queryClient.invalidateQueries({ queryKey: ["/api/maintenance"] });
+    await queryClient.invalidateQueries({ queryKey: ["/api/equipment"] });
+    await queryClient.invalidateQueries({ queryKey: ["/api/calendar/events"] });
+    await queryClient.invalidateQueries({ queryKey: ["/api/calendar/stats"] });
+  };
+
+  const openRescheduleDialog = (record: MaintenanceRecord) => {
+    setRescheduleTarget(record);
+    setRescheduleDate(format(new Date(record.scheduledDate), "yyyy-MM-dd"));
+    setRescheduleReason("");
+  };
+
+  const handleReschedule = async () => {
+    if (!rescheduleTarget) return;
+    if (!rescheduleDate) {
+      toast({ title: "Укажите новую дату", variant: "destructive" });
+      return;
+    }
+    if (!rescheduleReason.trim()) {
+      toast({ title: "Укажите причину переноса", variant: "destructive" });
+      return;
+    }
+
+    setRescheduleSaving(true);
+    try {
+      await apiRequest("POST", `/api/maintenance/${rescheduleTarget.id}/reschedule`, {
+        scheduledDate: new Date(rescheduleDate).toISOString(),
+        reason: rescheduleReason.trim(),
+      });
+      await invalidateScheduleQueries();
+      window.dispatchEvent(new CustomEvent("taskUpdated"));
+      window.dispatchEvent(new CustomEvent("equipmentUpdated"));
+      toast({
+        title: "ТО перенесено",
+        description: "Дата в календаре и связанная задача обновлены",
+      });
+      setRescheduleTarget(null);
+    } catch (error) {
+      toast({
+        title: "Ошибка переноса",
+        description: error instanceof Error ? error.message : "Не удалось перенести ТО",
+        variant: "destructive",
+      });
+    } finally {
+      setRescheduleSaving(false);
+    }
+  };
+
   const handleOpenTaskDialog = () => {
     if (!selectedDate) return;
     if (isAdminViewAll && !dialogSubdivisionId) {
@@ -364,34 +459,25 @@ export default function Schedule() {
       return;
     }
 
-    const taskStatus =
-      formData.status === "completed"
-        ? "completed"
-        : formData.status === "in_progress"
-          ? "in_progress"
-          : "pending";
-
     try {
-      await apiRequest("POST", "/api/tasks", {
-        title: `ТО: ${formData.type} — ${formData.equipmentName}`,
-        description: formData.notes || formData.duration || undefined,
-        taskType: "maintenance",
-        maintenanceType: formData.type,
+      await apiRequest("POST", "/api/maintenance", {
         equipmentId: equipmentItem.id,
-        dueDate: selectedDate.toISOString(),
-        status: taskStatus,
+        equipmentName: formData.equipmentName,
+        maintenanceType: formData.type,
+        scheduledDate: selectedDate.toISOString(),
+        status: mapMaintenanceFormStatus(formData.status),
         priority: formData.priority,
-        assigneeName: maintenanceResponsible,
-        sourceType: "manual",
-        subdivisionId: effectiveSubdivisionId ?? undefined,
+        notes: formData.notes || formData.duration || undefined,
+        duration: formData.duration || undefined,
+        responsible: maintenanceResponsible,
       });
-      await queryClient.invalidateQueries({ queryKey: ["/api/tasks"] });
-      await queryClient.invalidateQueries({ queryKey: ["/api/equipment"] });
-      await queryClient.invalidateQueries({ queryKey: ["/api/calendar/events"] });
-      await queryClient.invalidateQueries({ queryKey: ["/api/calendar/stats"] });
+      await invalidateScheduleQueries();
       window.dispatchEvent(new CustomEvent("taskUpdated"));
       window.dispatchEvent(new CustomEvent("equipmentUpdated"));
-      toast({ title: "ТО запланировано", description: "Запись добавлена в календарь" });
+      toast({
+        title: "ТО запланировано",
+        description: `Задача появится за ${MAINTENANCE_TASK_LEAD_DAYS} дн. до даты ТО`,
+      });
       setIsAddDialogOpen(false);
       setSelectedDate(null);
     } catch (error) {
@@ -659,6 +745,7 @@ export default function Schedule() {
                             {calendarDays.map(day => {
                               const {
                                 tasks: dayTasks,
+                                maintenance: dayMaintenance,
                                 serviceRequests: daySr,
                                 remarks: dayRemarks,
                                 production: dayProduction,
@@ -687,6 +774,42 @@ export default function Schedule() {
                                     {format(day, 'd')}
                                   </div>
                                   <div className="space-y-1">
+                                    {dayMaintenance.map((record) => {
+                                      const recordEquipment = equipment.find(
+                                        (e) => e.id === record.equipmentId
+                                      );
+                                      const equipmentModel =
+                                        recordEquipment?.model?.trim() ||
+                                        equipmentModelFromId(record.equipmentId, equipment);
+                                      const isCompleted = record.status === "completed";
+                                      const chipLabel = formatTaskCalendarLabel(
+                                        record.id,
+                                        equipmentModel
+                                      );
+                                      const chip = (
+                                        <div
+                                          className={`text-[10px] sm:text-xs p-0.5 sm:p-1 rounded cursor-pointer hover:opacity-80 transition-opacity truncate ${getCalendarMaintenanceChipClass(
+                                            record.status,
+                                            isCompleted
+                                          )}`}
+                                          title={`${record.maintenanceType} — ${record.equipmentName}${
+                                            record.status === "postponed"
+                                              ? ` (${maintenanceStatusLabel(record.status)})`
+                                              : ""
+                                          }`}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            openRescheduleDialog(record);
+                                          }}
+                                        >
+                                          {record.status === "postponed" ? "↻ " : ""}
+                                          {chipLabel}
+                                        </div>
+                                      );
+
+                                      return <div key={`maint-${record.id}`}>{chip}</div>;
+                                    })}
+
                                     {dayTasks.map((task: any) => {
                                       const taskEquipment = task.equipmentId
                                         ? equipment.find((e: any) => e.id === task.equipmentId)
@@ -1062,6 +1185,10 @@ export default function Schedule() {
                   </p>
                 </TabsContent>
                 <TabsContent value="main" className="mt-4 space-y-4">
+                  <p className="text-xs text-muted-foreground">
+                    Задача на ТО создаётся автоматически за {MAINTENANCE_TASK_LEAD_DAYS} дня до
+                    выбранной даты. Клик по ТО в календаре — перенос.
+                  </p>
                   {renderMaintenanceFormFields()}
                 </TabsContent>
               </Tabs>
@@ -1078,6 +1205,10 @@ export default function Schedule() {
                   disabled={subdivisionLocked}
                 />
                 {renderMaintenanceFormFields()}
+                <p className="text-xs text-muted-foreground">
+                  Задача на ТО создаётся за {MAINTENANCE_TASK_LEAD_DAYS} дня до даты. Клик по ТО в
+                  календаре — перенос.
+                </p>
               </div>
             )}
           </div>
@@ -1097,6 +1228,64 @@ export default function Schedule() {
             >
               <Save className="h-4 w-4 mr-2" />
               Сохранить ТО
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={rescheduleTarget != null}
+        onOpenChange={(open) => {
+          if (!open) setRescheduleTarget(null);
+        }}
+      >
+        <DialogContent className={scheduleDialogClass}>
+          <DialogHeader className="px-6 pt-6 shrink-0">
+            <DialogTitle>Перенос ТО</DialogTitle>
+          </DialogHeader>
+          <div className={scheduleDialogBodyClass}>
+            {rescheduleTarget && (
+              <>
+                <p className="text-sm text-muted-foreground text-multiline">
+                  {rescheduleTarget.maintenanceType} — {rescheduleTarget.equipmentName}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Текущая дата:{" "}
+                  {format(new Date(rescheduleTarget.scheduledDate), "dd.MM.yyyy", { locale: ru })}
+                </p>
+                {scopedTasks.find((t) => t.maintenanceId === rescheduleTarget.id) && (
+                  <p className="text-xs text-muted-foreground">
+                    Связанная задача обновится автоматически (срок − {MAINTENANCE_TASK_LEAD_DAYS} дн.).
+                  </p>
+                )}
+                <div>
+                  <Label htmlFor="reschedule-date">Новая дата ТО</Label>
+                  <Input
+                    id="reschedule-date"
+                    type="date"
+                    value={rescheduleDate}
+                    onChange={(e) => setRescheduleDate(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="reschedule-reason">Причина переноса</Label>
+                  <Textarea
+                    id="reschedule-reason"
+                    value={rescheduleReason}
+                    onChange={(e) => setRescheduleReason(e.target.value)}
+                    placeholder="Укажите причину переноса"
+                    rows={3}
+                  />
+                </div>
+              </>
+            )}
+          </div>
+          <DialogFooter className={scheduleDialogFooterClass}>
+            <Button variant="outline" onClick={() => setRescheduleTarget(null)}>
+              Отмена
+            </Button>
+            <Button onClick={handleReschedule} disabled={rescheduleSaving}>
+              Перенести
             </Button>
           </DialogFooter>
         </DialogContent>

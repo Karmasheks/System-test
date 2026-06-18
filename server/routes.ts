@@ -2369,7 +2369,11 @@ app.post("/api/maintenance", authenticate, requireRole(writeRoles), async (req, 
 
     if (req.user) {
       try {
-        await createTaskFromMaintenance(record, req.user);
+        const { ensureMaintenanceTask, afterMaintenanceScheduleChange } = await import(
+          "./maintenance-scheduling-service"
+        );
+        await ensureMaintenanceTask(record, req.user);
+        await afterMaintenanceScheduleChange(record.equipmentId);
       } catch (taskErr) {
         console.error("Auto-task from maintenance failed:", taskErr);
       }
@@ -2439,6 +2443,22 @@ app.put("/api/maintenance/:id", authenticate, requireRole(writeRoles), async (re
       return res.status(404).json({ message: "Запись о техобслуживании не найдена" });
     }
 
+    if (req.user && updateData.scheduledDate) {
+      try {
+        const { onMaintenanceScheduledDateChanged } = await import("./maintenance-scheduling-service");
+        await onMaintenanceScheduledDateChanged(record, existing.scheduledDate, req.user);
+      } catch (syncErr) {
+        console.error("Maintenance date sync failed:", syncErr);
+      }
+    } else if (record.equipmentId && (req.body.status !== undefined || req.body.scheduledDate !== undefined)) {
+      try {
+        const { afterMaintenanceScheduleChange } = await import("./maintenance-scheduling-service");
+        await afterMaintenanceScheduleChange(record.equipmentId);
+      } catch (syncErr) {
+        console.error("Equipment next maintenance sync failed:", syncErr);
+      }
+    }
+
       if (req.user && req.body.status !== undefined && req.body.status !== existing.status) {
         await storage.createMaintenanceStatusHistory({
           maintenanceRecordId: id,
@@ -2493,6 +2513,25 @@ app.put("/api/maintenance/:id", authenticate, requireRole(writeRoles), async (re
   }
 });
 
+app.post("/api/maintenance/:id/reschedule", authenticate, requireRole(writeRoles), async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const scheduledDate = parseMaintenanceDate(req.body.scheduledDate);
+    if (!scheduledDate) {
+      return res.status(400).json({ message: "Некорректная scheduledDate" });
+    }
+    const reason = String(req.body.reason ?? "");
+    const { rescheduleMaintenance } = await import("./maintenance-scheduling-service");
+    const record = await rescheduleMaintenance(id, scheduledDate, reason, req.user!);
+    return res.status(200).json(record);
+  } catch (error: any) {
+    const message = error?.message ?? "Ошибка переноса ТО";
+    const status =
+      message.includes("не найдена") ? 404 : message.includes("Нельзя") ? 400 : 400;
+    return res.status(status).json({ message });
+  }
+});
+
 app.delete("/api/maintenance/:id", authenticate, requireRole(writeRoles), async (req, res) => {
   try {
     const id = parseInt(req.params.id);
@@ -2502,6 +2541,12 @@ app.delete("/api/maintenance/:id", authenticate, requireRole(writeRoles), async 
       return res.status(404).json({ message: "Запись о техобслуживании не найдена" });
     }
     if (existing?.equipmentId && req.user) {
+      try {
+        const { afterMaintenanceScheduleChange } = await import("./maintenance-scheduling-service");
+        await afterMaintenanceScheduleChange(existing.equipmentId);
+      } catch (syncErr) {
+        console.error("Equipment next maintenance sync failed:", syncErr);
+      }
       const { syncToirAndRecalculateProduction } = await import("./production-toir-integration-service");
       await syncToirAndRecalculateProduction(existing.equipmentId, {
         id: req.user.id,
@@ -2841,6 +2886,15 @@ app.delete("/api/maintenance/:id", authenticate, requireRole(writeRoles), async 
   setInterval(() => {
     expireStalePresenceUsers().catch((err) => console.error("presence sweep failed:", err));
   }, presenceSweepMs);
+
+  const maintenanceSchedulerMs = 60 * 60 * 1000;
+  const runMaintenanceScheduler = () => {
+    import("./maintenance-scheduling-service")
+      .then((m) => m.runMaintenanceTaskScheduler())
+      .catch((err) => console.error("maintenance task scheduler failed:", err));
+  };
+  runMaintenanceScheduler();
+  setInterval(runMaintenanceScheduler, maintenanceSchedulerMs);
   
   return httpServer;
 }

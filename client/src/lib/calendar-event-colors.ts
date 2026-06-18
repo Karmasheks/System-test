@@ -68,6 +68,17 @@ export function getCalendarProductionChipClass(isCompleted: boolean): string {
   return isCompleted ? calendarProductionColors.completed : calendarProductionColors.active;
 }
 
+export function getCalendarMaintenanceChipClass(
+  status: string,
+  isCompleted: boolean
+): string {
+  if (isCompleted) return calendarTaskTypeColors.maintenance.completed;
+  if (status === "postponed") {
+    return "bg-amber-100 text-amber-950 border border-dashed border-amber-500 dark:bg-amber-950/45 dark:text-amber-100 dark:border-amber-600";
+  }
+  return calendarTaskTypeColors.maintenance.active;
+}
+
 /** Короткий swatch для легенды (только фон + рамка). */
 export function calendarLegendSwatchClass(
   kind: keyof typeof calendarTaskTypeColors | "service_request" | "remark" | "production"

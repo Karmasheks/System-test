@@ -14,6 +14,7 @@ import {
   equipment,
   productionSchedule,
   productionOrders,
+  maintenanceRecords,
   type InsertContact,
   type InsertSupplier,
   type InsertBudgetEntry,
@@ -343,6 +344,8 @@ export async function getCalendarEvents(
   for (const t of allTasks) {
     if (equipmentId && t.equipmentId !== equipmentId) continue;
     if (!t.dueDate) continue;
+    // Задачи из записи ТО отображаются по scheduledDate записи, не по dueDate задачи.
+    if (t.sourceType === "maintenance" && t.maintenanceId != null) continue;
     const dt = new Date(t.dueDate);
     if (dt < fromDate || dt > toDate) continue;
     const done = t.status === "completed";
@@ -358,6 +361,32 @@ export async function getCalendarEvents(
       equipmentModel: modelFor(t.equipmentId),
       isCompleted: done,
       isPending: !done && (t.status === "pending" || t.status === "in_progress"),
+    });
+  }
+
+  let allMaintenance = await db.select().from(maintenanceRecords);
+  if (scope && !scope.viewAll) {
+    const { filterMaintenanceByScope } = await import("./subdivision-equipment-filter");
+    allMaintenance = await filterMaintenanceByScope(allMaintenance, scope);
+  }
+  for (const m of allMaintenance) {
+    if (equipmentId && m.equipmentId !== equipmentId) continue;
+    if (m.status === "cancelled") continue;
+    const dt = new Date(m.scheduledDate);
+    if (dt < fromDate || dt > toDate) continue;
+    const done = m.status === "completed";
+    events.push({
+      id: `maintenance-${m.id}`,
+      sourceType: "maintenance",
+      sourceId: m.id,
+      title: `ТО: ${m.maintenanceType} — ${m.equipmentName}`,
+      date: dt.toISOString(),
+      status: m.status,
+      equipmentId: m.equipmentId,
+      equipmentName: m.equipmentName,
+      equipmentModel: modelFor(m.equipmentId),
+      isCompleted: done,
+      isPending: !done && m.status !== "cancelled",
     });
   }
 

@@ -15,6 +15,10 @@ import {
   type ServiceRequestStatus,
 } from "@shared/service-request-constants";
 import { eq, and, or, isNull, desc, gte, lte } from "drizzle-orm";
+import {
+  maintenanceTaskDueDate,
+  shouldCreateMaintenanceTaskNow,
+} from "@shared/maintenance-scheduling-constants";
 
 type AuthUser = { id: number; name: string };
 
@@ -176,7 +180,7 @@ export async function createTaskFromMaintenance(
     taskType: "maintenance",
     maintenanceType: record.maintenanceType,
     equipmentId: record.equipmentId,
-    dueDate: new Date(record.scheduledDate),
+    dueDate: maintenanceTaskDueDate(new Date(record.scheduledDate)),
     sourceType: "maintenance",
     sourceId: record.id,
     maintenanceId: record.id,
@@ -833,6 +837,8 @@ export async function createMaintenanceFromServiceRequest(
     createdByName: user.name,
   });
 
-  await createTaskFromMaintenance(record, user);
+  if (shouldCreateMaintenanceTaskNow(new Date(record.scheduledDate))) {
+    await createTaskFromMaintenance(record, user);
+  }
   return record;
 }
