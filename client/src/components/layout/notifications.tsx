@@ -10,8 +10,7 @@ import {
   DropdownMenuLabel,
 } from '@/components/ui/dropdown-menu';
 import { useRemarksData } from '@/hooks/use-remarks-data';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import type { Task } from '@/types/api';
+import { useQueryClient } from '@tanstack/react-query';
 import { Link } from 'wouter';
 import { apiRequest } from '@/lib/queryClient';
 import {
@@ -24,6 +23,10 @@ import { useAuth } from '@/hooks/use-auth';
 import { useEquipmentApi } from '@/hooks/use-equipment-api';
 import { toast } from '@/hooks/use-toast';
 import type { Notification as DbNotification } from '@shared/schema';
+import {
+  parseMaintenanceScheduledMessage,
+  reminderRepeatIntervalMs,
+} from '@shared/notification-reminder-constants';
 
 interface Notification {
   id: string;
@@ -41,9 +44,20 @@ interface Notification {
 }
 
 const DISMISSED_KEY = 'dismissed-local-notifications';
-const REPEAT_AFTER_MS = 4 * 60 * 60 * 1000;
+const TOAST_MAX_AGE_MS = 3 * 60 * 1000;
 
-type DismissedEntry = { id: string; at: number; repeat?: boolean };
+type DismissedEntry = { id: string; at: number; repeat?: boolean; repeatMs?: number };
+
+function defaultLocalRepeatMs(id: string): number {
+  if (id.startsWith('maintenance-task-') || id.startsWith('maintenance-overdue-task-')) {
+    return reminderRepeatIntervalMs(7, { maintenance: true });
+  }
+  return 2 * 24 * 60 * 60 * 1000;
+}
+
+function entryRepeatMs(entry: DismissedEntry): number {
+  return entry.repeatMs ?? defaultLocalRepeatMs(entry.id);
+}
 
 function loadDismissed(): DismissedEntry[] {
   try {
@@ -59,20 +73,25 @@ function saveDismissed(entries: DismissedEntry[]) {
 
 function isEntryActive(entry: DismissedEntry): boolean {
   if (!entry.repeat) return true;
-  return Date.now() - entry.at < REPEAT_AFTER_MS;
+  return Date.now() - entry.at < entryRepeatMs(entry);
 }
 
 function isLocallyDismissed(id: string, hiddenIds: Set<string>): boolean {
   if (hiddenIds.has(id)) return true;
   const entry = loadDismissed().find((e) => e.id === id);
   if (!entry) return false;
-  if (entry.repeat && Date.now() - entry.at >= REPEAT_AFTER_MS) return false;
+  if (entry.repeat && Date.now() - entry.at >= entryRepeatMs(entry)) return false;
   return true;
 }
 
-function dismissLocalNotification(id: string, repeatable: boolean) {
+function dismissLocalNotification(id: string, repeatable: boolean, repeatMs?: number) {
   const list = loadDismissed().filter((e) => e.id !== id);
-  list.push({ id, at: Date.now(), repeat: repeatable });
+  list.push({
+    id,
+    at: Date.now(),
+    repeat: repeatable,
+    repeatMs: repeatable ? (repeatMs ?? defaultLocalRepeatMs(id)) : undefined,
+  });
   saveDismissed(list);
 }
 
@@ -86,6 +105,10 @@ function dismissAllLocalNotifications(ids: string[]) {
       at: now,
       repeat:
         id.startsWith('maintenance-task-') || id.startsWith('maintenance-overdue-task-'),
+      repeatMs:
+        id.startsWith('maintenance-task-') || id.startsWith('maintenance-overdue-task-')
+          ? reminderRepeatIntervalMs(7, { maintenance: true })
+          : undefined,
     });
   }
   saveDismissed([...mergedMap.values()]);
@@ -104,6 +127,9 @@ function parseTaskCommentMessage(message: string) {
 }
 
 function resolveDbNotificationLink(n: DbNotification): string {
+  if (n.type === 'maintenance_scheduled') {
+    return '/schedule';
+  }
   if (n.taskId) {
     if (n.type === 'task_comment') {
       const parsed = parseTaskCommentMessage(n.message || '');
@@ -123,6 +149,7 @@ function resolveDbNotificationLink(n: DbNotification): string {
 
 function mapDbNotificationType(type: string): Notification['type'] {
   if (type === 'task_comment') return 'task_comment';
+  if (type === 'maintenance_scheduled') return 'maintenance';
   if (type.startsWith('task_')) return 'task';
   if (type.startsWith('warehouse_')) return 'warehouse';
   if (type.startsWith('service_request')) return 'service_request';
@@ -133,6 +160,9 @@ function getDbDescription(n: DbNotification): string {
   if (n.type === 'task_comment') {
     return parseTaskCommentMessage(n.message || '').text;
   }
+  if (n.type === 'maintenance_scheduled') {
+    return parseMaintenanceScheduledMessage(n.message || '');
+  }
   return n.message || '';
 }
 
@@ -140,10 +170,6 @@ export function NotificationsDropdown() {
   const { user } = useAuth();
   const { equipment } = useEquipmentApi();
   const { remarks } = useRemarksData();
-  const { data: tasks = [] } = useQuery<Task[]>({
-    queryKey: ['/api/tasks'],
-    enabled: !!user,
-  });
   const { data: dbNotifications = [] } = useNotifications(!!user);
   const markRead = useMarkNotificationRead();
   const dismissDb = useDismissNotification();
@@ -205,6 +231,8 @@ export function NotificationsDropdown() {
     );
 
     for (const n of fresh) {
+      const age = Date.now() - new Date(n.createdAt).getTime();
+      if (age > TOAST_MAX_AGE_MS) continue;
       seenDbIdsRef.current!.add(n.id);
       toast({
         title: n.title || 'Новое уведомление',
@@ -221,58 +249,8 @@ export function NotificationsDropdown() {
   const generateLocalNotifications = useCallback((): Notification[] => {
     const notifications: Notification[] = [];
     const today = new Date();
-    const nextWeek = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
 
-    tasks
-      .filter(
-        (task) =>
-          task.taskType === 'maintenance' &&
-          task.dueDate &&
-          task.status !== 'completed' &&
-          task.status !== 'cancelled'
-      )
-      .forEach((task) => {
-        const scheduledDate = new Date(task.dueDate!);
-        const daysUntil = Math.ceil(
-          (scheduledDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
-        );
-        const equipmentItem = equipment.find((eq) => eq.id === task.equipmentId);
-        const equipmentName =
-          equipmentItem?.name ?? task.equipmentId ?? 'Оборудование';
-        const typeLabel = task.maintenanceType || 'ТО';
-
-        if (scheduledDate <= nextWeek && scheduledDate >= today) {
-          const id = `maintenance-task-${task.id}`;
-          if (isLocallyDismissed(id, hiddenLocalIds)) return;
-          notifications.push({
-            id,
-            type: 'maintenance',
-            title: 'Требуется ТО',
-            description: `${equipmentName} - ${typeLabel} через ${daysUntil} дн.`,
-            link: `/tasks?task=${task.id}`,
-            equipmentId: task.equipmentId ?? undefined,
-            priority: daysUntil <= 3 ? 'high' : 'medium',
-            createdAt: today,
-            isLocal: true,
-            repeatableDismiss: true,
-          });
-        } else if (scheduledDate < today) {
-          const id = `maintenance-overdue-task-${task.id}`;
-          if (isLocallyDismissed(id, hiddenLocalIds)) return;
-          notifications.push({
-            id,
-            type: 'warning',
-            title: 'Просрочено ТО',
-            description: `${equipmentName} - ${typeLabel} просрочено на ${Math.abs(daysUntil)} дн.`,
-            link: `/tasks?task=${task.id}`,
-            equipmentId: task.equipmentId ?? undefined,
-            priority: 'high',
-            createdAt: today,
-            isLocal: true,
-            repeatableDismiss: true,
-          });
-        }
-      });
+    // ТО по задачам — только через серверные уведомления (без дублей каждые 4 ч).
 
     remarks.forEach((remark) => {
       if (remark.status === 'open' || remark.status === 'in_progress') {
@@ -332,7 +310,7 @@ export function NotificationsDropdown() {
     });
 
     return notifications;
-  }, [equipment, remarks, tasks, hiddenLocalIds]);
+  }, [equipment, remarks, hiddenLocalIds]);
 
   const dbMapped: Notification[] = useMemo(
     () =>

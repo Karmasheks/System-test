@@ -1,7 +1,16 @@
 import { eq, inArray } from "drizzle-orm";
 import { db } from "./db";
-import { productionDailyPlan, productionTooling, productionToolingProducts } from "@shared/schema";
-import { predictNextMaintenanceDateFromPlan } from "@shared/production-tooling-utils";
+import {
+  productionDailyPlan,
+  productionTooling,
+  productionToolingProducts,
+  products,
+} from "@shared/schema";
+import {
+  isMaintenanceDue,
+  predictNextMaintenanceDateFromPlan,
+  resolveNextMaintenancePlannedAt,
+} from "@shared/production-tooling-utils";
 
 function dateKey(d: Date | string): string {
   if (typeof d === "string") return d.slice(0, 10);
@@ -17,13 +26,34 @@ export async function loadMaintenancePlanContext(
   subdivisionId: number
 ): Promise<MaintenancePlanContext> {
   const today = new Date().toISOString().slice(0, 10);
-  const rows = await db
-    .select()
-    .from(productionDailyPlan)
-    .where(eq(productionDailyPlan.subdivisionId, subdivisionId));
+  const [rows, toolingRows, productRows] = await Promise.all([
+    db
+      .select()
+      .from(productionDailyPlan)
+      .where(eq(productionDailyPlan.subdivisionId, subdivisionId)),
+    db
+      .select({ id: productionTooling.id, pfNumber: productionTooling.pfNumber })
+      .from(productionTooling)
+      .where(eq(productionTooling.subdivisionId, subdivisionId)),
+    db
+      .select({ id: products.id, pfNumber: products.pfNumber })
+      .from(products)
+      .where(eq(products.subdivisionId, subdivisionId)),
+  ]);
+
+  const toolingByPf = new Map(
+    toolingRows.map((t) => [t.pfNumber.toUpperCase(), t.id])
+  );
+  const productById = new Map(productRows.map((p) => [p.id, p]));
 
   const byProductId = new Map<number, Map<string, number>>();
   const byToolingId = new Map<number, Map<string, number>>();
+
+  const addToolingQty = (toolingId: number, d: string, qty: number) => {
+    if (!byToolingId.has(toolingId)) byToolingId.set(toolingId, new Map());
+    const bucket = byToolingId.get(toolingId)!;
+    bucket.set(d, (bucket.get(d) ?? 0) + qty);
+  };
 
   for (const row of rows) {
     const d = dateKey(row.planDate);
@@ -36,11 +66,18 @@ export async function loadMaintenancePlanContext(
       const bucket = byProductId.get(row.productId)!;
       bucket.set(d, (bucket.get(d) ?? 0) + qty);
     }
-    if (row.toolingId) {
-      if (!byToolingId.has(row.toolingId)) byToolingId.set(row.toolingId, new Map());
-      const bucket = byToolingId.get(row.toolingId)!;
-      bucket.set(d, (bucket.get(d) ?? 0) + qty);
+
+    let toolingId = row.toolingId ?? null;
+    if (!toolingId && row.pfNumber) {
+      toolingId = toolingByPf.get(row.pfNumber.toUpperCase()) ?? null;
     }
+    if (!toolingId && row.productId) {
+      const product = productById.get(row.productId);
+      if (product?.pfNumber) {
+        toolingId = toolingByPf.get(product.pfNumber.toUpperCase()) ?? null;
+      }
+    }
+    if (toolingId) addToolingQty(toolingId, d, qty);
   }
 
   return { byProductId, byToolingId };
@@ -86,18 +123,27 @@ export async function syncToolingMaintenancePlannedDate(
 ): Promise<Date | null> {
   const planCtx = ctx ?? (await loadMaintenancePlanContext(tooling.subdivisionId));
   const predicted = predictMaintenanceDateForTooling(tooling, productIds, planCtx);
+  const maintenanceDue = isMaintenanceDue(
+    tooling.maintenanceCycleInterval,
+    tooling.cyclesSinceMaintenance
+  );
+  const resolved = resolveNextMaintenancePlannedAt(
+    tooling.nextMaintenancePlannedAt,
+    predicted,
+    maintenanceDue
+  );
   const current = tooling.nextMaintenancePlannedAt?.getTime() ?? null;
-  const next = predicted?.getTime() ?? null;
+  const next = resolved?.getTime() ?? null;
   if (current !== next) {
     await db
       .update(productionTooling)
       .set({
-        nextMaintenancePlannedAt: predicted,
+        nextMaintenancePlannedAt: resolved,
         updatedAt: new Date(),
       })
       .where(eq(productionTooling.id, tooling.id));
   }
-  return predicted;
+  return resolved;
 }
 
 export async function syncToolingMaintenancePlannedDatesForSubdivision(

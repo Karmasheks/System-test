@@ -8,8 +8,8 @@ import {
   products,
 } from "@shared/schema";
 import {
-  isMaintenanceDue,
   piecesToCycles,
+  resolveToolingStatusForCycleCount,
 } from "@shared/production-tooling-utils";
 import type { ProductionToolingStatus } from "@shared/schema";
 import { getProductionTooling, patchToolingCycleCounters } from "./production-tooling-service";
@@ -92,22 +92,11 @@ async function updateToolingCounters(
   sinceMaintenance: number
 ): Promise<void> {
   let status: ProductionToolingStatus = tooling.status as ProductionToolingStatus;
-  const frozenStatuses = new Set([
-    "decommissioned",
-    "on_maintenance",
-    "repair",
-    "testing",
-    "storage",
-    "conservation",
-    "maintenance_completed",
-  ]);
-  if (!frozenStatuses.has(tooling.status)) {
-    if (isMaintenanceDue(tooling.maintenanceCycleInterval, sinceMaintenance)) {
-      status = "maintenance_due";
-    } else if (status === "maintenance_due") {
-      status = "ok";
-    }
-  }
+  status = resolveToolingStatusForCycleCount(
+    status,
+    tooling.maintenanceCycleInterval,
+    sinceMaintenance
+  ) as ProductionToolingStatus;
 
   await patchToolingCycleCounters(tooling.id, {
     cycleCounterTotal: totalCycles,

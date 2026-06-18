@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -32,13 +32,33 @@ import {
   useProductionMutations,
   type ProductWithSubs,
 } from "@/hooks/use-production-planning";
-import { Plus, Pencil, Package } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
+import { Plus, Package } from "lucide-react";
+import { formatCavitiesDisplay } from "@shared/cavities-utils";
 import { ListPaginationControls } from "@/components/list-pagination-controls";
 import { useListPagination } from "@/hooks/use-list-pagination";
 
 type Props = {
   subdivisionId: number;
 };
+
+function ProductMetricLines({
+  lines,
+}: {
+  lines: Array<{ label: string; value: ReactNode }>;
+}) {
+  return (
+    <div className="space-y-1 text-xs whitespace-normal">
+      {lines.map((line) => (
+        <div key={line.label} className="leading-snug">
+          <span className="text-muted-foreground">{line.label}: </span>
+          {line.value}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export function PlanningProductsTab({ subdivisionId }: Props) {
   const { toast } = useToast();
@@ -187,60 +207,129 @@ export function PlanningProductsTab({ subdivisionId }: Props) {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>SAP</TableHead>
-                <TableHead>Наименование</TableHead>
-                <TableHead>ПФ / оснастка</TableHead>
-                <TableHead>Вес изд., г</TableHead>
-                <TableHead>Литник, г</TableHead>
-                <TableHead>Норма 11ч</TableHead>
-                <TableHead>Цикл</TableHead>
-                <TableHead>Гнёзд</TableHead>
-                <TableHead></TableHead>
+                <TableHead className="min-w-[180px]">SAP / наименование</TableHead>
+                <TableHead className="min-w-[160px]">ПФ / оснастка</TableHead>
+                <TableHead className="min-w-[160px]">Вес и литник</TableHead>
+                <TableHead className="min-w-[140px]">Нормы и цикл</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-center text-muted-foreground">
+                  <TableCell colSpan={4} className="text-center text-muted-foreground">
                     Загрузка…
                   </TableCell>
                 </TableRow>
               ) : productsTotal === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-center text-muted-foreground">
+                  <TableCell colSpan={4} className="text-center text-muted-foreground">
                     Нет изделий. Создайте изделие или привяжите через оснастку/ПФ.
                   </TableCell>
                 </TableRow>
               ) : (
-                productPageItems.map((p) => (
-                  <TableRow key={p.id}>
-                    <TableCell className="font-mono">{p.sapCode}</TableCell>
-                    <TableCell>{p.name}</TableCell>
-                    <TableCell className="font-mono">{p.pfNumber ?? "—"}</TableCell>
-                    <TableCell>{p.productWeight ?? "—"}</TableCell>
-                    <TableCell>
-                      {p.sprueWeight ??
-                        (p.shotWeight != null && p.productWeight != null
-                          ? Math.max(
-                              0,
-                              p.shotWeight - p.productWeight * (p.cavities ?? 1)
-                            )
-                          : "—")}
-                    </TableCell>
-                    <TableCell>
-                      {p.defaultShiftNorm?.toLocaleString("ru-RU") ?? "—"}
-                    </TableCell>
-                    <TableCell>{p.cycleTimeSec ?? "—"}</TableCell>
-                    <TableCell>{p.cavities ?? "—"}</TableCell>
-                    <TableCell>
-                      {canEdit && (
-                        <Button variant="ghost" size="sm" onClick={() => openEdit(p)}>
-                          <Pencil className="h-4 w-4" />
-                        </Button>
+                productPageItems.map((p) => {
+                  const linked = tooling.find((t) => t.pfNumber === p.pfNumber);
+                  const sprue =
+                    p.sprueWeight ??
+                    (p.shotWeight != null && p.productWeight != null
+                      ? Math.max(0, p.shotWeight - p.productWeight * (p.cavities ?? 1))
+                      : null);
+                  return (
+                    <TableRow
+                      key={p.id}
+                      className={cn(
+                        canEdit && "cursor-pointer hover:bg-muted/50",
+                        "align-top"
                       )}
-                    </TableCell>
-                  </TableRow>
-                ))
+                      onClick={() => canEdit && openEdit(p)}
+                    >
+                      <TableCell className="align-top whitespace-normal">
+                        <div className="space-y-1 py-0.5 max-w-[240px]">
+                          <Badge variant="secondary" className="font-mono text-xs">
+                            {p.sapCode}
+                          </Badge>
+                          <div
+                            className="text-sm font-medium leading-snug line-clamp-3"
+                            title={p.name}
+                          >
+                            {p.name?.trim() || "Без названия"}
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell className="align-top whitespace-normal">
+                        {linked || p.pfNumber ? (
+                          <div className="space-y-1 text-xs max-w-[220px]">
+                            <div className="font-mono text-blue-700 dark:text-blue-300">
+                              {p.pfNumber ?? linked?.pfNumber ?? "—"}
+                            </div>
+                            {linked && (
+                              <div
+                                className="text-sm leading-snug line-clamp-2"
+                                title={linked.name}
+                              >
+                                {linked.name}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground text-xs">Не привязано</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="align-top">
+                        <ProductMetricLines
+                          lines={[
+                            {
+                              label: "Вес изд.",
+                              value: (
+                                <span className="tabular-nums">
+                                  {p.productWeight ?? "—"} г
+                                </span>
+                              ),
+                            },
+                            {
+                              label: "Литник",
+                              value: (
+                                <span className="tabular-nums">{sprue ?? "—"} г</span>
+                              ),
+                            },
+                          ]}
+                        />
+                      </TableCell>
+                      <TableCell className="align-top">
+                        <ProductMetricLines
+                          lines={[
+                            {
+                              label: "Норма 11 ч",
+                              value: (
+                                <span className="tabular-nums">
+                                  {p.defaultShiftNorm?.toLocaleString("ru-RU") ?? "—"}
+                                </span>
+                              ),
+                            },
+                            {
+                              label: "Цикл",
+                              value: (
+                                <span className="tabular-nums">
+                                  {p.cycleTimeSec ?? linked?.cycleTimeSec ?? "—"} сек
+                                </span>
+                              ),
+                            },
+                            {
+                              label: "Гнёзда",
+                              value: (
+                                <span className="tabular-nums">
+                                  {linked
+                                    ? formatCavitiesDisplay(linked)
+                                    : p.cavities ?? "—"}
+                                </span>
+                              ),
+                            },
+                          ]}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
               )}
             </TableBody>
           </Table>

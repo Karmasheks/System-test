@@ -1,13 +1,23 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, like, sql } from "drizzle-orm";
 import { db } from "./db";
-import { notifications, taskCoexecutors, tasks, type Task } from "@shared/schema";
+import { maintenanceRecords, notifications, taskCoexecutors, tasks, type Task } from "@shared/schema";
 import { storage } from "./storage";
-
-const REPEAT_AFTER_MS = 4 * 60 * 60 * 1000;
-const UPCOMING_DAYS = 3;
+import { findTaskByMaintenanceId } from "./maintenance-scheduling-service";
+import {
+  daysUntilDate,
+  formatMaintenanceScheduledMessage,
+  reminderRepeatIntervalMs,
+  shouldNotifyMaintenanceSchedule,
+  shouldNotifyTaskUpcoming,
+  TASK_UPCOMING_NOTIFY_DAYS,
+} from "@shared/notification-reminder-constants";
 
 function isManagerRole(role: string): boolean {
   return role === "admin" || role === "marketing_manager";
+}
+
+function isMaintenanceTask(task: Task): boolean {
+  return task.taskType === "maintenance" || task.maintenanceId != null;
 }
 
 async function getTasksForUserReminders(userId: number, role: string): Promise<Task[]> {
@@ -36,22 +46,30 @@ async function getTasksForUserReminders(userId: number, role: string): Promise<T
 }
 
 const lastReminderSyncByUser = new Map<number, number>();
-const REMINDER_SYNC_INTERVAL_MS = 15 * 60 * 1000;
+export const REMINDER_SYNC_INTERVAL_MS = 15 * 60 * 1000;
 
-async function hasRecentArchivedForTask(
+async function hasRecentArchived(
   userId: number,
-  taskId: number
+  type: string,
+  repeatAfterMs: number,
+  filters: { taskId?: number; messagePrefix?: string }
 ): Promise<boolean> {
+  const conditions = [
+    eq(notifications.userId, userId),
+    eq(notifications.type, type),
+    eq(notifications.isArchived, true),
+  ];
+  if (filters.taskId != null) {
+    conditions.push(eq(notifications.taskId, filters.taskId));
+  }
+  if (filters.messagePrefix) {
+    conditions.push(like(notifications.message, `${filters.messagePrefix}%`));
+  }
+
   const rows = await db
     .select()
     .from(notifications)
-    .where(
-      and(
-        eq(notifications.userId, userId),
-        eq(notifications.taskId, taskId),
-        eq(notifications.isArchived, true)
-      )
-    )
+    .where(and(...conditions))
     .orderBy(desc(sql`COALESCE(${notifications.readAt}, ${notifications.createdAt})`))
     .limit(1);
 
@@ -60,25 +78,30 @@ async function hasRecentArchivedForTask(
 
   const dismissedAt = new Date(last.readAt ?? last.createdAt);
   if (Number.isNaN(dismissedAt.getTime())) return false;
-  return Date.now() - dismissedAt.getTime() < REPEAT_AFTER_MS;
+  return Date.now() - dismissedAt.getTime() < repeatAfterMs;
 }
 
 async function hasActiveReminder(
   userId: number,
-  taskId: number,
-  type: string
+  type: string,
+  filters: { taskId?: number; messagePrefix?: string }
 ): Promise<boolean> {
+  const conditions = [
+    eq(notifications.userId, userId),
+    eq(notifications.type, type),
+    eq(notifications.isArchived, false),
+  ];
+  if (filters.taskId != null) {
+    conditions.push(eq(notifications.taskId, filters.taskId));
+  }
+  if (filters.messagePrefix) {
+    conditions.push(like(notifications.message, `${filters.messagePrefix}%`));
+  }
+
   const rows = await db
     .select({ id: notifications.id })
     .from(notifications)
-    .where(
-      and(
-        eq(notifications.userId, userId),
-        eq(notifications.taskId, taskId),
-        eq(notifications.type, type),
-        eq(notifications.isArchived, false)
-      )
-    )
+    .where(and(...conditions))
     .limit(1);
 
   return rows.length > 0;
@@ -90,10 +113,23 @@ async function ensureTaskReminder(
   type: "task_overdue" | "task_upcoming",
   title: string,
   message: string,
-  priority: "high" | "medium" | "low"
+  priority: "high" | "medium" | "low",
+  daysUntil: number
 ): Promise<void> {
-  if (await hasActiveReminder(userId, task.id, type)) return;
-  if (await hasRecentArchivedForTask(userId, task.id)) return;
+  const maintenance = isMaintenanceTask(task);
+  const repeatAfterMs = reminderRepeatIntervalMs(daysUntil, {
+    maintenance,
+    overdue: type === "task_overdue",
+  });
+
+  if (await hasActiveReminder(userId, type, { taskId: task.id })) return;
+  if (
+    await hasRecentArchived(userId, type, repeatAfterMs, {
+      taskId: task.id,
+    })
+  ) {
+    return;
+  }
 
   await storage.createNotification({
     userId,
@@ -106,39 +142,110 @@ async function ensureTaskReminder(
   });
 }
 
+async function ensureMaintenanceScheduleReminder(
+  userId: number,
+  record: typeof maintenanceRecords.$inferSelect,
+  daysUntilTo: number
+): Promise<void> {
+  const messagePrefix = `maintenance_record:${record.id}|`;
+  const repeatAfterMs = reminderRepeatIntervalMs(daysUntilTo, { maintenance: true });
+
+  if (
+    await hasActiveReminder(userId, "maintenance_scheduled", {
+      messagePrefix,
+    })
+  ) {
+    return;
+  }
+  if (
+    await hasRecentArchived(userId, "maintenance_scheduled", repeatAfterMs, {
+      messagePrefix,
+    })
+  ) {
+    return;
+  }
+
+  await storage.createNotification({
+    userId,
+    title: "Запланировано ТО",
+    message: formatMaintenanceScheduledMessage(
+      record.id,
+      record.equipmentName,
+      record.maintenanceType,
+      daysUntilTo
+    ),
+    type: "maintenance_scheduled",
+    equipmentId: record.equipmentId,
+    priority: daysUntilTo <= 7 ? "medium" : "low",
+  });
+}
+
+const TERMINAL_MAINTENANCE_STATUSES = new Set(["completed", "cancelled"]);
+
+async function syncMaintenanceScheduleReminders(userId: number, role: string): Promise<void> {
+  if (!isManagerRole(role)) return;
+
+  const records = await storage.getAllMaintenanceRecords();
+  const today = new Date();
+
+  for (const record of records) {
+    if (TERMINAL_MAINTENANCE_STATUSES.has(record.status)) continue;
+
+    const scheduled = new Date(record.scheduledDate);
+    const daysUntilTo = daysUntilDate(scheduled, today);
+    if (!shouldNotifyMaintenanceSchedule(daysUntilTo)) continue;
+
+    const linkedTask = await findTaskByMaintenanceId(record.id);
+    if (linkedTask && linkedTask.status !== "completed" && linkedTask.status !== "cancelled") {
+      continue;
+    }
+
+    await ensureMaintenanceScheduleReminder(userId, record, daysUntilTo);
+  }
+}
+
 export async function syncTaskReminderNotifications(
   userId: number,
   role: string
 ): Promise<void> {
   const now = new Date();
-  const upcomingLimit = new Date(now.getTime() + UPCOMING_DAYS * 24 * 60 * 60 * 1000);
+  const upcomingLimit = new Date(
+    now.getTime() + TASK_UPCOMING_NOTIFY_DAYS * 24 * 60 * 60 * 1000
+  );
   const relevantTasks = await getTasksForUserReminders(userId, role);
 
   for (const task of relevantTasks) {
     if (!task.dueDate) continue;
     const due = new Date(task.dueDate);
-    const daysUntil = Math.ceil((due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+    const daysUntil = daysUntilDate(due, now);
+    const maintenance = isMaintenanceTask(task);
 
     if (due < now) {
       await ensureTaskReminder(
         userId,
         task,
         "task_overdue",
-        `Просрочена задача #${task.id}`,
-        `${task.title} — просрочена на ${Math.abs(daysUntil)} дн.`,
-        "high"
+        maintenance ? `Просрочено ТО (задача #${task.id})` : `Просрочена задача #${task.id}`,
+        maintenance
+          ? `${task.title} — просрочено на ${Math.abs(daysUntil)} дн.`
+          : `${task.title} — просрочена на ${Math.abs(daysUntil)} дн.`,
+        "high",
+        daysUntil
       );
-    } else if (due <= upcomingLimit) {
+    } else if (due <= upcomingLimit && shouldNotifyTaskUpcoming(daysUntil)) {
       await ensureTaskReminder(
         userId,
         task,
         "task_upcoming",
-        `Срок задачи #${task.id}`,
+        maintenance ? `Срок ТО (задача #${task.id})` : `Срок задачи #${task.id}`,
         daysUntil <= 0
           ? `${task.title} — срок сегодня`
           : `${task.title} — осталось ${daysUntil} дн.`,
-        daysUntil <= 1 ? "high" : "medium"
+        daysUntil <= 1 ? "high" : "medium",
+        daysUntil
       );
     }
   }
+
+  await syncMaintenanceScheduleReminders(userId, role);
 }

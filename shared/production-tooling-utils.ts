@@ -48,12 +48,52 @@ export function isMaintenanceDue(
   return cyclesSinceMaintenance >= maintenanceCycleInterval;
 }
 
+/** Статусы, которые не переключаются автоматически по наработке. */
+export const FROZEN_TOOLING_STATUSES = new Set([
+  "decommissioned",
+  "on_maintenance",
+  "repair",
+  "testing",
+  "storage",
+  "conservation",
+]);
+
+export function resolveToolingStatusForCycleCount(
+  currentStatus: string,
+  maintenanceCycleInterval: number | null | undefined,
+  cyclesSinceMaintenance: number
+): string {
+  if (FROZEN_TOOLING_STATUSES.has(currentStatus)) return currentStatus;
+  if (isMaintenanceDue(maintenanceCycleInterval, cyclesSinceMaintenance)) return "maintenance_due";
+  if (currentStatus === "maintenance_due") return "ok";
+  return currentStatus;
+}
+
+export function maintenanceDueToday(): Date {
+  const today = new Date();
+  today.setHours(12, 0, 0, 0);
+  return today;
+}
+
+/** Плановая дата ТО: расчёт по плану → просрочено → сохранённая в карточке. */
+export function resolveNextMaintenancePlannedAt(
+  stored: Date | string | null | undefined,
+  predicted: Date | null | undefined,
+  maintenanceDue: boolean
+): Date | null {
+  if (predicted != null) return predicted;
+  if (maintenanceDue) return maintenanceDueToday();
+  if (!stored) return null;
+  const d = stored instanceof Date ? stored : new Date(stored);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 export function warrantyUsagePercent(
   cycleCounterTotal: number,
   cyclesUntilGuarantee: number | null | undefined
 ): number | null {
   if (!cyclesUntilGuarantee || cyclesUntilGuarantee <= 0) return null;
-  return Math.min(100, Math.round((cycleCounterTotal / cyclesUntilGuarantee) * 1000) / 10);
+  return Math.round((cycleCounterTotal / cyclesUntilGuarantee) * 1000) / 10;
 }
 
 export function maintenanceUsagePercent(
@@ -61,7 +101,7 @@ export function maintenanceUsagePercent(
   maintenanceCycleInterval: number | null | undefined
 ): number | null {
   if (!maintenanceCycleInterval || maintenanceCycleInterval <= 0) return null;
-  return Math.min(100, Math.round((cyclesSinceMaintenance / maintenanceCycleInterval) * 1000) / 10);
+  return Math.round((cyclesSinceMaintenance / maintenanceCycleInterval) * 1000) / 10;
 }
 
 export type PlanQuantityByDate = { planDate: string; plannedQuantity: number };

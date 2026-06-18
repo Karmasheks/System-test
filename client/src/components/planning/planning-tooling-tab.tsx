@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,6 +17,11 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -51,7 +56,7 @@ import {
 import {
   ToolingStatusBadge,
   PercentCell,
-  plannedDateClass,
+  nextMaintenanceDateClass,
 } from "@/lib/production-tooling-status";
 import { cn } from "@/lib/utils";
 import { Plus, Wrench, PackagePlus, CheckCircle2 } from "lucide-react";
@@ -206,9 +211,105 @@ function productsNeedSync(
   });
 }
 
-function productNamesList(products: ProductionToolingView["products"]) {
-  if (products.length === 0) return "—";
-  return products.map((p) => p.name).join("; ");
+function MetricLines({
+  lines,
+}: {
+  lines: Array<{ label: string; value: ReactNode; className?: string }>;
+}) {
+  return (
+    <div className="space-y-1 text-xs whitespace-normal">
+      {lines.map((line) => (
+        <div key={line.label} className={cn("leading-snug", line.className)}>
+          <span className="text-muted-foreground">{line.label}: </span>
+          {line.value}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function PfProductsCell({
+  pfNumber,
+  pfName,
+  products,
+}: {
+  pfNumber: string;
+  pfName: string;
+  products: ProductionToolingView["products"];
+}) {
+  const primary = products[0];
+  const extra = products.slice(1);
+
+  return (
+    <div className="space-y-1.5 py-0.5 min-w-0 max-w-[240px] whitespace-normal">
+      <div className="text-sm font-medium leading-snug line-clamp-2" title={pfName}>
+        {pfName}
+      </div>
+      {primary ? (
+        <div className="space-y-1">
+          <div className="rounded border bg-muted/30 px-2 py-1.5 space-y-0.5">
+            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+              Основное изделие
+            </div>
+            <div className="flex flex-wrap items-center gap-1">
+              <Badge variant="secondary" className="font-mono text-[10px] px-1.5 py-0">
+                {primary.sapCode}
+              </Badge>
+            </div>
+            <div
+              className="text-xs leading-snug line-clamp-3"
+              title={primary.name?.trim() || undefined}
+            >
+              {primary.name?.trim() || "Без названия"}
+            </div>
+          </div>
+          {extra.length > 0 && (
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 w-full justify-between px-2 text-xs font-normal"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <span>Ещё изделия ({extra.length})</span>
+                  <span className="font-mono text-muted-foreground">
+                    {extra.map((p) => p.sapCode).join(", ")}
+                  </span>
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent
+                className="w-80 p-2"
+                align="start"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <p className="text-xs font-medium text-muted-foreground mb-2 px-1">
+                  Все SAP по ПФ
+                </p>
+                <ul className="space-y-1.5 max-h-52 overflow-y-auto">
+                  {products.map((p) => (
+                    <li
+                      key={p.id}
+                      className="rounded border px-2 py-1.5 text-xs leading-snug"
+                    >
+                      <div className="font-mono font-medium">{p.sapCode}</div>
+                      <div className="text-muted-foreground mt-0.5">
+                        {p.name?.trim() || "—"}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </PopoverContent>
+            </Popover>
+          )}
+        </div>
+      ) : (
+        <span className="text-xs text-muted-foreground">Нет привязанных изделий</span>
+      )}
+      <div className="font-mono text-xs text-blue-700 dark:text-blue-300">{pfNumber}</div>
+    </div>
+  );
 }
 
 function parseOptionalInt(raw: string): number | undefined {
@@ -258,21 +359,6 @@ function formatDate(value: string | Date | null | undefined) {
     month: "2-digit",
     year: "numeric",
   });
-}
-
-function ProductLinks({ products }: { products: ProductionToolingView["products"] }) {
-  if (products.length === 0) {
-    return <span className="text-muted-foreground">—</span>;
-  }
-  return (
-    <div className="flex flex-wrap gap-1">
-      {products.map((p) => (
-        <Badge key={p.id} variant="outline" className="font-mono text-xs">
-          {p.sapCode}
-        </Badge>
-      ))}
-    </div>
-  );
 }
 
 export function PlanningToolingTab({ subdivisionId }: Props) {
@@ -588,41 +674,28 @@ export function PlanningToolingTab({ subdivisionId }: Props) {
         )}
       </div>
 
-      <div className="rounded-md border overflow-x-auto">
+      <div className="rounded-md border">
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead className="w-10">№</TableHead>
-              <TableHead>№ ПФ</TableHead>
-              <TableHead className="min-w-[180px]">Изделие</TableHead>
-              <TableHead>Гнёзд</TableHead>
-              <TableHead>Дата обновления</TableHead>
-              <TableHead>Смыканий</TableHead>
-              <TableHead>Гарантия</TableHead>
-              <TableHead>% гарантии</TableHead>
-              <TableHead>Дата ТО</TableHead>
-              <TableHead>После ТО</TableHead>
-              <TableHead>Период ТО</TableHead>
-              <TableHead>% наработки</TableHead>
-              <TableHead>След. ТО</TableHead>
-              <TableHead>№ ОС</TableHead>
-              <TableHead>Статус</TableHead>
-              <TableHead className="min-w-[120px]">Местоположение</TableHead>
-              <TableHead>ТО, ч</TableHead>
-              <TableHead>Оценка ТО, ч</TableHead>
-              {canEdit && <TableHead className="w-12" />}
+              <TableHead className="min-w-[200px]">ПФ / изделия</TableHead>
+              <TableHead className="min-w-[130px]">Гнёзда / статус</TableHead>
+              <TableHead className="min-w-[130px]">Смыкания / гарантия</TableHead>
+              <TableHead className="min-w-[140px]">ТО</TableHead>
+              <TableHead className="min-w-[120px]">№ ОС / место</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={canEdit ? 19 : 18} className="text-center text-muted-foreground">
+                <TableCell colSpan={6} className="text-center text-muted-foreground">
                   Загрузка…
                 </TableCell>
               </TableRow>
             ) : tooling.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={canEdit ? 19 : 18} className="text-center text-muted-foreground">
+                <TableCell colSpan={6} className="text-center text-muted-foreground">
                   Нет записей. Добавьте пресс-формы и оснастку по каталогу ПФ.
                 </TableCell>
               </TableRow>
@@ -639,88 +712,176 @@ export function PlanningToolingTab({ subdivisionId }: Props) {
                 return (
                   <TableRow
                     key={row.id}
-                    className="cursor-pointer hover:bg-muted/50"
+                    className="cursor-pointer hover:bg-muted/50 align-top"
                     onClick={() => setDetailId(row.id)}
                   >
-                    <TableCell className="text-muted-foreground">{from + index}</TableCell>
-                    <TableCell className="font-mono text-blue-700 dark:text-blue-300 underline-offset-2">
-                      {row.pfNumber}
+                    <TableCell className="text-muted-foreground align-top pt-3">
+                      {from + index}
                     </TableCell>
-                    <TableCell className="text-sm">{productNamesList(row.products)}</TableCell>
-                    <TableCell className="tabular-nums">
-                      {formatCavitiesDisplay({
-                        cavitiesLayout: row.cavitiesLayout,
-                        cavities: row.cavities,
-                      })}
-                      {row.piecesPerCycle != null && (
-                        <span className="block text-xs text-muted-foreground">
-                          {row.piecesPerCycle} изд./цикл
-                        </span>
-                      )}
+                    <TableCell className="align-top">
+                      <PfProductsCell
+                        pfNumber={row.pfNumber}
+                        pfName={row.name}
+                        products={row.products}
+                      />
                     </TableCell>
-                    <TableCell
-                      className={cn(
-                        row.infoUpdatedAt &&
-                          "bg-green-100 text-green-900 dark:bg-green-950 dark:text-green-100"
-                      )}
-                    >
-                      {formatDate(row.infoUpdatedAt)}
+                    <TableCell className="align-top whitespace-normal">
+                      <MetricLines
+                        lines={[
+                          {
+                            label: "Гнёзда",
+                            value: (
+                              <span className="tabular-nums">
+                                {formatCavitiesDisplay({
+                                  cavitiesLayout: row.cavitiesLayout,
+                                  cavities: row.cavities,
+                                })}
+                                {row.piecesPerCycle != null && (
+                                  <span className="text-muted-foreground">
+                                    {" "}
+                                    ({row.piecesPerCycle} изд./цикл)
+                                  </span>
+                                )}
+                              </span>
+                            ),
+                          },
+                          {
+                            label: "Статус",
+                            value: <ToolingStatusBadge status={row.status} />,
+                          },
+                          {
+                            label: "Обновлено",
+                            value: (
+                              <span
+                                className={cn(
+                                  "tabular-nums rounded px-1",
+                                  row.infoUpdatedAt &&
+                                    "bg-green-100 text-green-900 dark:bg-green-950 dark:text-green-100"
+                                )}
+                              >
+                                {formatDate(row.infoUpdatedAt)}
+                              </span>
+                            ),
+                          },
+                        ]}
+                      />
                     </TableCell>
-                    <TableCell className="tabular-nums">{row.cycleCounterTotal}</TableCell>
-                    <TableCell className="tabular-nums">
-                      {row.cyclesUntilGuarantee ?? "—"}
+                    <TableCell className="align-top whitespace-normal">
+                      <MetricLines
+                        lines={[
+                          {
+                            label: "Смыканий",
+                            value: (
+                              <span className="tabular-nums font-medium">
+                                {row.cycleCounterTotal}
+                              </span>
+                            ),
+                          },
+                          {
+                            label: "Гарантия",
+                            value: (
+                              <span className="tabular-nums">
+                                {row.cyclesUntilGuarantee ?? "—"}
+                              </span>
+                            ),
+                          },
+                          {
+                            label: "% гарантии",
+                            value: <PercentCell value={warrantyPct} />,
+                          },
+                        ]}
+                      />
                     </TableCell>
-                    <TableCell>
-                      <PercentCell value={warrantyPct} />
+                    <TableCell className="align-top whitespace-normal">
+                      <MetricLines
+                        lines={[
+                          {
+                            label: "Дата ТО",
+                            value: (
+                              <span
+                                className={cn(
+                                  "tabular-nums rounded px-1",
+                                  row.lastMaintenanceAt &&
+                                    "bg-green-100 text-green-900 dark:bg-green-950 dark:text-green-100"
+                                )}
+                              >
+                                {formatDate(row.lastMaintenanceAt)}
+                              </span>
+                            ),
+                          },
+                          {
+                            label: "После ТО",
+                            value: (
+                              <span className="tabular-nums">{row.cyclesSinceMaintenance}</span>
+                            ),
+                          },
+                          {
+                            label: "Период",
+                            value: (
+                              <span className="tabular-nums">
+                                {row.maintenanceCycleInterval ?? "—"}
+                              </span>
+                            ),
+                          },
+                          {
+                            label: "% наработки",
+                            value: <PercentCell value={maintenancePct} />,
+                          },
+                          {
+                            label: "След. ТО",
+                            value: (
+                              <span
+                                className={cn(
+                                  "tabular-nums rounded px-1",
+                                  nextMaintenanceDateClass(
+                                    row.nextMaintenancePlannedAt,
+                                    row.maintenanceDue
+                                  )
+                                )}
+                              >
+                                {formatDate(row.nextMaintenancePlannedAt)}
+                              </span>
+                            ),
+                          },
+                          {
+                            label: "ТО, ч",
+                            value: (
+                              <span className="tabular-nums">
+                                {row.lastMaintenanceDurationHours ?? "—"}
+                                {row.estimatedMaintenanceHours != null && (
+                                  <span className="text-muted-foreground">
+                                    {" "}
+                                    / оценка {row.estimatedMaintenanceHours}
+                                  </span>
+                                )}
+                              </span>
+                            ),
+                          },
+                        ]}
+                      />
                     </TableCell>
-                    <TableCell
-                      className={cn(
-                        row.lastMaintenanceAt &&
-                          "bg-green-100 text-green-900 dark:bg-green-950 dark:text-green-100"
-                      )}
-                    >
-                      {formatDate(row.lastMaintenanceAt)}
+                    <TableCell className="align-top whitespace-normal">
+                      <MetricLines
+                        lines={[
+                          {
+                            label: "№ ОС",
+                            value: (
+                              <span className="font-mono tabular-nums">
+                                {row.fixedAssetNumber ?? "—"}
+                              </span>
+                            ),
+                          },
+                          {
+                            label: "Место",
+                            value: (
+                              <span className="leading-snug line-clamp-3" title={row.storageLocation ?? undefined}>
+                                {row.storageLocation ?? "—"}
+                              </span>
+                            ),
+                          },
+                        ]}
+                      />
                     </TableCell>
-                    <TableCell className="tabular-nums">{row.cyclesSinceMaintenance}</TableCell>
-                    <TableCell className="tabular-nums">
-                      {row.maintenanceCycleInterval ?? "—"}
-                    </TableCell>
-                    <TableCell>
-                      <PercentCell value={maintenancePct} />
-                    </TableCell>
-                    <TableCell
-                      className={cn(
-                        "tabular-nums",
-                        plannedDateClass(row.nextMaintenancePlannedAt)
-                      )}
-                    >
-                      {formatDate(row.nextMaintenancePlannedAt)}
-                    </TableCell>
-                    <TableCell className="font-mono text-sm">
-                      {row.fixedAssetNumber ?? "—"}
-                    </TableCell>
-                    <TableCell>
-                      <ToolingStatusBadge status={row.status} />
-                    </TableCell>
-                    <TableCell className="text-sm">{row.storageLocation ?? "—"}</TableCell>
-                    <TableCell className="tabular-nums">
-                      {row.lastMaintenanceDurationHours ?? "—"}
-                    </TableCell>
-                    <TableCell className="tabular-nums">
-                      {row.estimatedMaintenanceHours ?? "—"}
-                    </TableCell>
-                    {canEdit && (
-                      <TableCell onClick={(e) => e.stopPropagation()}>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => openEdit(row)}
-                          title="Редактировать"
-                        >
-                          <Wrench className="h-4 w-4" />
-                        </Button>
-                      </TableCell>
-                    )}
                   </TableRow>
                 );
               })
@@ -750,25 +911,21 @@ export function PlanningToolingTab({ subdivisionId }: Props) {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>№ ПФ</TableHead>
-              <TableHead>Наименование</TableHead>
-              <TableHead>SAP / изделия</TableHead>
-              <TableHead>Циклов после ТО</TableHead>
-              <TableHead>Интервал ТО</TableHead>
-              <TableHead>Последнее ТО</TableHead>
-              <TableHead></TableHead>
+              <TableHead className="min-w-[200px]">ПФ / изделия</TableHead>
+              <TableHead>ТО по счётчику</TableHead>
+              <TableHead className="w-[140px]"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {maintenanceLoading ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground">
+                <TableCell colSpan={3} className="text-center text-muted-foreground">
                   Загрузка…
                 </TableCell>
               </TableRow>
             ) : maintenanceDue.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground">
+                <TableCell colSpan={3} className="text-center text-muted-foreground">
                   Нет оснастки/ПФ, требующей ТО.
                 </TableCell>
               </TableRow>
@@ -776,18 +933,43 @@ export function PlanningToolingTab({ subdivisionId }: Props) {
               maintenanceDue.map((row) => (
                 <TableRow
                   key={row.id}
-                  className="cursor-pointer hover:bg-muted/50"
+                  className="cursor-pointer hover:bg-muted/50 align-top"
                   onClick={() => setDetailId(row.id)}
                 >
-                  <TableCell className="font-mono">{row.pfNumber}</TableCell>
-                  <TableCell>{row.name}</TableCell>
-                  <TableCell><ProductLinks products={row.products} /></TableCell>
-                  <TableCell className="font-medium text-destructive">
-                    {row.cyclesSinceMaintenance}
+                  <TableCell className="align-top whitespace-normal">
+                    <PfProductsCell
+                      pfNumber={row.pfNumber}
+                      pfName={row.name}
+                      products={row.products}
+                    />
                   </TableCell>
-                  <TableCell>{row.maintenanceCycleInterval ?? "—"}</TableCell>
-                  <TableCell>{formatDate(row.lastMaintenanceAt)}</TableCell>
-                  <TableCell onClick={(e) => e.stopPropagation()}>
+                  <TableCell className="align-top">
+                    <MetricLines
+                      lines={[
+                        {
+                          label: "После ТО",
+                          value: (
+                            <span className="tabular-nums font-medium text-destructive">
+                              {row.cyclesSinceMaintenance}
+                            </span>
+                          ),
+                        },
+                        {
+                          label: "Интервал",
+                          value: (
+                            <span className="tabular-nums">
+                              {row.maintenanceCycleInterval ?? "—"}
+                            </span>
+                          ),
+                        },
+                        {
+                          label: "Последнее ТО",
+                          value: formatDate(row.lastMaintenanceAt),
+                        },
+                      ]}
+                    />
+                  </TableCell>
+                  <TableCell className="align-top" onClick={(e) => e.stopPropagation()}>
                     {canEdit && (
                       <Button
                         size="sm"
@@ -937,7 +1119,10 @@ export function PlanningToolingTab({ subdivisionId }: Props) {
                   <div
                     className={cn(
                       "inline-block rounded px-1.5",
-                      plannedDateClass(detail.nextMaintenancePlannedAt)
+                      nextMaintenanceDateClass(
+                        detail.nextMaintenancePlannedAt,
+                        detail.maintenanceDue
+                      )
                     )}
                   >
                     {formatDate(detail.nextMaintenancePlannedAt)}

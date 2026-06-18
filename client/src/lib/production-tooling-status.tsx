@@ -57,6 +57,15 @@ export function plannedDateClass(isoDate: string | Date | null | undefined): str
   return "bg-green-100 text-green-900 dark:bg-green-950 dark:text-green-100";
 }
 
+/** Цвет даты «След. ТО»: красный при просрочке по наработке или по дате. */
+export function nextMaintenanceDateClass(
+  isoDate: string | Date | null | undefined,
+  maintenanceDue?: boolean
+): string {
+  if (maintenanceDue) return "bg-red-100 text-red-900 dark:bg-red-950 dark:text-red-100";
+  return plannedDateClass(isoDate);
+}
+
 export function ToolingStatusBadge({ status }: { status: string }) {
   return (
     <Badge variant="outline" className={cn("font-normal", toolingStatusClass(status))}>

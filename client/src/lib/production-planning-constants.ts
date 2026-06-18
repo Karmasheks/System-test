@@ -64,4 +64,5 @@ export {
   PercentCell,
   percentUsageClass,
   plannedDateClass,
+  nextMaintenanceDateClass,
 } from "./production-tooling-status";

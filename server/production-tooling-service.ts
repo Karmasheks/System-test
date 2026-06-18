@@ -15,6 +15,8 @@ import {
   cyclesRemainingGuarantee,
   cyclesUntilMaintenance,
   isMaintenanceDue,
+  resolveNextMaintenancePlannedAt,
+  resolveToolingStatusForCycleCount,
 } from "@shared/production-tooling-utils";
 import { createProduct } from "./production-service";
 import { recalculateToolingCycles } from "./production-tooling-cycle-service";
@@ -97,10 +99,19 @@ function enrichTooling(
   const predictedMaintenanceAt = planCtx
     ? predictMaintenanceDateForTooling(row, ids, planCtx)
     : null;
+  const maintenanceDue = isMaintenanceDue(
+    row.maintenanceCycleInterval,
+    row.cyclesSinceMaintenance
+  );
+  const nextMaintenancePlannedAt = resolveNextMaintenancePlannedAt(
+    row.nextMaintenancePlannedAt,
+    predictedMaintenanceAt,
+    maintenanceDue
+  );
 
   return {
     ...row,
-    nextMaintenancePlannedAt: predictedMaintenanceAt ?? row.nextMaintenancePlannedAt,
+    nextMaintenancePlannedAt,
     products: linkedProducts,
     cyclesUntilMaintenance: cyclesUntilMaintenance(
       row.maintenanceCycleInterval,
@@ -110,7 +121,7 @@ function enrichTooling(
       row.cyclesUntilGuarantee,
       row.cycleCounterTotal
     ),
-    maintenanceDue: isMaintenanceDue(row.maintenanceCycleInterval, row.cyclesSinceMaintenance),
+    maintenanceDue,
   };
 }
 
@@ -194,6 +205,12 @@ export async function setToolingProductLinks(toolingId: number, productIds: numb
     .update(productionTooling)
     .set({ productId: primary, updatedAt: new Date() })
     .where(eq(productionTooling.id, toolingId));
+
+  const fresh = await getProductionTooling(toolingId);
+  if (fresh) {
+    const ids = await linkedProductIdsForToolingRow(fresh);
+    await syncToolingMaintenancePlannedDate(fresh, ids);
+  }
 }
 
 function parseOptionalTimestamp(value: string | Date | null | undefined): Date | null | undefined {
@@ -332,7 +349,16 @@ export async function updateProductionTooling(
     const fresh = await getProductionTooling(id);
     if (fresh) {
       const ids = await linkedProductIdsForToolingRow(fresh);
-      await syncToolingMaintenancePlannedDate(fresh, ids);
+      const interval = rest.maintenanceCycleInterval ?? fresh.maintenanceCycleInterval;
+      const since = rest.cyclesSinceMaintenance ?? fresh.cyclesSinceMaintenance;
+      const status = resolveToolingStatusForCycleCount(fresh.status, interval, since);
+      if (status !== fresh.status) {
+        await patchToolingCycleCounters(id, { status });
+      }
+      const forSync = await getProductionTooling(id);
+      if (forSync) {
+        await syncToolingMaintenancePlannedDate(forSync, ids);
+      }
     }
   }
   return (await getProductionToolingView(id))!;
@@ -467,7 +493,7 @@ export async function recordToolingMaintenance(
     .set({
       cycleCounterTotal: totalCycles,
       cyclesAtLastMaintenance: cyclesAt,
-      cyclesSinceMaintenance: Math.max(0, totalCycles - cyclesAt),
+      cyclesSinceMaintenance: 0,
       lastMaintenanceAt: performedAt,
       status: "maintenance_completed",
       infoUpdatedAt: new Date(),
