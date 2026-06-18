@@ -65,6 +65,8 @@ export type ProductionAnalytics = {
   summary: {
     ordersTotal: number;
     ordersInProgress: number;
+    productsTotal: number;
+    toolingTotal: number;
     scheduleSlots: number;
     factsRecorded: number;
     totalProduced: number;
@@ -154,6 +156,8 @@ export function useProductionProducts(filters?: {
       filters?.search,
       filters?.activeOnly,
     ],
+    enabled: filters?.subdivisionId != null,
+    staleTime: 30_000,
     queryFn: async () => {
       const res = await apiRequest(
         "GET",
@@ -555,6 +559,8 @@ export function useProductionOrders(filters?: {
       filters?.status,
       filters?.priority,
     ],
+    enabled: filters?.subdivisionId != null,
+    staleTime: 30_000,
     queryFn: async () => {
       const res = await apiRequest(
         "GET",
@@ -628,6 +634,61 @@ export function useProductionFacts(filters?: {
   });
 }
 
+export type CatalogCounts = {
+  productsTotal: number;
+  toolingTotal: number;
+};
+
+export function useCatalogCounts(subdivisionId: number | null) {
+  return useQuery<CatalogCounts>({
+    queryKey: ["/api/production/catalog-counts", subdivisionId],
+    enabled: subdivisionId != null,
+    staleTime: 15_000,
+    queryFn: async () => {
+      const res = await apiRequest(
+        "GET",
+        `/api/production/catalog-counts?subdivisionId=${subdivisionId}`
+      );
+      return res.json();
+    },
+  });
+}
+
+export type ProductionKpiSummary = {
+  planFact: ProductionAnalytics["planFact"];
+  equipmentLoad: ProductionAnalytics["equipmentLoad"];
+  atRiskOrders: ProductionAnalytics["atRiskOrders"];
+  materialShortageCount: number;
+  conflictCounts: {
+    plan: number;
+    maintenance: number;
+  };
+  summary: ProductionAnalytics["summary"];
+};
+
+export function useProductionKpiSummary(
+  subdivisionId: number | null,
+  from?: string,
+  to?: string
+) {
+  return useQuery<ProductionKpiSummary>({
+    queryKey: ["/api/production/kpi-summary", subdivisionId, from, to],
+    enabled: subdivisionId != null,
+    staleTime: 30_000,
+    queryFn: async () => {
+      const res = await apiRequest(
+        "GET",
+        `/api/production/kpi-summary${qs({
+          subdivisionId: String(subdivisionId),
+          from,
+          to,
+        })}`
+      );
+      return res.json();
+    },
+  });
+}
+
 export function useProductionAnalytics(
   subdivisionId: number | null,
   from?: string,
@@ -636,6 +697,7 @@ export function useProductionAnalytics(
   return useQuery<ProductionAnalytics>({
     queryKey: ["/api/production/analytics", subdivisionId, from, to],
     enabled: subdivisionId != null,
+    staleTime: 60_000,
     queryFn: async () => {
       const res = await apiRequest(
         "GET",
@@ -692,6 +754,8 @@ export function useProductionMutations() {
     queryClient.invalidateQueries({ queryKey: ["/api/production/schedule"] });
     queryClient.invalidateQueries({ queryKey: ["/api/production/facts"] });
     queryClient.invalidateQueries({ queryKey: ["/api/production/analytics"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/production/kpi-summary"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/production/catalog-counts"] });
     queryClient.invalidateQueries({ queryKey: ["/api/production/conflicts"] });
     queryClient.invalidateQueries({ queryKey: ["/api/production/materials/stocks"] });
     queryClient.invalidateQueries({ queryKey: ["/api/production/warehouse/summary"] });
@@ -702,10 +766,12 @@ export function useProductionMutations() {
 
   const invalidateToolingQueries = () => {
     queryClient.invalidateQueries({ queryKey: ["/api/production/tooling"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/production/catalog-counts"] });
   };
 
   const invalidateProductsQueries = () => {
     queryClient.invalidateQueries({ queryKey: ["/api/production/products"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/production/catalog-counts"] });
   };
 
   const patchToolingInCaches = (updated: ProductionToolingView) => {

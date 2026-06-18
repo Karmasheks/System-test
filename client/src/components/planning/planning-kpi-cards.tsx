@@ -1,5 +1,4 @@
-import type { ProductionAnalytics } from "@/hooks/use-production-planning";
-import type { ProductionPlanConflict } from "@shared/schema";
+import type { ProductionKpiSummary, CatalogCounts } from "@/hooks/use-production-planning";
 import {
   AlertTriangle,
   Factory,
@@ -11,12 +10,15 @@ import {
   FileCheck,
   TrendingUp,
   AlertCircle,
+  Package,
+  Container,
 } from "lucide-react";
 
 type Props = {
-  analytics: ProductionAnalytics | undefined;
-  conflicts: ProductionPlanConflict[] | undefined;
+  kpi: ProductionKpiSummary | undefined;
+  catalogCounts?: CatalogCounts;
   loading?: boolean;
+  countsLoading?: boolean;
 };
 
 type KpiItem = {
@@ -26,14 +28,14 @@ type KpiItem = {
   tone?: string;
 };
 
-export function PlanningKpiCards({ analytics, conflicts, loading }: Props) {
-  const planFact = analytics?.planFact ?? [];
+export function PlanningKpiCards({ kpi, catalogCounts, loading, countsLoading }: Props) {
+  const planFact = kpi?.planFact ?? [];
   const totalPlanned = planFact.reduce((s, r) => s + r.planned, 0);
   const totalFact = planFact.reduce((s, r) => s + r.fact, 0);
   const completionPct =
     totalPlanned > 0 ? Math.round((totalFact / totalPlanned) * 100) : 0;
 
-  const equipmentLoad = analytics?.equipmentLoad ?? [];
+  const equipmentLoad = kpi?.equipmentLoad ?? [];
   const maxMinutesPerWeek = equipmentLoad.length * 5 * 8 * 60;
   const totalPlannedMinutes = equipmentLoad.reduce((s, e) => s + e.plannedMinutes, 0);
   const loadPct =
@@ -41,30 +43,41 @@ export function PlanningKpiCards({ analytics, conflicts, loading }: Props) {
       ? Math.min(100, Math.round((totalPlannedMinutes / maxMinutesPerWeek) * 100))
       : 0;
 
-  const maintenanceConflicts =
-    conflicts?.filter(
-      (c) =>
-        !c.isResolved &&
-        (c.conflictType === "maintenance_overlap" || c.conflictType === "repair_overlap")
-    ).length ?? 0;
+  const planConflicts = kpi?.conflictCounts.plan ?? 0;
+  const maintenanceConflicts = kpi?.conflictCounts.maintenance ?? 0;
 
-  const planConflicts = conflicts?.filter((c) => !c.isResolved).length ?? 0;
+  const productsTotal =
+    catalogCounts?.productsTotal ?? kpi?.summary.productsTotal ?? 0;
+  const toolingTotal = catalogCounts?.toolingTotal ?? kpi?.summary.toolingTotal ?? 0;
+  const catalogBusy = countsLoading ?? loading;
 
   const items: KpiItem[] = [
     {
       label: "Заказов",
-      value: loading ? "—" : analytics?.summary.ordersTotal ?? 0,
+      value: loading ? "—" : kpi?.summary.ordersTotal ?? 0,
       icon: Layers,
     },
     {
       label: "В работе",
-      value: loading ? "—" : analytics?.summary.ordersInProgress ?? 0,
+      value: loading ? "—" : kpi?.summary.ordersInProgress ?? 0,
       icon: ClipboardList,
       tone: "text-blue-600",
     },
     {
+      label: "Видов изд.",
+      value: catalogBusy ? "—" : productsTotal,
+      icon: Package,
+      tone: "text-sky-600",
+    },
+    {
+      label: "Оснастка/ПФ",
+      value: catalogBusy ? "—" : toolingTotal,
+      icon: Container,
+      tone: "text-indigo-600",
+    },
+    {
       label: "С риском",
-      value: loading ? "—" : analytics?.atRiskOrders?.length ?? 0,
+      value: loading ? "—" : kpi?.atRiskOrders?.length ?? 0,
       icon: AlertTriangle,
       tone: "text-orange-600",
     },
@@ -82,29 +95,29 @@ export function PlanningKpiCards({ analytics, conflicts, loading }: Props) {
     },
     {
       label: "Слотов",
-      value: loading ? "—" : analytics?.summary.scheduleSlots ?? 0,
+      value: loading ? "—" : kpi?.summary.scheduleSlots ?? 0,
       icon: TrendingUp,
     },
     {
       label: "Выпущено",
-      value: loading ? "—" : analytics?.summary.totalProduced ?? 0,
+      value: loading ? "—" : kpi?.summary.totalProduced ?? 0,
       icon: FileCheck,
       tone: "text-emerald-700 dark:text-emerald-400",
     },
     {
       label: "Брак",
-      value: loading ? "—" : analytics?.summary.totalDefective ?? 0,
+      value: loading ? "—" : kpi?.summary.totalDefective ?? 0,
       icon: AlertCircle,
       tone: "text-red-600",
     },
     {
       label: "Факт записей",
-      value: loading ? "—" : analytics?.summary.factsRecorded ?? 0,
+      value: loading ? "—" : kpi?.summary.factsRecorded ?? 0,
       icon: FileCheck,
     },
     {
       label: "Нехватка",
-      value: loading ? "—" : analytics?.materialShortages?.length ?? 0,
+      value: loading ? "—" : kpi?.materialShortageCount ?? 0,
       icon: PackageX,
       tone: "text-red-600",
     },

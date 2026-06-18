@@ -44,6 +44,7 @@ interface Notification {
 }
 
 const DISMISSED_KEY = 'dismissed-local-notifications';
+const TOASTED_DB_KEY = 'toasted-db-notification-ids';
 const TOAST_MAX_AGE_MS = 3 * 60 * 1000;
 
 type DismissedEntry = { id: string; at: number; repeat?: boolean; repeatMs?: number };
@@ -82,6 +83,24 @@ function isLocallyDismissed(id: string, hiddenIds: Set<string>): boolean {
   if (!entry) return false;
   if (entry.repeat && Date.now() - entry.at >= entryRepeatMs(entry)) return false;
   return true;
+}
+
+function loadToastedDbIds(): Set<number> {
+  try {
+    const raw = sessionStorage.getItem(TOASTED_DB_KEY);
+    if (!raw) return new Set();
+    const ids = JSON.parse(raw) as number[];
+    return new Set(ids.filter((id) => Number.isInteger(id)));
+  } catch {
+    return new Set();
+  }
+}
+
+function rememberToastedDbId(id: number) {
+  const ids = loadToastedDbIds();
+  ids.add(id);
+  const list = [...ids].slice(-500);
+  sessionStorage.setItem(TOASTED_DB_KEY, JSON.stringify(list));
 }
 
 function dismissLocalNotification(id: string, repeatable: boolean, repeatMs?: number) {
@@ -226,14 +245,20 @@ export function NotificationsDropdown() {
       return;
     }
 
+    const toastedDbIds = loadToastedDbIds();
     const fresh = dbNotifications.filter(
-      (n) => !seenDbIdsRef.current!.has(n.id) && !n.isRead
+      (n) => !seenDbIdsRef.current!.has(n.id) && !n.isRead && !toastedDbIds.has(n.id)
     );
 
     for (const n of fresh) {
       const age = Date.now() - new Date(n.createdAt).getTime();
-      if (age > TOAST_MAX_AGE_MS) continue;
+      if (age > TOAST_MAX_AGE_MS) {
+        rememberToastedDbId(n.id);
+        seenDbIdsRef.current!.add(n.id);
+        continue;
+      }
       seenDbIdsRef.current!.add(n.id);
+      rememberToastedDbId(n.id);
       toast({
         title: n.title || 'Новое уведомление',
         description: getDbDescription(n),

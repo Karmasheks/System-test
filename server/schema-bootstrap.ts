@@ -48,6 +48,10 @@ export async function bootstrapSchema(connectionString: string): Promise<void> {
     await sql`ALTER TABLE production_tooling ADD COLUMN IF NOT EXISTS cycles_until_guarantee integer`;
     await sql`ALTER TABLE production_tooling ADD COLUMN IF NOT EXISTS maintenance_cycle_interval integer`;
     await sql`ALTER TABLE production_tooling ADD COLUMN IF NOT EXISTS cycle_counter_total integer NOT NULL DEFAULT 0`;
+    await sql`ALTER TABLE production_tooling ADD COLUMN IF NOT EXISTS cycle_counter_registry_base integer`;
+    await sql`UPDATE production_tooling
+      SET cycle_counter_registry_base = cycle_counter_total
+      WHERE cycle_counter_registry_base IS NULL AND cycle_counter_total > 0`;
     await sql`ALTER TABLE production_tooling ADD COLUMN IF NOT EXISTS cycles_since_maintenance integer NOT NULL DEFAULT 0`;
     await sql`ALTER TABLE production_tooling ADD COLUMN IF NOT EXISTS cycles_at_last_maintenance integer`;
     await sql`ALTER TABLE production_tooling ADD COLUMN IF NOT EXISTS last_maintenance_at timestamp`;
@@ -119,6 +123,20 @@ export async function bootstrapSchema(connectionString: string): Promise<void> {
       ON CONFLICT (tooling_id, product_id) DO NOTHING`;
 
     // Первый системный admin — супер-администратор (если ещё не назначен)
+    await sql`CREATE INDEX IF NOT EXISTS production_orders_subdivision_idx ON production_orders (subdivision_id)`;
+    await sql`CREATE INDEX IF NOT EXISTS production_fact_subdivision_report_date_idx ON production_fact (subdivision_id, report_date)`;
+    await sql`CREATE INDEX IF NOT EXISTS production_fact_order_id_idx ON production_fact (order_id)`;
+    await sql`CREATE INDEX IF NOT EXISTS products_subdivision_id_idx ON products (subdivision_id)`;
+    await sql`CREATE INDEX IF NOT EXISTS production_plan_conflicts_subdivision_resolved_idx ON production_plan_conflicts (subdivision_id, is_resolved)`;
+    await sql`CREATE INDEX IF NOT EXISTS production_tooling_products_tooling_id_idx ON production_tooling_products (tooling_id)`;
+    await sql`CREATE INDEX IF NOT EXISTS product_bom_product_subdivision_idx ON product_bom (product_id, subdivision_id)`;
+
+    await sql`
+      UPDATE notifications
+      SET is_archived = true
+      WHERE is_read = true AND is_archived = false
+    `;
+
     await sql`
       UPDATE users
       SET is_super_admin = true

@@ -535,11 +535,16 @@ export class PostgreSQLStorage implements IStorage {
   }
 
   async getActiveNotifications(userId: number): Promise<Notification[]> {
-    return await db.select().from(notifications)
-      .where(and(
-        eq(notifications.userId, userId),
-        eq(notifications.isArchived, false)
-      ))
+    return await db
+      .select()
+      .from(notifications)
+      .where(
+        and(
+          eq(notifications.userId, userId),
+          eq(notifications.isArchived, false),
+          eq(notifications.isRead, false)
+        )
+      )
       .orderBy(desc(notifications.createdAt));
   }
 
@@ -565,8 +570,9 @@ export class PostgreSQLStorage implements IStorage {
   }
 
   async markNotificationAsRead(id: number): Promise<Notification | undefined> {
-    const result = await db.update(notifications)
-      .set({ isRead: true, readAt: new Date() })
+    const result = await db
+      .update(notifications)
+      .set({ isRead: true, isArchived: true, readAt: new Date() })
       .where(eq(notifications.id, id))
       .returning();
     return result[0];

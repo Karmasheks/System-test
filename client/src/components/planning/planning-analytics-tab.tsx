@@ -1,20 +1,17 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-
-import type { ProductionAnalytics } from "@/hooks/use-production-planning";
-
+import { useProductionAnalytics } from "@/hooks/use-production-planning";
 import { PRODUCTION_ORDER_STATUS_LABELS } from "@/lib/production-planning-constants";
 
-
-
 type Props = {
-
-  analytics: ProductionAnalytics | undefined;
-
+  subdivisionId: number;
 };
 
+export function PlanningAnalyticsTab({ subdivisionId }: Props) {
+  const { data: analytics, isLoading } = useProductionAnalytics(subdivisionId);
 
-
-export function PlanningAnalyticsTab({ analytics }: Props) {
+  if (isLoading && !analytics) {
+    return <p className="text-sm text-muted-foreground p-4">Загрузка аналитики…</p>;
+  }
 
   const planFact = analytics?.planFact ?? [];
 

@@ -8,6 +8,7 @@ import {
   products,
 } from "@shared/schema";
 import {
+  computeToolingCyclesFromFacts,
   piecesToCycles,
   resolveToolingStatusForCycleCount,
 } from "@shared/production-tooling-utils";
@@ -44,13 +45,21 @@ async function linkedProductIdsForTooling(
   return ids;
 }
 
-export async function recalculateToolingCycles(toolingId: number): Promise<void> {
-  const tooling = await getProductionTooling(toolingId);
-  if (!tooling) return;
+function cycleDivisorForProduct(
+  tooling: typeof productionTooling.$inferSelect,
+  product: typeof products.$inferSelect | undefined
+) {
+  return {
+    piecesPerCycle: tooling.piecesPerCycle,
+    cavitiesLayout: tooling.cavitiesLayout,
+    cavities: product?.cavities ?? tooling.cavities,
+  };
+}
 
-  const productIds = await linkedProductIdsForTooling(tooling);
-  if (productIds.size === 0) return;
-
+async function factCyclesForTooling(
+  tooling: typeof productionTooling.$inferSelect,
+  productIds: Set<number>
+): Promise<number> {
   const orders = await db
     .select()
     .from(productionOrders)
@@ -59,10 +68,22 @@ export async function recalculateToolingCycles(toolingId: number): Promise<void>
     .filter((o) => productIds.has(o.productId))
     .map((o) => o.id);
 
-  if (orderIdsForTooling.length === 0) {
-    await updateToolingCounters(tooling, 0, tooling.cyclesAtLastMaintenance ?? 0);
-    return;
-  }
+  if (orderIdsForTooling.length === 0) return 0;
+
+  const orderById = new Map(orders.map((o) => [o.id, o]));
+  const productRows =
+    productIds.size > 0
+      ? await db
+          .select()
+          .from(products)
+          .where(
+            and(
+              eq(products.subdivisionId, tooling.subdivisionId),
+              inArray(products.id, [...productIds])
+            )
+          )
+      : [];
+  const productById = new Map(productRows.map((p) => [p.id, p]));
 
   const facts = await db
     .select()
@@ -74,16 +95,41 @@ export async function recalculateToolingCycles(toolingId: number): Promise<void>
       )
     );
 
-  let totalPieces = 0;
+  const piecesByProduct = new Map<number, number>();
   for (const fact of facts) {
-    totalPieces += fact.producedQuantity ?? 0;
+    const order = orderById.get(fact.orderId);
+    if (!order) continue;
+    piecesByProduct.set(
+      order.productId,
+      (piecesByProduct.get(order.productId) ?? 0) + (fact.producedQuantity ?? 0)
+    );
   }
 
-  const totalCycles = piecesToCycles(totalPieces, tooling);
-  const base = tooling.cyclesAtLastMaintenance ?? 0;
-  const sinceMaintenance = Math.max(0, totalCycles - base);
+  let totalFactCycles = 0;
+  for (const [productId, pieces] of piecesByProduct) {
+    if (pieces <= 0) continue;
+    totalFactCycles += piecesToCycles(
+      pieces,
+      cycleDivisorForProduct(tooling, productById.get(productId))
+    );
+  }
+  return totalFactCycles;
+}
 
-  await updateToolingCounters(tooling, totalCycles, sinceMaintenance);
+export async function recalculateToolingCycles(toolingId: number): Promise<void> {
+  const tooling = await getProductionTooling(toolingId);
+  if (!tooling) return;
+
+  const productIds = await linkedProductIdsForTooling(tooling);
+  if (productIds.size === 0) return;
+
+  const factCycles = await factCyclesForTooling(tooling, productIds);
+  if (factCycles <= 0) return;
+
+  const computed = computeToolingCyclesFromFacts(tooling, factCycles);
+  if (!computed) return;
+
+  await updateToolingCounters(tooling, computed.totalCycles, computed.sinceMaintenance);
 }
 
 async function updateToolingCounters(
@@ -106,9 +152,37 @@ async function updateToolingCounters(
 
   const fresh = await getProductionTooling(tooling.id);
   if (fresh) {
-    const productIds = await linkedProductIdsForToolingRow(fresh);
-    await syncToolingMaintenancePlannedDate(fresh, productIds);
+    const ids = await linkedProductIdsForToolingRow(fresh);
+    await syncToolingMaintenancePlannedDate(fresh, ids);
   }
+}
+
+export async function recalculateToolingCyclesForProduct(productId: number): Promise<void> {
+  const [product] = await db.select().from(products).where(eq(products.id, productId));
+  if (!product) return;
+
+  const toolingIds = new Set<number>();
+
+  if (product.pfNumber) {
+    const byPf = await db
+      .select({ id: productionTooling.id })
+      .from(productionTooling)
+      .where(
+        and(
+          eq(productionTooling.subdivisionId, product.subdivisionId),
+          eq(productionTooling.pfNumber, product.pfNumber)
+        )
+      );
+    for (const row of byPf) toolingIds.add(row.id);
+  }
+
+  const junction = await db
+    .select({ toolingId: productionToolingProducts.toolingId })
+    .from(productionToolingProducts)
+    .where(eq(productionToolingProducts.productId, productId));
+  for (const row of junction) toolingIds.add(row.toolingId);
+
+  await Promise.all([...toolingIds].map((id) => recalculateToolingCycles(id)));
 }
 
 export async function recalculateToolingCyclesForSubdivision(subdivisionId: number): Promise<void> {

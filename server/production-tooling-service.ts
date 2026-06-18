@@ -238,6 +238,8 @@ export async function createProductionTooling(
       ...rest,
       applicableEquipmentIds: rest.applicableEquipmentIds ?? [],
       cycleCounterTotal: rest.cycleCounterTotal ?? 0,
+      cycleCounterRegistryBase:
+        rest.cycleCounterRegistryBase ?? rest.cycleCounterTotal ?? 0,
       cyclesSinceMaintenance: rest.cyclesSinceMaintenance ?? 0,
       lastMaintenanceAt: parseOptionalTimestamp(lastMaintenanceAt) ?? undefined,
       infoUpdatedAt: parseOptionalTimestamp(infoUpdatedAt) ?? now,
@@ -309,21 +311,34 @@ export async function updateProductionTooling(
     skipCycleRecalc,
     ...rest
   } = data;
+  const linkOnlyUpdate =
+    productIds !== undefined &&
+    Object.keys(rest).length === 0 &&
+    lastMaintenanceAt === undefined &&
+    infoUpdatedAt === undefined &&
+    nextMaintenancePlannedAt === undefined;
   const now = new Date();
   const updatePayload: Partial<typeof productionTooling.$inferInsert> = {
     ...rest,
     updatedAt: now,
-    infoUpdatedAt:
+  };
+  if (!linkOnlyUpdate) {
+    updatePayload.infoUpdatedAt =
       infoUpdatedAt !== undefined
         ? parseOptionalTimestamp(infoUpdatedAt) ?? null
-        : now,
-  };
+        : now;
+  } else if (infoUpdatedAt !== undefined) {
+    updatePayload.infoUpdatedAt = parseOptionalTimestamp(infoUpdatedAt) ?? null;
+  }
   if (lastMaintenanceAt !== undefined) {
     updatePayload.lastMaintenanceAt = parseOptionalTimestamp(lastMaintenanceAt) ?? null;
   }
   if (nextMaintenancePlannedAt !== undefined) {
     updatePayload.nextMaintenancePlannedAt =
       parseOptionalTimestamp(nextMaintenancePlannedAt) ?? null;
+  }
+  if (rest.cycleCounterTotal !== undefined) {
+    updatePayload.cycleCounterRegistryBase = rest.cycleCounterTotal;
   }
   const [row] = await db
     .update(productionTooling)
@@ -343,7 +358,7 @@ export async function updateProductionTooling(
     rest.cyclesAtLastMaintenance !== undefined ||
     lastMaintenanceAt !== undefined;
 
-  if (!skipCycleRecalc && !hasManualCounters) {
+  if (!skipCycleRecalc && !hasManualCounters && !linkOnlyUpdate) {
     await recalculateToolingCycles(id);
   } else {
     const fresh = await getProductionTooling(id);
@@ -492,6 +507,7 @@ export async function recordToolingMaintenance(
     .update(productionTooling)
     .set({
       cycleCounterTotal: totalCycles,
+      cycleCounterRegistryBase: totalCycles,
       cyclesAtLastMaintenance: cyclesAt,
       cyclesSinceMaintenance: 0,
       lastMaintenanceAt: performedAt,

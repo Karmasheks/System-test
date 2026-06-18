@@ -136,3 +136,36 @@ export function predictNextMaintenanceDateFromPlan(
   }
   return null;
 }
+
+export type ToolingCounterState = {
+  cycleCounterRegistryBase?: number | null;
+  cycleCounterTotal: number;
+  cyclesAtLastMaintenance?: number | null;
+  cyclesSinceMaintenance: number;
+};
+
+/** Базовый счётчик до учёта факта выпуска в приложении. */
+export function resolveCycleCounterRegistryBase(tooling: ToolingCounterState): number {
+  if (tooling.cycleCounterRegistryBase != null) {
+    return tooling.cycleCounterRegistryBase;
+  }
+  const atLast = tooling.cyclesAtLastMaintenance ?? 0;
+  return Math.max(tooling.cycleCounterTotal, atLast + tooling.cyclesSinceMaintenance);
+}
+
+/** Итоговые циклы: база реестра + факт выпуска в системе. */
+export function computeToolingCyclesFromFacts(
+  tooling: ToolingCounterState,
+  factCycles: number
+): { totalCycles: number; sinceMaintenance: number } | null {
+  if (factCycles <= 0) return null;
+
+  const registryBase = resolveCycleCounterRegistryBase(tooling);
+  const atLast = tooling.cyclesAtLastMaintenance ?? 0;
+  const registrySince = Math.max(0, registryBase - atLast);
+
+  return {
+    totalCycles: registryBase + factCycles,
+    sinceMaintenance: registrySince + factCycles,
+  };
+}

@@ -73,6 +73,7 @@ function rowToValues(rec, subdivisionId) {
     cycles_until_guarantee: rec.cyclesUntilGuarantee ?? null,
     maintenance_cycle_interval: rec.maintenanceCycleInterval ?? 15000,
     cycle_counter_total: rec.cycleCounterTotal ?? 0,
+    cycle_counter_registry_base: rec.cycleCounterTotal ?? 0,
     cycles_since_maintenance: rec.cyclesSinceMaintenance ?? 0,
     cycles_at_last_maintenance: rec.cyclesAtLastMaintenance ?? null,
     last_maintenance_at: tsOrNull(rec.lastMaintenanceAt),
@@ -121,6 +122,7 @@ try {
           cycles_until_guarantee = ${v.cycles_until_guarantee},
           maintenance_cycle_interval = ${v.maintenance_cycle_interval},
           cycle_counter_total = ${v.cycle_counter_total},
+          cycle_counter_registry_base = ${v.cycle_counter_registry_base},
           cycles_since_maintenance = ${v.cycles_since_maintenance},
           cycles_at_last_maintenance = ${v.cycles_at_last_maintenance},
           last_maintenance_at = ${v.last_maintenance_at},
@@ -137,7 +139,7 @@ try {
           subdivision_id, pf_number, name, tooling_type, status,
           cavities, cavities_layout, pieces_per_cycle, storage_location,
           requires_maintenance_level2, cycles_until_guarantee,
-          maintenance_cycle_interval, cycle_counter_total,
+          maintenance_cycle_interval, cycle_counter_total, cycle_counter_registry_base,
           cycles_since_maintenance, cycles_at_last_maintenance,
           last_maintenance_at, fixed_asset_number, info_updated_at,
           next_maintenance_planned_at, applicable_equipment_ids
@@ -145,7 +147,7 @@ try {
           ${v.subdivision_id}, ${v.pf_number}, ${v.name}, ${v.tooling_type}, ${v.status},
           ${v.cavities}, ${v.cavities_layout}, ${v.pieces_per_cycle}, ${v.storage_location},
           ${v.requires_maintenance_level2}, ${v.cycles_until_guarantee},
-          ${v.maintenance_cycle_interval}, ${v.cycle_counter_total},
+          ${v.maintenance_cycle_interval}, ${v.cycle_counter_total}, ${v.cycle_counter_registry_base},
           ${v.cycles_since_maintenance}, ${v.cycles_at_last_maintenance},
           ${v.last_maintenance_at}, ${v.fixed_asset_number}, ${v.info_updated_at},
           ${v.next_maintenance_planned_at}, ${JSON.stringify(v.applicable_equipment_ids)}::jsonb

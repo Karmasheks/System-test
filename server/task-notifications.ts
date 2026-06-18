@@ -1,5 +1,8 @@
 import { storage } from "./storage";
 import { getTaskCoexecutors } from "./task-coexecutors-service";
+import { and, eq, like } from "drizzle-orm";
+import { db } from "./db";
+import { notifications } from "@shared/schema";
 import type { Task, TaskComment } from "@shared/schema";
 
 const ENGINEER_NOTIFY_ROLES = new Set([
@@ -97,6 +100,20 @@ export async function notifyTaskCommentAdded(
   const message = formatTaskCommentNotificationMessage(comment);
 
   for (const userId of recipients) {
+    const existing = await db
+      .select({ id: notifications.id })
+      .from(notifications)
+      .where(
+        and(
+          eq(notifications.userId, userId),
+          eq(notifications.type, "task_comment"),
+          eq(notifications.taskId, task.id),
+          like(notifications.message, `%"commentId":${comment.id}%`)
+        )
+      )
+      .limit(1);
+    if (existing.length > 0) continue;
+
     await storage.createNotification({
       userId,
       title: `Комментарий к задаче #${task.id}`,

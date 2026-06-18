@@ -21,13 +21,10 @@ export function useNotifications(enabled = true) {
 export function useMarkNotificationRead() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (id: number) => {
-      const res = await apiRequest("PATCH", `/api/notifications/${id}/read`);
-      return res.json();
-    },
+    mutationFn: archiveNotificationRequest,
     onSuccess: (updated: Notification) => {
       qc.setQueryData<Notification[]>([...NOTIFICATIONS_KEY], (current) =>
-        current?.map((n) => (n.id === updated.id ? { ...n, isRead: true } : n)) ?? []
+        current?.filter((n) => n.id !== updated.id) ?? []
       );
     },
   });

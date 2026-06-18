@@ -1,4 +1,4 @@
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, gte, inArray } from "drizzle-orm";
 import { db } from "./db";
 import {
   productionDailyPlan,
@@ -30,7 +30,12 @@ export async function loadMaintenancePlanContext(
     db
       .select()
       .from(productionDailyPlan)
-      .where(eq(productionDailyPlan.subdivisionId, subdivisionId)),
+      .where(
+        and(
+          eq(productionDailyPlan.subdivisionId, subdivisionId),
+          gte(productionDailyPlan.planDate, today)
+        )
+      ),
     db
       .select({ id: productionTooling.id, pfNumber: productionTooling.pfNumber })
       .from(productionTooling)
@@ -190,6 +195,18 @@ export async function linkedProductIdsForToolingRow(
     .from(productionToolingProducts)
     .where(eq(productionToolingProducts.toolingId, tooling.id));
   for (const row of junction) ids.add(row.productId);
+
+  const byPf = await db
+    .select({ id: products.id })
+    .from(products)
+    .where(
+      and(
+        eq(products.subdivisionId, tooling.subdivisionId),
+        eq(products.pfNumber, tooling.pfNumber)
+      )
+    );
+  for (const row of byPf) ids.add(row.id);
+
   return ids;
 }
 

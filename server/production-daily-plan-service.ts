@@ -8,7 +8,7 @@ import {
   productEquipment,
   productionTooling,
 } from "@shared/schema";
-import { and, eq } from "drizzle-orm";
+import { and, eq, gte, inArray, lte } from "drizzle-orm";
 import type { InsertProductionDailyPlan } from "@shared/schema";
 import {
   computeShiftNormFromCycle,
@@ -78,19 +78,18 @@ export async function listDailyPlan(filters: {
     conditions.push(eq(productionDailyPlan.equipmentId, filters.equipmentId));
   }
 
-  let rows = await db
+  if (filters.from) {
+    conditions.push(gte(productionDailyPlan.planDate, filters.from.toISOString().slice(0, 10)));
+  }
+  if (filters.to) {
+    conditions.push(lte(productionDailyPlan.planDate, filters.to.toISOString().slice(0, 10)));
+  }
+
+  return db
     .select()
     .from(productionDailyPlan)
     .where(and(...conditions))
     .orderBy(productionDailyPlan.planDate);
-
-  if (filters.from) {
-    rows = rows.filter((r) => new Date(r.planDate) >= filters.from!);
-  }
-  if (filters.to) {
-    rows = rows.filter((r) => new Date(r.planDate) <= filters.to!);
-  }
-  return rows;
 }
 
 export async function getDailyPlanGrid(filters: {
@@ -102,7 +101,33 @@ export async function getDailyPlanGrid(filters: {
   const pattern = await getActiveShiftPattern(filters.subdivisionId);
   const slotCodes = pattern.slots.map((s) => s.code);
   const rows = await listDailyPlan(filters);
-  const equipmentRows = await db.select().from(equipment);
+
+  const fromKey = filters.from.toISOString().slice(0, 10);
+  const toKey = filters.to.toISOString().slice(0, 10);
+  const factConditions = [
+    eq(productionFact.subdivisionId, filters.subdivisionId),
+    gte(productionFact.reportDate, fromKey),
+    lte(productionFact.reportDate, toKey),
+  ];
+  if (filters.equipmentId) {
+    factConditions.push(eq(productionFact.equipmentId, filters.equipmentId));
+  }
+  const filteredFacts = await db
+    .select()
+    .from(productionFact)
+    .where(and(...factConditions));
+
+  const equipmentIds = new Set<string>();
+  for (const row of rows) equipmentIds.add(row.equipmentId);
+  for (const fact of filteredFacts) equipmentIds.add(fact.equipmentId);
+
+  const equipmentRows =
+    equipmentIds.size > 0
+      ? await db
+          .select()
+          .from(equipment)
+          .where(inArray(equipment.id, [...equipmentIds]))
+      : [];
   const equipmentNameById = new Map(equipmentRows.map((e) => [e.id, e.name]));
 
   const orderRows = await db
@@ -130,15 +155,6 @@ export async function getDailyPlanGrid(filters: {
   const peByProductEquipment = new Map(
     peRows.map((pe) => [`${pe.productId}:${pe.equipmentId}`, pe])
   );
-
-  const factRows = await db
-    .select()
-    .from(productionFact)
-    .where(eq(productionFact.subdivisionId, filters.subdivisionId));
-  const filteredFacts = factRows.filter((f) => {
-    const d = new Date(f.reportDate);
-    return d >= filters.from && d <= filters.to;
-  });
 
   const dates: string[] = [];
   const cursor = new Date(filters.from);

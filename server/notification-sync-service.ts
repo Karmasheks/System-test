@@ -48,17 +48,13 @@ async function getTasksForUserReminders(userId: number, role: string): Promise<T
 const lastReminderSyncByUser = new Map<number, number>();
 export const REMINDER_SYNC_INTERVAL_MS = 15 * 60 * 1000;
 
-async function hasRecentArchived(
+async function hasRecentlyDismissed(
   userId: number,
   type: string,
   repeatAfterMs: number,
   filters: { taskId?: number; messagePrefix?: string }
 ): Promise<boolean> {
-  const conditions = [
-    eq(notifications.userId, userId),
-    eq(notifications.type, type),
-    eq(notifications.isArchived, true),
-  ];
+  const conditions = [eq(notifications.userId, userId), eq(notifications.type, type)];
   if (filters.taskId != null) {
     conditions.push(eq(notifications.taskId, filters.taskId));
   }
@@ -76,9 +72,20 @@ async function hasRecentArchived(
   const last = rows[0];
   if (!last) return false;
 
+  if (!last.isArchived && !last.isRead) return false;
+
   const dismissedAt = new Date(last.readAt ?? last.createdAt);
   if (Number.isNaN(dismissedAt.getTime())) return false;
   return Date.now() - dismissedAt.getTime() < repeatAfterMs;
+}
+
+async function hasRecentArchived(
+  userId: number,
+  type: string,
+  repeatAfterMs: number,
+  filters: { taskId?: number; messagePrefix?: string }
+): Promise<boolean> {
+  return hasRecentlyDismissed(userId, type, repeatAfterMs, filters);
 }
 
 async function hasActiveReminder(

@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,13 +10,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Table,
   TableBody,
   TableCell,
@@ -26,18 +19,20 @@ import {
 } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
 import { useAccessControl } from "@/hooks/use-access-control";
+import { useProductionDisplayConfig } from "@/hooks/use-production-display-config";
 import {
   useProductionProducts,
   useProductionTooling,
   useProductionMutations,
   type ProductWithSubs,
 } from "@/hooks/use-production-planning";
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { Plus, Package } from "lucide-react";
 import { formatCavitiesDisplay } from "@shared/cavities-utils";
+import type { ProductCatalogDisplayConfig } from "@shared/production-display-config";
 import { ListPaginationControls } from "@/components/list-pagination-controls";
 import { useListPagination } from "@/hooks/use-list-pagination";
+import { ToolingPfPicker } from "@/components/planning/tooling-pf-picker";
 
 type Props = {
   subdivisionId: number;
@@ -48,6 +43,9 @@ function ProductMetricLines({
 }: {
   lines: Array<{ label: string; value: ReactNode }>;
 }) {
+  if (lines.length === 0) {
+    return <span className="text-muted-foreground text-xs">—</span>;
+  }
   return (
     <div className="space-y-1 text-xs whitespace-normal">
       {lines.map((line) => (
@@ -60,10 +58,26 @@ function ProductMetricLines({
   );
 }
 
+function useProductCatalogColumns(catalog: ProductCatalogDisplayConfig) {
+  return useMemo(() => {
+    const showWeights = catalog.showProductWeight || catalog.showSprueWeight;
+    const showNorms =
+      catalog.showShiftNorm || catalog.showCycleTime || catalog.showCavities;
+    const columns = [{ id: "sap", label: "SAP / наименование" }];
+    if (catalog.showPfTooling) columns.push({ id: "pf", label: "ПФ / оснастка" });
+    if (showWeights) columns.push({ id: "weights", label: "Вес и литник" });
+    if (showNorms) columns.push({ id: "norms", label: "Нормы и цикл" });
+    return { columns, showWeights, showNorms };
+  }, [catalog]);
+}
+
 export function PlanningProductsTab({ subdivisionId }: Props) {
   const { toast } = useToast();
   const { canEditModule } = useAccessControl();
   const canEdit = canEditModule("production_planning");
+  const { config, isLoading: settingsLoading } = useProductionDisplayConfig(subdivisionId);
+  const catalog = config.productCatalog;
+  const { columns, showWeights, showNorms } = useProductCatalogColumns(catalog);
 
   const [search, setSearch] = useState("");
   const { data: products = [], isLoading } = useProductionProducts({
@@ -83,7 +97,7 @@ export function PlanningProductsTab({ subdivisionId }: Props) {
     to,
   } = useListPagination(products, 25, `${subdivisionId}-${search}`);
 
-  const { createProduct, updateProduct, updateTooling } = useProductionMutations();
+  const { createProduct, updateProduct } = useProductionMutations();
 
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<ProductWithSubs | null>(null);
@@ -127,8 +141,12 @@ export function PlanningProductsTab({ subdivisionId }: Props) {
     try {
       const selectedTooling = tooling.find((t) => String(t.id) === form.toolingId);
       const cavities = selectedTooling?.cavities ?? editing?.cavities ?? 1;
-      const productWeight = form.productWeight ? Number(form.productWeight) : undefined;
-      const sprueWeight = form.sprueWeight ? Number(form.sprueWeight) : undefined;
+      const productWeight =
+        catalog.showProductWeight && form.productWeight
+          ? Number(form.productWeight)
+          : undefined;
+      const sprueWeight =
+        catalog.showSprueWeight && form.sprueWeight ? Number(form.sprueWeight) : undefined;
       const shotWeight =
         productWeight != null && sprueWeight != null
           ? productWeight * cavities + sprueWeight
@@ -138,9 +156,10 @@ export function PlanningProductsTab({ subdivisionId }: Props) {
         subdivisionId,
         sapCode: form.sapCode.trim(),
         name: form.name.trim(),
-        pfNumber: selectedTooling?.pfNumber ?? undefined,
-        cycleTimeSec: selectedTooling?.cycleTimeSec ?? undefined,
-        cavities: selectedTooling?.cavities ?? undefined,
+        pfNumber: catalog.showPfTooling ? selectedTooling?.pfNumber ?? undefined : undefined,
+        cycleTimeSec:
+          catalog.showCycleTime ? selectedTooling?.cycleTimeSec ?? undefined : undefined,
+        cavities: catalog.showCavities ? selectedTooling?.cavities ?? undefined : undefined,
         productWeight,
         sprueWeight,
         shotWeight,
@@ -150,25 +169,9 @@ export function PlanningProductsTab({ subdivisionId }: Props) {
 
       if (editing) {
         await updateProduct.mutateAsync({ id: editing.id, ...payload });
-        if (selectedTooling) {
-          const linkIds = new Set(selectedTooling.products.map((t) => t.id));
-          linkIds.add(editing.id);
-          await updateTooling.mutateAsync({
-            id: selectedTooling.id,
-            productIds: [...linkIds],
-          });
-        }
         toast({ title: "Изделие обновлено" });
       } else {
-        const created = await createProduct.mutateAsync(payload);
-        if (selectedTooling && created?.id) {
-          const linkIds = new Set(selectedTooling.products.map((t) => t.id));
-          linkIds.add(created.id);
-          await updateTooling.mutateAsync({
-            id: selectedTooling.id,
-            productIds: [...linkIds],
-          });
-        }
+        await createProduct.mutateAsync(payload);
         toast({ title: "Изделие создано" });
       }
       setOpen(false);
@@ -181,6 +184,9 @@ export function PlanningProductsTab({ subdivisionId }: Props) {
       });
     }
   };
+
+  const colSpan = columns.length;
+  const loading = isLoading || settingsLoading;
 
   return (
     <div className="space-y-4">
@@ -207,22 +213,23 @@ export function PlanningProductsTab({ subdivisionId }: Props) {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="min-w-[180px]">SAP / наименование</TableHead>
-                <TableHead className="min-w-[160px]">ПФ / оснастка</TableHead>
-                <TableHead className="min-w-[160px]">Вес и литник</TableHead>
-                <TableHead className="min-w-[140px]">Нормы и цикл</TableHead>
+                {columns.map((col) => (
+                  <TableHead key={col.id} className="min-w-[140px]">
+                    {col.label}
+                  </TableHead>
+                ))}
               </TableRow>
             </TableHeader>
             <TableBody>
-              {isLoading ? (
+              {loading ? (
                 <TableRow>
-                  <TableCell colSpan={4} className="text-center text-muted-foreground">
+                  <TableCell colSpan={colSpan} className="text-center text-muted-foreground">
                     Загрузка…
                   </TableCell>
                 </TableRow>
               ) : productsTotal === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={4} className="text-center text-muted-foreground">
+                  <TableCell colSpan={colSpan} className="text-center text-muted-foreground">
                     Нет изделий. Создайте изделие или привяжите через оснастку/ПФ.
                   </TableCell>
                 </TableRow>
@@ -234,6 +241,57 @@ export function PlanningProductsTab({ subdivisionId }: Props) {
                     (p.shotWeight != null && p.productWeight != null
                       ? Math.max(0, p.shotWeight - p.productWeight * (p.cavities ?? 1))
                       : null);
+
+                  const weightLines = [];
+                  if (catalog.showProductWeight) {
+                    weightLines.push({
+                      label: "Вес изд.",
+                      value: (
+                        <span className="tabular-nums">{p.productWeight ?? "—"} г</span>
+                      ),
+                    });
+                  }
+                  if (catalog.showSprueWeight) {
+                    weightLines.push({
+                      label: "Литник",
+                      value: <span className="tabular-nums">{sprue ?? "—"} г</span>,
+                    });
+                  }
+
+                  const normLines = [];
+                  if (catalog.showShiftNorm) {
+                    normLines.push({
+                      label: "Норма 11 ч",
+                      value: (
+                        <span className="tabular-nums">
+                          {p.defaultShiftNorm?.toLocaleString("ru-RU") ?? "—"}
+                        </span>
+                      ),
+                    });
+                  }
+                  if (catalog.showCycleTime) {
+                    normLines.push({
+                      label: "Цикл",
+                      value: (
+                        <span className="tabular-nums">
+                          {p.cycleTimeSec ?? linked?.cycleTimeSec ?? "—"} сек
+                        </span>
+                      ),
+                    });
+                  }
+                  if (catalog.showCavities) {
+                    normLines.push({
+                      label: "Гнёзда",
+                      value: (
+                        <span className="tabular-nums">
+                          {linked
+                            ? formatCavitiesDisplay(linked)
+                            : p.cavities ?? "—"}
+                        </span>
+                      ),
+                    });
+                  }
+
                   return (
                     <TableRow
                       key={p.id}
@@ -245,88 +303,48 @@ export function PlanningProductsTab({ subdivisionId }: Props) {
                     >
                       <TableCell className="align-top whitespace-normal">
                         <div className="space-y-1 py-0.5 max-w-[240px]">
-                          <Badge variant="secondary" className="font-mono text-xs">
+                          <div className="font-mono text-sm font-semibold tracking-wide text-foreground tabular-nums">
                             {p.sapCode}
-                          </Badge>
+                          </div>
                           <div
-                            className="text-sm font-medium leading-snug line-clamp-3"
+                            className="text-sm text-muted-foreground leading-snug line-clamp-3"
                             title={p.name}
                           >
                             {p.name?.trim() || "Без названия"}
                           </div>
                         </div>
                       </TableCell>
-                      <TableCell className="align-top whitespace-normal">
-                        {linked || p.pfNumber ? (
-                          <div className="space-y-1 text-xs max-w-[220px]">
-                            <div className="font-mono text-blue-700 dark:text-blue-300">
-                              {p.pfNumber ?? linked?.pfNumber ?? "—"}
-                            </div>
-                            {linked && (
-                              <div
-                                className="text-sm leading-snug line-clamp-2"
-                                title={linked.name}
-                              >
-                                {linked.name}
+                      {catalog.showPfTooling && (
+                        <TableCell className="align-top whitespace-normal">
+                          {linked || p.pfNumber ? (
+                            <div className="space-y-1 text-xs max-w-[220px]">
+                              <div className="font-mono text-blue-700 dark:text-blue-300">
+                                {p.pfNumber ?? linked?.pfNumber ?? "—"}
                               </div>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="text-muted-foreground text-xs">Не привязано</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="align-top">
-                        <ProductMetricLines
-                          lines={[
-                            {
-                              label: "Вес изд.",
-                              value: (
-                                <span className="tabular-nums">
-                                  {p.productWeight ?? "—"} г
-                                </span>
-                              ),
-                            },
-                            {
-                              label: "Литник",
-                              value: (
-                                <span className="tabular-nums">{sprue ?? "—"} г</span>
-                              ),
-                            },
-                          ]}
-                        />
-                      </TableCell>
-                      <TableCell className="align-top">
-                        <ProductMetricLines
-                          lines={[
-                            {
-                              label: "Норма 11 ч",
-                              value: (
-                                <span className="tabular-nums">
-                                  {p.defaultShiftNorm?.toLocaleString("ru-RU") ?? "—"}
-                                </span>
-                              ),
-                            },
-                            {
-                              label: "Цикл",
-                              value: (
-                                <span className="tabular-nums">
-                                  {p.cycleTimeSec ?? linked?.cycleTimeSec ?? "—"} сек
-                                </span>
-                              ),
-                            },
-                            {
-                              label: "Гнёзда",
-                              value: (
-                                <span className="tabular-nums">
-                                  {linked
-                                    ? formatCavitiesDisplay(linked)
-                                    : p.cavities ?? "—"}
-                                </span>
-                              ),
-                            },
-                          ]}
-                        />
-                      </TableCell>
+                              {linked && (
+                                <div
+                                  className="text-sm leading-snug line-clamp-2"
+                                  title={linked.name}
+                                >
+                                  {linked.name}
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground text-xs">Не привязано</span>
+                          )}
+                        </TableCell>
+                      )}
+                      {showWeights && (
+                        <TableCell className="align-top">
+                          <ProductMetricLines lines={weightLines} />
+                        </TableCell>
+                      )}
+                      {showNorms && (
+                        <TableCell className="align-top">
+                          <ProductMetricLines lines={normLines} />
+                        </TableCell>
+                      )}
                     </TableRow>
                   );
                 })
@@ -351,7 +369,7 @@ export function PlanningProductsTab({ subdivisionId }: Props) {
           setOpen(v);
         }}
       >
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-lg max-h-[min(90vh,720px)] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Package className="h-5 w-5" />
@@ -374,55 +392,59 @@ export function PlanningProductsTab({ subdivisionId }: Props) {
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
               />
             </div>
-            <div className="space-y-1">
-              <Label>ПФ / оснастка</Label>
-              <Select
-                value={form.toolingId || "none"}
-                onValueChange={(v) =>
-                  setForm({ ...form, toolingId: v === "none" ? "" : v })
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Не привязано" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Не привязано</SelectItem>
-                  {tooling.map((t) => (
-                    <SelectItem key={t.id} value={String(t.id)}>
-                      {t.pfNumber} — {t.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">
-                Цикл, гнёзда и нормы задаются в карточке ПФ / оснастки по изделиям.
-              </p>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
+            {catalog.showPfTooling && (
               <div className="space-y-1">
-                <Label>Вес изделия, г</Label>
-                <Input
-                  type="number"
-                  min={0}
-                  step={0.01}
-                  value={form.productWeight}
-                  onChange={(e) => setForm({ ...form, productWeight: e.target.value })}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label>Вес литника, г</Label>
-                <Input
-                  type="number"
-                  min={0}
-                  step={0.01}
-                  value={form.sprueWeight}
-                  onChange={(e) => setForm({ ...form, sprueWeight: e.target.value })}
+                <Label>ПФ / оснастка</Label>
+                <ToolingPfPicker
+                  tooling={tooling}
+                  value={form.toolingId}
+                  onChange={(toolingId) => setForm({ ...form, toolingId })}
                 />
                 <p className="text-xs text-muted-foreground">
-                  На одну отливку; вес отливки = изделие × гнёзда + литник
+                  Необязательно. Цикл и гнёзда — в карточке ПФ при включённых полях.
                 </p>
               </div>
-            </div>
+            )}
+            {(catalog.showProductWeight || catalog.showSprueWeight) && (
+              <div
+                className={cn(
+                  "grid gap-3",
+                  catalog.showProductWeight && catalog.showSprueWeight
+                    ? "grid-cols-2"
+                    : "grid-cols-1"
+                )}
+              >
+                {catalog.showProductWeight && (
+                  <div className="space-y-1">
+                    <Label>Вес изделия, г</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      step={0.01}
+                      value={form.productWeight}
+                      onChange={(e) => setForm({ ...form, productWeight: e.target.value })}
+                      placeholder="Необязательно"
+                    />
+                  </div>
+                )}
+                {catalog.showSprueWeight && (
+                  <div className="space-y-1">
+                    <Label>Вес литника, г</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      step={0.01}
+                      value={form.sprueWeight}
+                      onChange={(e) => setForm({ ...form, sprueWeight: e.target.value })}
+                      placeholder="Необязательно"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      На одну отливку; необязательно
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <DialogFooter>

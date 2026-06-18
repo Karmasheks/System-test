@@ -56,6 +56,8 @@ import {
   createProductionFact,
   addProductionDowntime,
   getProductionAnalytics,
+  getProductionKpiSummary,
+  countCatalogItems,
   calculateOrderMaterialRequirements,
   listPlanConflicts,
   resolvePlanConflict,
@@ -1663,6 +1665,58 @@ export function registerProductionRoutes(app: Express, authenticate: AuthMiddlew
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "Ошибка проверки";
       res.status(400).json({ message });
+    }
+  });
+
+  app.get("/api/production/catalog-counts", authenticate, async (req, res) => {
+    const ctx = await requireProductionView(req, res);
+    if (!ctx) return;
+
+    const subdivisionId = Number(req.query.subdivisionId);
+    if (!subdivisionId || Number.isNaN(subdivisionId)) {
+      return res.status(400).json({ message: "Укажите subdivisionId" });
+    }
+
+    const subScope = await getSubdivisionScopeForRequest(req);
+    if (subScope) {
+      try {
+        assertSubdivisionAccess(subScope, subdivisionId);
+      } catch (e) {
+        if (handleSubdivisionError(res, e)) return;
+      }
+    }
+
+    try {
+      res.json(await countCatalogItems(subdivisionId));
+    } catch {
+      res.status(500).json({ message: "Ошибка подсчёта каталога" });
+    }
+  });
+
+  app.get("/api/production/kpi-summary", authenticate, async (req, res) => {
+    const ctx = await requireProductionView(req, res);
+    if (!ctx) return;
+
+    const subdivisionId = Number(req.query.subdivisionId);
+    if (!subdivisionId || Number.isNaN(subdivisionId)) {
+      return res.status(400).json({ message: "Укажите subdivisionId" });
+    }
+
+    const subScope = await getSubdivisionScopeForRequest(req);
+    if (subScope) {
+      try {
+        assertSubdivisionAccess(subScope, subdivisionId);
+      } catch (e) {
+        if (handleSubdivisionError(res, e)) return;
+      }
+    }
+
+    try {
+      const from = parseOptionalDate(req.query.from as string | undefined);
+      const to = parseOptionalDate(req.query.to as string | undefined);
+      res.json(await getProductionKpiSummary({ subdivisionId, from, to }));
+    } catch {
+      res.status(500).json({ message: "Ошибка KPI" });
     }
   });
 

@@ -1219,6 +1219,8 @@ export const productionTooling = pgTable(
     maintenanceCycleInterval: integer("maintenance_cycle_interval"),
     /** Суммарный счётчик циклов (из факта выпуска / плана). */
     cycleCounterTotal: integer("cycle_counter_total").notNull().default(0),
+    /** База счётчика до учёта факта выпуска в системе (импорт / ручной ввод / ТО). */
+    cycleCounterRegistryBase: integer("cycle_counter_registry_base"),
     /** Циклов с последнего ТО. */
     cyclesSinceMaintenance: integer("cycles_since_maintenance").notNull().default(0),
     /** Снимок total циклов на момент последнего ТО. */
@@ -1832,6 +1834,7 @@ export const insertProductionToolingSchema = createInsertSchema(productionToolin
     cyclesUntilGuarantee: z.number().int().positive().optional().nullable(),
     maintenanceCycleInterval: z.number().int().positive().optional().nullable(),
     cycleCounterTotal: z.number().int().min(0).optional(),
+    cycleCounterRegistryBase: z.number().int().min(0).optional().nullable(),
     cyclesSinceMaintenance: z.number().int().min(0).optional(),
     cyclesAtLastMaintenance: z.number().int().min(0).optional().nullable(),
     lastMaintenanceAt: z.string().optional().nullable(),

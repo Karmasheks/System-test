@@ -3,6 +3,7 @@ import {
   products,
   productSubdivisionAvailability,
   materials,
+  materialSubdivisionAvailability,
   productBom,
   productEquipment,
   productionOrders,
@@ -13,6 +14,7 @@ import {
   maintenanceRecords,
   equipment,
   productionPlanningSettings,
+  productionTooling,
   type InsertProduct,
   type InsertMaterial,
   type InsertProductBom,
@@ -24,7 +26,7 @@ import {
   type ProductionOrderStatus,
 } from "@shared/schema";
 import { canAccessSubdivision, type SubdivisionScope } from "@shared/subdivision-scope";
-import { and, desc, eq, gte, inArray, lte, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gte, ilike, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import {
   checkScheduleConflicts,
   summarizeConflictStatus,
@@ -36,6 +38,7 @@ import {
   calculateMaterialRequirements,
   processFactMaterialWriteoff,
   reserveMaterialsForQuantity,
+  countMaterialShortages,
   listMaterialsWithLowStock,
 } from "./production-materials-service";
 import { getScheduleToirOverlay } from "./production-toir-integration-service";
@@ -84,25 +87,41 @@ export async function listProducts(filters?: {
   search?: string;
   activeOnly?: boolean;
 }) {
-  let rows = await db.select().from(products).orderBy(desc(products.updatedAt));
-
+  const conditions = [];
   if (filters?.subdivisionId) {
-    rows = rows.filter((p) => p.subdivisionId === filters.subdivisionId);
+    conditions.push(eq(products.subdivisionId, filters.subdivisionId));
   }
   if (filters?.activeOnly) {
-    rows = rows.filter((p) => p.isActive);
+    conditions.push(eq(products.isActive, true));
   }
   if (filters?.search?.trim()) {
-    const q = filters.search.trim().toLowerCase();
-    rows = rows.filter(
-      (p) =>
-        p.name.toLowerCase().includes(q) ||
-        p.sapCode.toLowerCase().includes(q) ||
-        (p.pfNumber?.toLowerCase().includes(q) ?? false)
+    const q = `%${filters.search.trim()}%`;
+    conditions.push(
+      or(
+        ilike(products.name, q),
+        ilike(products.sapCode, q),
+        ilike(products.pfNumber, q)
+      )!
     );
   }
 
-  const availability = await db.select().from(productSubdivisionAvailability);
+  const rows =
+    conditions.length > 0
+      ? await db
+          .select()
+          .from(products)
+          .where(and(...conditions))
+          .orderBy(desc(products.updatedAt))
+      : await db.select().from(products).orderBy(desc(products.updatedAt));
+
+  const productIds = rows.map((p) => p.id);
+  const availability =
+    productIds.length > 0
+      ? await db
+          .select()
+          .from(productSubdivisionAvailability)
+          .where(inArray(productSubdivisionAvailability.productId, productIds))
+      : [];
   const map = new Map<number, number[]>();
   for (const row of availability) {
     const list = map.get(row.productId) ?? [];
@@ -179,32 +198,52 @@ export async function listMaterials(filters?: {
   search?: string;
   activeOnly?: boolean;
 }) {
-  let rows = await db.select().from(materials).orderBy(desc(materials.updatedAt));
-
+  const conditions = [];
   if (filters?.subdivisionId) {
-    rows = rows.filter(
-      (m) =>
-        m.subdivisionId === filters.subdivisionId ||
-        m.subdivisionId == null ||
-        m.isSharedAcrossSubdivisions
+    conditions.push(
+      or(
+        eq(materials.subdivisionId, filters.subdivisionId),
+        isNull(materials.subdivisionId),
+        eq(materials.isSharedAcrossSubdivisions, true)
+      )!
     );
   }
-  if (filters?.activeOnly) rows = rows.filter((m) => m.isActive);
+  if (filters?.activeOnly) {
+    conditions.push(eq(materials.isActive, true));
+  }
   if (filters?.search?.trim()) {
-    const q = filters.search.trim().toLowerCase();
-    rows = rows.filter(
-      (m) =>
-        m.name.toLowerCase().includes(q) ||
-        m.sapCode.toLowerCase().includes(q)
-    );
+    const q = `%${filters.search.trim()}%`;
+    conditions.push(or(ilike(materials.name, q), ilike(materials.sapCode, q))!);
   }
 
-  const result = [];
-  for (const m of rows) {
-    const subdivisionIds = await listMaterialSubdivisionIds(m.id);
-    result.push({ ...m, subdivisionIds });
+  const rows =
+    conditions.length > 0
+      ? await db
+          .select()
+          .from(materials)
+          .where(and(...conditions))
+          .orderBy(desc(materials.updatedAt))
+      : await db.select().from(materials).orderBy(desc(materials.updatedAt));
+
+  const materialIds = rows.map((m) => m.id);
+  const availability =
+    materialIds.length > 0
+      ? await db
+          .select()
+          .from(materialSubdivisionAvailability)
+          .where(inArray(materialSubdivisionAvailability.materialId, materialIds))
+      : [];
+  const map = new Map<number, number[]>();
+  for (const row of availability) {
+    const list = map.get(row.materialId) ?? [];
+    list.push(row.subdivisionId);
+    map.set(row.materialId, list);
   }
-  return result;
+
+  return rows.map((m) => ({
+    ...m,
+    subdivisionIds: map.get(m.id) ?? [],
+  }));
 }
 
 export async function getMaterial(id: number) {
@@ -351,14 +390,27 @@ export async function listProductionOrders(filters?: {
   status?: string;
   priority?: string;
 }) {
-  let rows = await db.select().from(productionOrders).orderBy(desc(productionOrders.updatedAt));
+  const conditions = [];
+  if (filters?.subdivisionId) {
+    conditions.push(eq(productionOrders.subdivisionId, filters.subdivisionId));
+  }
+  if (filters?.productId) {
+    conditions.push(eq(productionOrders.productId, filters.productId));
+  }
+  if (filters?.status) {
+    conditions.push(eq(productionOrders.status, filters.status));
+  }
+  if (filters?.priority) {
+    conditions.push(eq(productionOrders.priority, filters.priority));
+  }
 
-  if (filters?.subdivisionId) rows = rows.filter((o) => o.subdivisionId === filters.subdivisionId);
-  if (filters?.productId) rows = rows.filter((o) => o.productId === filters.productId);
-  if (filters?.status) rows = rows.filter((o) => o.status === filters.status);
-  if (filters?.priority) rows = rows.filter((o) => o.priority === filters.priority);
-
-  return rows;
+  return conditions.length > 0
+    ? await db
+        .select()
+        .from(productionOrders)
+        .where(and(...conditions))
+        .orderBy(desc(productionOrders.updatedAt))
+    : await db.select().from(productionOrders).orderBy(desc(productionOrders.updatedAt));
 }
 
 export async function getProductionOrder(id: number) {
@@ -651,22 +703,20 @@ export async function listFacts(filters?: {
   if (filters?.orderId) conditions.push(eq(productionFact.orderId, filters.orderId));
   if (filters?.equipmentId) conditions.push(eq(productionFact.equipmentId, filters.equipmentId));
 
-  let rows =
-    conditions.length === 0
-      ? await db.select().from(productionFact).orderBy(desc(productionFact.reportDate))
-      : await db
-          .select()
-          .from(productionFact)
-          .where(and(...conditions))
-          .orderBy(desc(productionFact.reportDate));
-
   if (filters?.from) {
-    rows = rows.filter((f) => new Date(f.reportDate) >= filters.from!);
+    conditions.push(gte(productionFact.reportDate, filters.from.toISOString().slice(0, 10)));
   }
   if (filters?.to) {
-    rows = rows.filter((f) => new Date(f.reportDate) <= filters.to!);
+    conditions.push(lte(productionFact.reportDate, filters.to.toISOString().slice(0, 10)));
   }
-  return rows;
+
+  return conditions.length === 0
+    ? await db.select().from(productionFact).orderBy(desc(productionFact.reportDate))
+    : await db
+        .select()
+        .from(productionFact)
+        .where(and(...conditions))
+        .orderBy(desc(productionFact.reportDate));
 }
 
 export async function createProductionFact(
@@ -712,10 +762,18 @@ export async function createProductionFact(
   }
 
   try {
-    const { recalculateToolingCyclesForSubdivision } = await import(
+    const order = await getProductionOrder(row.orderId);
+    const { recalculateToolingCyclesForProduct } = await import(
       "./production-tooling-cycle-service"
     );
-    await recalculateToolingCyclesForSubdivision(row.subdivisionId);
+    if (order) {
+      await recalculateToolingCyclesForProduct(order.productId);
+    } else {
+      const { recalculateToolingCyclesForSubdivision } = await import(
+        "./production-tooling-cycle-service"
+      );
+      await recalculateToolingCyclesForSubdivision(row.subdivisionId);
+    }
   } catch (err) {
     console.error("tooling cycle sync after fact:", err);
   }
@@ -738,6 +796,117 @@ export async function createProductionFact(
 export async function addProductionDowntime(data: InsertProductionDowntime) {
   const [row] = await db.insert(productionDowntimes).values(data).returning();
   return row;
+}
+
+export async function countCatalogItems(subdivisionId: number) {
+  const [productRows, toolingRows] = await Promise.all([
+    listProducts({ subdivisionId }),
+    db
+      .select({ id: productionTooling.id })
+      .from(productionTooling)
+      .where(eq(productionTooling.subdivisionId, subdivisionId)),
+  ]);
+
+  return {
+    productsTotal: productRows.length,
+    toolingTotal: toolingRows.length,
+  };
+}
+
+export async function getProductionKpiSummary(filters: {
+  subdivisionId: number;
+  from?: Date;
+  to?: Date;
+}) {
+  const { subdivisionId, from, to } = filters;
+  const periodFrom =
+    from ?? new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+  const periodTo =
+    to ??
+    new Date(
+      new Date().getFullYear(),
+      new Date().getMonth() + 1,
+      0,
+      23,
+      59,
+      59,
+      999
+    );
+
+  const [
+    orders,
+    schedule,
+    facts,
+    conflicts,
+    materialShortageCount,
+    catalogCounts,
+  ] = await Promise.all([
+    listProductionOrders({ subdivisionId }),
+    listSchedule({ subdivisionId, from: periodFrom, to: periodTo }),
+    listFacts({ subdivisionId, from: periodFrom, to: periodTo }),
+    listPlanConflicts(subdivisionId, true),
+    countMaterialShortages(subdivisionId),
+    countCatalogItems(subdivisionId),
+  ]);
+
+  const planFact = orders.map((order) => {
+    const orderFacts = facts.filter((f) => f.orderId === order.id);
+    const factQty = orderFacts.reduce((s, f) => s + f.producedQuantity, 0);
+    const target = order.plannedQuantity > 0 ? order.plannedQuantity : order.requestedQuantity;
+    return {
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      productId: order.productId,
+      planned: target,
+      fact: factQty,
+      defective: orderFacts.reduce((s, f) => s + f.defectiveQuantity, 0),
+      variance: factQty - target,
+    };
+  });
+
+  const equipmentIds = [...new Set(schedule.map((s) => s.equipmentId))];
+  const equipmentLoad = equipmentIds.map((eqId) => {
+    const slots = schedule.filter(
+      (s) => s.equipmentId === eqId && ACTIVE_SCHEDULE_STATUSES.includes(s.status)
+    );
+    const totalMinutes = slots.reduce((sum, s) => {
+      return sum + (s.endTime.getTime() - s.startTime.getTime()) / 60000;
+    }, 0);
+    return { equipmentId: eqId, slotCount: slots.length, plannedMinutes: totalMinutes };
+  });
+
+  const atRiskOrders = orders.filter((o) => {
+    if (!o.desiredEndDate) return false;
+    const end = new Date(o.desiredEndDate);
+    const target = o.plannedQuantity > 0 ? o.plannedQuantity : o.requestedQuantity;
+    if (o.completedQuantity >= target) return false;
+    return end < new Date();
+  });
+
+  const maintenanceConflicts = conflicts.filter(
+    (c) => c.conflictType === "maintenance_overlap" || c.conflictType === "repair_overlap"
+  ).length;
+
+  return {
+    planFact,
+    equipmentLoad,
+    atRiskOrders,
+    materialShortageCount,
+    conflictCounts: {
+      plan: conflicts.length,
+      maintenance: maintenanceConflicts,
+    },
+    summary: {
+      ordersTotal: orders.length,
+      ordersInProgress: orders.filter((o) => o.status === "in_progress").length,
+      productsTotal: catalogCounts.productsTotal,
+      toolingTotal: catalogCounts.toolingTotal,
+      scheduleSlots: schedule.length,
+      factsRecorded: facts.length,
+      totalProduced: facts.reduce((s, f) => s + f.producedQuantity, 0),
+      totalDefective: facts.reduce((s, f) => s + f.defectiveQuantity, 0),
+    },
+  };
 }
 
 export async function getProductionAnalytics(filters: {
@@ -883,6 +1052,8 @@ export async function getProductionAnalytics(filters: {
     0
   );
 
+  const catalogCounts = await countCatalogItems(subdivisionId);
+
   return {
     planFact,
     equipmentLoad,
@@ -915,6 +1086,8 @@ export async function getProductionAnalytics(filters: {
     summary: {
       ordersTotal: orders.length,
       ordersInProgress: orders.filter((o) => o.status === "in_progress").length,
+      productsTotal: catalogCounts.productsTotal,
+      toolingTotal: catalogCounts.toolingTotal,
       scheduleSlots: schedule.length,
       factsRecorded: facts.length,
       totalProduced: facts.reduce((s, f) => s + f.producedQuantity, 0),
@@ -939,16 +1112,16 @@ export async function calculateOrderMaterialRequirements(orderId: number) {
 }
 
 export async function listPlanConflicts(subdivisionId: number, onlyUnresolved = true) {
-  let rows = await db
+  const conditions = [eq(productionPlanConflicts.subdivisionId, subdivisionId)];
+  if (onlyUnresolved) {
+    conditions.push(eq(productionPlanConflicts.isResolved, false));
+  }
+
+  return db
     .select()
     .from(productionPlanConflicts)
-    .where(eq(productionPlanConflicts.subdivisionId, subdivisionId))
+    .where(and(...conditions))
     .orderBy(desc(productionPlanConflicts.createdAt));
-
-  if (onlyUnresolved) {
-    rows = rows.filter((r) => !r.isResolved);
-  }
-  return rows;
 }
 
 export async function resolvePlanConflict(id: number) {

@@ -17,6 +17,7 @@ import { useProductionDisplayConfig } from "@/hooks/use-production-display-confi
 import {
   PRODUCTION_SCHEDULE_STATUS_CODES,
   PRODUCTION_SCHEDULE_STATUS_LABELS,
+  PRODUCT_CATALOG_PRESETS,
   type ProductionDisplayConfig,
 } from "@shared/production-display-config";
 import { useToast } from "@/hooks/use-toast";
@@ -366,6 +367,110 @@ export function PlanningSettingsTab({ subdivisionId, subdivisionName }: Props) {
                 Изменение режима списания доступно при праве редактирования планирования
               </p>
             )}
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Справочник изделий</CardTitle>
+            <CardDescription>
+              Какие поля показывать на вкладке «Изделия» — под тип продукции подразделения
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4 text-sm">
+            <div className="flex flex-wrap gap-2">
+              {Object.entries(PRODUCT_CATALOG_PRESETS).map(([key, preset]) => (
+                <Button
+                  key={key}
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    applyLocalOverrides({
+                      productCatalog: {
+                        ...config.productCatalog,
+                        ...preset.config,
+                      },
+                    })
+                  }
+                >
+                  {preset.label}
+                </Button>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Пресеты можно донастроить чекбоксами ниже. Вес и литник необязательны при сохранении.
+            </p>
+            {(
+              [
+                ["showPfTooling", "ПФ / оснастка"],
+                ["showProductWeight", "Вес изделия"],
+                ["showSprueWeight", "Вес литника"],
+                ["showShiftNorm", "Норма смены"],
+                ["showCycleTime", "Цикл литья"],
+                ["showCavities", "Гнёзда"],
+              ] as const
+            ).map(([field, label]) => (
+              <label key={field} className="flex items-center gap-2">
+                <Checkbox
+                  checked={config.productCatalog[field]}
+                  onCheckedChange={(v) =>
+                    applyLocalOverrides({
+                      productCatalog: {
+                        ...config.productCatalog,
+                        [field]: Boolean(v),
+                      },
+                    })
+                  }
+                />
+                {label}
+              </label>
+            ))}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Вкладки планирования</CardTitle>
+            <CardDescription>
+              Скрыть ненужные разделы для сборки, электроники и др.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            {(
+              [
+                ["schedule", "График планирования"],
+                ["orders", "Потребность и заказ"],
+                ["facts", "Факт выпуска"],
+                ["warehouse", "Внутренний склад"],
+                ["tooling", "Оснастка / ПФ"],
+                ["products", "Изделия"],
+                ["materials", "Материалы"],
+                ["conflicts", "Конфликты"],
+                ["analytics", "Аналитика"],
+                ["oee", "OEE"],
+              ] as const
+            ).map(([field, label]) => (
+              <label key={field} className="flex items-center gap-2">
+                <Checkbox
+                  checked={config.planningTabs[field]}
+                  onCheckedChange={(v) =>
+                    applyLocalOverrides({
+                      planningTabs: {
+                        ...config.planningTabs,
+                        [field]: Boolean(v),
+                      },
+                    })
+                  }
+                />
+                {label}
+              </label>
+            ))}
+            <p className="text-xs text-muted-foreground pt-2">
+              Вкладка «Настройки» всегда доступна.
+            </p>
           </CardContent>
         </Card>
       </div>
