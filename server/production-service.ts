@@ -711,6 +711,15 @@ export async function createProductionFact(
     }
   }
 
+  try {
+    const { recalculateToolingCyclesForSubdivision } = await import(
+      "./production-tooling-cycle-service"
+    );
+    await recalculateToolingCyclesForSubdivision(row.subdivisionId);
+  } catch (err) {
+    console.error("tooling cycle sync after fact:", err);
+  }
+
   if ((data.downtimeMinutes ?? 0) > 0 || data.downtimeReason) {
     await db.insert(productionDowntimes).values({
       subdivisionId: row.subdivisionId,

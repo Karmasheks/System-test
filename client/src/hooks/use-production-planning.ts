@@ -9,7 +9,7 @@ import type {
   ProductionPlanConflict,
   ProductionImportBatch,
 } from "@shared/schema";
-import type { ProductionTooling } from "@shared/schema";
+import type { ProductionTooling, ProductionToolingMaintenance } from "@shared/schema";
 import type { MaterialRequirementLine } from "@/components/planning/types";
 
 function qs(params: Record<string, string | undefined>) {
@@ -307,12 +307,29 @@ export function useInternalWarehouseSummary(
   });
 }
 
+export type ToolingProductLink = {
+  id: number;
+  sapCode: string;
+  name: string;
+};
+
+export type ProductionToolingView = ProductionTooling & {
+  products: ToolingProductLink[];
+  cyclesUntilMaintenance: number | null;
+  cyclesRemainingGuarantee: number | null;
+  maintenanceDue: boolean;
+};
+
+export type ProductionToolingDetail = ProductionToolingView & {
+  maintenanceHistory: ProductionToolingMaintenance[];
+};
+
 export function useProductionTooling(
   subdivisionId: number | null,
   search?: string,
   activeOnly?: boolean
 ) {
-  return useQuery<ProductionTooling[]>({
+  return useQuery<ProductionToolingView[]>({
     queryKey: ["/api/production/tooling", subdivisionId, search, activeOnly],
     enabled: subdivisionId != null,
     queryFn: async () => {
@@ -329,10 +346,44 @@ export function useProductionTooling(
   });
 }
 
+export function useToolingDetail(id: number | null) {
+  return useQuery<ProductionToolingDetail>({
+    queryKey: ["/api/production/tooling", id],
+    enabled: id != null,
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/production/tooling/${id}`);
+      return res.json();
+    },
+  });
+}
+
+export function useToolingMaintenanceDue(subdivisionId: number | null) {
+  return useQuery<ProductionToolingView[]>({
+    queryKey: ["/api/production/tooling/maintenance-due", subdivisionId],
+    enabled: subdivisionId != null,
+    queryFn: async () => {
+      const res = await apiRequest(
+        "GET",
+        `/api/production/tooling/maintenance-due${qs({
+          subdivisionId: String(subdivisionId),
+        })}`
+      );
+      return res.json();
+    },
+  });
+}
+
 export type DailyPlanCellValue = {
-  shift1: number;
-  shift2: number;
+  shifts: Record<string, number>;
   fact: number;
+};
+
+export type ShiftSlotView = {
+  code: string;
+  name: string;
+  hours: number;
+  startTime?: string;
+  endTime?: string;
 };
 
 export type DailyPlanGridResponse = {
@@ -340,6 +391,7 @@ export type DailyPlanGridResponse = {
   from: string;
   to: string;
   dates: string[];
+  shiftSlots: ShiftSlotView[];
   rows: Array<{
     key: string;
     equipmentId: string;
@@ -351,6 +403,7 @@ export type DailyPlanGridResponse = {
     productSapCode: string | null;
     pfNumber: string | null;
     shiftNorm: number | null;
+    normByShift: Record<string, number>;
     targetQuantity: number;
     completedQuantity: number;
     remainderQuantity: number;
@@ -361,6 +414,63 @@ export type DailyPlanGridResponse = {
     factTotal: number;
   }>;
 };
+
+export function useShiftTemplates(subdivisionId: number | null) {
+  return useQuery({
+    queryKey: ["/api/production/shift-templates", subdivisionId],
+    enabled: subdivisionId != null,
+    queryFn: async () => {
+      const res = await apiRequest(
+        "GET",
+        `/api/production/shift-templates?subdivisionId=${subdivisionId}`
+      );
+      return res.json() as Promise<
+        Array<{
+          id: number;
+          name: string;
+          description: string | null;
+          pattern: { slots: ShiftSlotView[] };
+          isActive: boolean;
+        }>
+      >;
+    },
+  });
+}
+
+export function useActiveShiftPattern(subdivisionId: number | null) {
+  return useQuery({
+    queryKey: ["/api/production/shift-templates/active", subdivisionId],
+    enabled: subdivisionId != null,
+    queryFn: async () => {
+      const res = await apiRequest(
+        "GET",
+        `/api/production/shift-templates/active?subdivisionId=${subdivisionId}`
+      );
+      return res.json() as Promise<{ slots: ShiftSlotView[] }>;
+    },
+  });
+}
+
+export function useProductShiftNorms(
+  productId: number | null,
+  subdivisionId: number | null
+) {
+  return useQuery({
+    queryKey: ["/api/production/products", productId, "shift-norms", subdivisionId],
+    enabled: productId != null && subdivisionId != null,
+    queryFn: async () => {
+      const res = await apiRequest(
+        "GET",
+        `/api/production/products/${productId}/shift-norms?subdivisionId=${subdivisionId}`
+      );
+      return res.json() as Promise<{
+        stored: Array<{ shiftCode: string; shiftNorm: number }>;
+        resolved: Record<string, number>;
+        slots: ShiftSlotView[];
+      }>;
+    },
+  });
+}
 
 export type ProductBomLine = {
   bom: import("@shared/schema").ProductBom;
@@ -583,6 +693,8 @@ export function useProductionMutations() {
     queryClient.invalidateQueries({ queryKey: ["/api/production/warehouse/summary"] });
     queryClient.invalidateQueries({ queryKey: ["/api/production/tooling"] });
     queryClient.invalidateQueries({ queryKey: ["/api/production/daily-plan/grid"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/production/shift-templates"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/production/products"] });
   };
 
   const createOrder = useMutation({
@@ -710,6 +822,7 @@ export function useProductionMutations() {
         shiftCode?: string;
         plannedQuantity: number;
         pfNumber?: string | null;
+        toolingId?: number | null;
       }>;
     }) => {
       const res = await apiRequest("POST", "/api/production/daily-plan/bulk", body);
@@ -757,6 +870,21 @@ export function useProductionMutations() {
     onSuccess: invalidateAll,
   });
 
+  const recordToolingMaintenance = useMutation({
+    mutationFn: async ({
+      toolingId,
+      ...body
+    }: { toolingId: number; comment?: string; performedAt?: string }) => {
+      const res = await apiRequest(
+        "POST",
+        `/api/production/tooling/${toolingId}/maintenance`,
+        body
+      );
+      return res.json();
+    },
+    onSuccess: invalidateAll,
+  });
+
   const addBomLine = useMutation({
     mutationFn: async (body: Record<string, unknown>) => {
       const res = await apiRequest("POST", "/api/production/bom", body);
@@ -792,6 +920,45 @@ export function useProductionMutations() {
     onSuccess: invalidateAll,
   });
 
+  const createShiftTemplate = useMutation({
+    mutationFn: async (body: Record<string, unknown>) => {
+      const res = await apiRequest("POST", "/api/production/shift-templates", body);
+      return res.json();
+    },
+    onSuccess: invalidateAll,
+  });
+
+  const updateShiftTemplate = useMutation({
+    mutationFn: async ({ id, ...body }: { id: number } & Record<string, unknown>) => {
+      const res = await apiRequest("PATCH", `/api/production/shift-templates/${id}`, body);
+      return res.json();
+    },
+    onSuccess: invalidateAll,
+  });
+
+  const setDefaultShiftTemplate = useMutation({
+    mutationFn: async (body: { subdivisionId: number; templateId: number | null }) => {
+      const res = await apiRequest("POST", "/api/production/shift-templates/default", body);
+      return res.json();
+    },
+    onSuccess: invalidateAll,
+  });
+
+  const upsertProductShiftNorms = useMutation({
+    mutationFn: async ({
+      productId,
+      ...body
+    }: { productId: number } & Record<string, unknown>) => {
+      const res = await apiRequest(
+        "PUT",
+        `/api/production/products/${productId}/shift-norms`,
+        body
+      );
+      return res.json();
+    },
+    onSuccess: invalidateAll,
+  });
+
   return {
     createOrder,
     updateOrderStatus,
@@ -811,10 +978,15 @@ export function useProductionMutations() {
     createProduct,
     updateProduct,
     createProductFromTooling,
+    recordToolingMaintenance,
     addBomLine,
     removeBomLine,
     upsertProductEquipment,
     createPlanningDemand,
+    createShiftTemplate,
+    updateShiftTemplate,
+    setDefaultShiftTemplate,
+    upsertProductShiftNorms,
     invalidateAll,
   };
 }

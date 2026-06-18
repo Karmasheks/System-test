@@ -1,15 +1,111 @@
 import { db } from "./db";
-import { productionTooling, products } from "@shared/schema";
-import { and, eq } from "drizzle-orm";
-import type { InsertProductionTooling } from "@shared/schema";
+import {
+  productionTooling,
+  productionToolingProducts,
+  productionToolingMaintenance,
+  products,
+} from "@shared/schema";
+import { and, eq, inArray } from "drizzle-orm";
+import type {
+  InsertProductionTooling,
+  InsertProductionToolingMaintenance,
+} from "@shared/schema";
 import { computeShiftNormFromCycle } from "@shared/production-norm-utils";
+import {
+  cyclesRemainingGuarantee,
+  cyclesUntilMaintenance,
+  isMaintenanceDue,
+} from "@shared/production-tooling-utils";
 import { createProduct } from "./production-service";
+import { recalculateToolingCycles } from "./production-tooling-cycle-service";
+
+export type ToolingProductLink = {
+  id: number;
+  sapCode: string;
+  name: string;
+};
+
+export type ProductionToolingView = typeof productionTooling.$inferSelect & {
+  products: ToolingProductLink[];
+  cyclesUntilMaintenance: number | null;
+  cyclesRemainingGuarantee: number | null;
+  maintenanceDue: boolean;
+};
+
+export type ProductionToolingDetail = ProductionToolingView & {
+  maintenanceHistory: (typeof productionToolingMaintenance.$inferSelect)[];
+};
+
+async function loadProductLinks(toolings: (typeof productionTooling.$inferSelect)[]) {
+  const toolingIds = toolings.map((t) => t.id);
+  const junction =
+    toolingIds.length > 0
+      ? await db
+          .select()
+          .from(productionToolingProducts)
+          .where(inArray(productionToolingProducts.toolingId, toolingIds))
+      : [];
+
+  const productIds = new Set<number>();
+  for (const t of toolings) {
+    if (t.productId) productIds.add(t.productId);
+  }
+  for (const j of junction) productIds.add(j.productId);
+
+  const productRows =
+    productIds.size > 0
+      ? await db
+          .select()
+          .from(products)
+          .where(inArray(products.id, [...productIds]))
+      : [];
+  const productById = new Map(productRows.map((p) => [p.id, p]));
+
+  const junctionByTooling = new Map<number, number[]>();
+  for (const j of junction) {
+    const list = junctionByTooling.get(j.toolingId) ?? [];
+    list.push(j.productId);
+    junctionByTooling.set(j.toolingId, list);
+  }
+
+  return { productById, junctionByTooling };
+}
+
+function enrichTooling(
+  row: typeof productionTooling.$inferSelect,
+  productById: Map<number, typeof products.$inferSelect>,
+  junctionByTooling: Map<number, number[]>
+): ProductionToolingView {
+  const ids = new Set<number>();
+  if (row.productId) ids.add(row.productId);
+  for (const pid of junctionByTooling.get(row.id) ?? []) ids.add(pid);
+
+  const linkedProducts: ToolingProductLink[] = [...ids]
+    .map((id) => productById.get(id))
+    .filter((p): p is typeof products.$inferSelect => p != null)
+    .map((p) => ({ id: p.id, sapCode: p.sapCode, name: p.name }))
+    .sort((a, b) => a.sapCode.localeCompare(b.sapCode, "ru"));
+
+  return {
+    ...row,
+    products: linkedProducts,
+    cyclesUntilMaintenance: cyclesUntilMaintenance(
+      row.maintenanceCycleInterval,
+      row.cyclesSinceMaintenance
+    ),
+    cyclesRemainingGuarantee: cyclesRemainingGuarantee(
+      row.cyclesUntilGuarantee,
+      row.cycleCounterTotal
+    ),
+    maintenanceDue: isMaintenanceDue(row.maintenanceCycleInterval, row.cyclesSinceMaintenance),
+  };
+}
 
 export async function listProductionTooling(filters: {
   subdivisionId: number;
   activeOnly?: boolean;
   search?: string;
-}) {
+}): Promise<ProductionToolingView[]> {
   const rows = await db
     .select()
     .from(productionTooling)
@@ -28,7 +124,9 @@ export async function listProductionTooling(filters: {
         r.name.toLowerCase().includes(q)
     );
   }
-  return result;
+
+  const { productById, junctionByTooling } = await loadProductLinks(result);
+  return result.map((row) => enrichTooling(row, productById, junctionByTooling));
 }
 
 export async function getProductionTooling(id: number) {
@@ -36,28 +134,134 @@ export async function getProductionTooling(id: number) {
   return row ?? null;
 }
 
-export async function createProductionTooling(data: InsertProductionTooling) {
+export async function getProductionToolingDetail(id: number): Promise<ProductionToolingDetail | null> {
+  const row = await getProductionTooling(id);
+  if (!row) return null;
+
+  const { productById, junctionByTooling } = await loadProductLinks([row]);
+  const maintenanceHistory = await db
+    .select()
+    .from(productionToolingMaintenance)
+    .where(eq(productionToolingMaintenance.toolingId, id))
+    .orderBy(productionToolingMaintenance.performedAt);
+
+  return {
+    ...enrichTooling(row, productById, junctionByTooling),
+    maintenanceHistory: maintenanceHistory.reverse(),
+  };
+}
+
+export async function setToolingProductLinks(toolingId: number, productIds: number[]) {
+  await db
+    .delete(productionToolingProducts)
+    .where(eq(productionToolingProducts.toolingId, toolingId));
+
+  const unique = [...new Set(productIds.filter((id) => Number.isInteger(id) && id > 0))];
+  if (unique.length === 0) return;
+
+  await db.insert(productionToolingProducts).values(
+    unique.map((productId) => ({
+      toolingId,
+      productId,
+    }))
+  );
+
+  const primary = unique[0];
+  await db
+    .update(productionTooling)
+    .set({ productId: primary, updatedAt: new Date() })
+    .where(eq(productionTooling.id, toolingId));
+}
+
+export async function createProductionTooling(
+  data: InsertProductionTooling & { productIds?: number[] }
+) {
+  const { productIds, lastMaintenanceAt, ...rest } = data;
   const [row] = await db
     .insert(productionTooling)
     .values({
-      ...data,
-      applicableEquipmentIds: data.applicableEquipmentIds ?? [],
+      ...rest,
+      applicableEquipmentIds: rest.applicableEquipmentIds ?? [],
+      cycleCounterTotal: rest.cycleCounterTotal ?? 0,
+      cyclesSinceMaintenance: rest.cyclesSinceMaintenance ?? 0,
+      lastMaintenanceAt: lastMaintenanceAt ? new Date(lastMaintenanceAt) : undefined,
       updatedAt: new Date(),
     })
     .returning();
-  return row;
+
+  if (productIds?.length) {
+    await setToolingProductLinks(row.id, productIds);
+  } else if (rest.productId) {
+    await setToolingProductLinks(row.id, [rest.productId]);
+  }
+
+  await recalculateToolingCycles(row.id);
+  return (await getProductionToolingDetail(row.id))!;
+}
+
+export async function getProductionToolingByPfNumber(
+  subdivisionId: number,
+  pfNumber: string
+) {
+  const [row] = await db
+    .select()
+    .from(productionTooling)
+    .where(
+      and(
+        eq(productionTooling.subdivisionId, subdivisionId),
+        eq(productionTooling.pfNumber, pfNumber)
+      )
+    );
+  return row ?? null;
+}
+
+export async function patchToolingCycleCounters(
+  id: number,
+  data: {
+    cycleCounterTotal?: number;
+    cyclesSinceMaintenance?: number;
+    status?: typeof productionTooling.$inferSelect.status;
+  }
+) {
+  await db
+    .update(productionTooling)
+    .set({ ...data, updatedAt: new Date() })
+    .where(eq(productionTooling.id, id));
 }
 
 export async function updateProductionTooling(
   id: number,
-  data: Partial<InsertProductionTooling>
+  data: Partial<InsertProductionTooling> & {
+    productIds?: number[];
+    skipCycleRecalc?: boolean;
+  }
 ) {
+  const { productIds, lastMaintenanceAt, skipCycleRecalc, ...rest } = data;
+  const updatePayload: Partial<typeof productionTooling.$inferInsert> = {
+    ...rest,
+    updatedAt: new Date(),
+  };
+  if (lastMaintenanceAt !== undefined) {
+    updatePayload.lastMaintenanceAt = lastMaintenanceAt
+      ? new Date(lastMaintenanceAt)
+      : null;
+  }
   const [row] = await db
     .update(productionTooling)
-    .set({ ...data, updatedAt: new Date() })
+    .set(updatePayload)
     .where(eq(productionTooling.id, id))
     .returning();
-  return row ?? null;
+
+  if (!row) return null;
+
+  if (productIds) {
+    await setToolingProductLinks(id, productIds);
+  }
+
+  if (!skipCycleRecalc) {
+    await recalculateToolingCycles(id);
+  }
+  return (await getProductionToolingDetail(id))!;
 }
 
 export async function syncToolingFromProduct(productId: number) {
@@ -74,23 +278,31 @@ export async function syncToolingFromProduct(productId: number) {
       )
     );
 
-  const payload = {
+  if (existing) {
+    const junction = await db
+      .select({ productId: productionToolingProducts.productId })
+      .from(productionToolingProducts)
+      .where(eq(productionToolingProducts.toolingId, existing.id));
+    const ids = junction.map((j) => j.productId);
+    if (!ids.includes(product.id)) ids.push(product.id);
+    await setToolingProductLinks(existing.id, ids);
+    return getProductionToolingDetail(existing.id);
+  }
+
+  const created = await createProductionTooling({
     subdivisionId: product.subdivisionId,
     pfNumber: product.pfNumber,
-    name: product.name,
+    name: product.pfNumber,
+    productIds: [product.id],
     productId: product.id,
-    toolingType: "press_form" as const,
-    cycleTimeSec: product.cycleTimeSec,
-    cavities: product.cavities,
-    productWeightGr: product.productWeight,
-    shotWeightGr: product.shotWeight,
+    toolingType: "press_form",
+    cycleTimeSec: product.cycleTimeSec ?? undefined,
+    cavities: product.cavities ?? undefined,
+    productWeightGr: product.productWeight ?? undefined,
+    shotWeightGr: product.shotWeight ?? undefined,
     isActive: product.isActive,
-  };
-
-  if (existing) {
-    return updateProductionTooling(existing.id, payload);
-  }
-  return createProductionTooling(payload);
+  });
+  return created;
 }
 
 export async function createProductFromTooling(
@@ -98,8 +310,7 @@ export async function createProductFromTooling(
   data: { sapCode: string; name?: string; defaultShiftNorm?: number }
 ) {
   const tooling = await getProductionTooling(toolingId);
-  if (!tooling) throw new Error("Оснастка не найдена");
-  if (tooling.productId) throw new Error("Изделие уже связано с этой оснасткой");
+  if (!tooling) throw new Error("Оснастка/ПФ не найдена");
 
   const sapCode = data.sapCode.trim();
   if (!sapCode) throw new Error("Укажите SAP-код изделия");
@@ -132,6 +343,59 @@ export async function createProductFromTooling(
 
   if (!product) throw new Error("Не удалось создать изделие");
 
-  await updateProductionTooling(toolingId, { productId: product.id });
-  return { product, tooling: await getProductionTooling(toolingId) };
+  const junction = await db
+    .select({ productId: productionToolingProducts.productId })
+    .from(productionToolingProducts)
+    .where(eq(productionToolingProducts.toolingId, toolingId));
+  const ids = junction.map((j) => j.productId);
+  if (tooling.productId) ids.push(tooling.productId);
+  ids.push(product.id);
+  await setToolingProductLinks(toolingId, ids);
+
+  return { product, tooling: await getProductionToolingDetail(toolingId) };
+}
+
+export async function recordToolingMaintenance(
+  toolingId: number,
+  data: Omit<InsertProductionToolingMaintenance, "toolingId">,
+  user: { id: number; name: string }
+) {
+  const tooling = await getProductionTooling(toolingId);
+  if (!tooling) throw new Error("Оснастка/ПФ не найдена");
+
+  await recalculateToolingCycles(toolingId);
+  const fresh = await getProductionTooling(toolingId);
+  if (!fresh) throw new Error("Оснастка/ПФ не найдена");
+
+  const cyclesAt = fresh.cycleCounterTotal;
+
+  const [record] = await db
+    .insert(productionToolingMaintenance)
+    .values({
+      toolingId,
+      performedAt: data.performedAt ?? new Date(),
+      cyclesAtMaintenance: cyclesAt,
+      comment: data.comment ?? null,
+      performedById: user.id,
+      performedByName: user.name,
+    })
+    .returning();
+
+  await db
+    .update(productionTooling)
+    .set({
+      cyclesAtLastMaintenance: cyclesAt,
+      cyclesSinceMaintenance: 0,
+      lastMaintenanceAt: record.performedAt,
+      status: "ok",
+      updatedAt: new Date(),
+    })
+    .where(eq(productionTooling.id, toolingId));
+
+  return record;
+}
+
+export async function listToolingMaintenanceDue(subdivisionId: number) {
+  const all = await listProductionTooling({ subdivisionId, activeOnly: true });
+  return all.filter((t) => t.maintenanceDue || t.status === "maintenance_due");
 }

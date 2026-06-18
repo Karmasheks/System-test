@@ -38,6 +38,16 @@ export const MATERIAL_TYPE_LABELS: Record<string, string> = {
   other: "Прочее",
 };
 
+/** Типы для справочника материалов (без оснастки со склада). */
+export const MATERIAL_CATALOG_TYPES = [
+  "base",
+  "secondary",
+  "additive",
+  "colorant",
+  "packaging",
+  "other",
+] as const;
+
 export const TOOLING_TYPE_LABELS: Record<string, string> = {
   press_form: "Пресс-форма (ПФ)",
   applicator: "Аппликатор",
@@ -50,5 +60,19 @@ export const TOOLING_STATUS_LABELS: Record<string, string> = {
   ok: "Исправная",
   repair: "Ремонт",
   testing: "Испытания",
+  maintenance_due: "Требуется ТО",
+  on_maintenance: "На ТО",
   decommissioned: "Списана",
+};
+
+export const TOOLING_STATUS_VARIANTS: Record<
+  string,
+  "default" | "secondary" | "destructive" | "outline"
+> = {
+  ok: "outline",
+  repair: "secondary",
+  testing: "secondary",
+  maintenance_due: "destructive",
+  on_maintenance: "default",
+  decommissioned: "secondary",
 };

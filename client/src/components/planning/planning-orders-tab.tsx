@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -33,9 +34,16 @@ import {
   useProductionProducts,
   useProductionTooling,
   useProductionMutations,
+  useActiveShiftPattern,
+  useProductShiftNorms,
 } from "@/hooks/use-production-planning";
 import { useEquipmentApi } from "@/hooks/use-equipment-api";
 import { resolveShiftNorm } from "@shared/production-norm-utils";
+import {
+  buildAutoPlanDistribution,
+  sumDistribution,
+  type PlanDistributionLine,
+} from "@shared/production-plan-distribution";
 import {
   PRODUCTION_ORDER_PRIORITY_LABELS,
   PRODUCTION_ORDER_STATUS_LABELS,
@@ -70,6 +78,8 @@ export function PlanningOrdersTab({ subdivisionId }: Props) {
     activeOnly: true,
   });
   const { data: tooling = [] } = useProductionTooling(subdivisionId);
+  const { data: shiftPattern } = useActiveShiftPattern(subdivisionId);
+  const shiftSlots = shiftPattern?.slots ?? [];
   const { allEquipment } = useEquipmentApi();
   const equipment = useMemo(
     () =>
@@ -109,12 +119,76 @@ export function PlanningOrdersTab({ subdivisionId }: Props) {
     mode: "planning" as "planning" | "simple",
   });
 
+  const [activeShiftCodes, setActiveShiftCodes] = useState<string[]>(["1", "2"]);
+  const [planDistribution, setPlanDistribution] = useState<PlanDistributionLine[]>([]);
+  const [distributionTouched, setDistributionTouched] = useState(false);
+
   const selectedTooling = tooling.find((t) => String(t.id) === form.toolingId);
   const selectedProduct = products.find(
     (p) =>
       String(p.id) === form.productId ||
       (selectedTooling?.productId != null && p.id === selectedTooling.productId)
   );
+
+  const productIdForNorms = form.productId
+    ? Number(form.productId)
+    : selectedTooling?.productId ?? null;
+  const { data: productShiftNorms } = useProductShiftNorms(productIdForNorms, subdivisionId);
+
+  useEffect(() => {
+    if (shiftSlots.length > 0) {
+      setActiveShiftCodes(shiftSlots.map((s) => s.code));
+    }
+  }, [shiftSlots.map((s) => s.code).join(",")]);
+
+  const normByShift = useMemo(() => {
+    const resolved = productShiftNorms?.resolved ?? {};
+    const out: Record<string, number> = {};
+    for (const slot of shiftSlots) {
+      const fromSettings = resolved[slot.code];
+      if (fromSettings && fromSettings > 0) {
+        out[slot.code] = fromSettings;
+        continue;
+      }
+      if (selectedProduct) {
+        const computed = resolveShiftNorm(
+          selectedProduct,
+          null,
+          selectedTooling ?? undefined,
+          { shiftCode: slot.code, shiftHours: slot.hours, shiftNormByCode: resolved }
+        );
+        if (computed && computed > 0) out[slot.code] = computed;
+      }
+    }
+    return out;
+  }, [shiftSlots, productShiftNorms, selectedProduct, selectedTooling]);
+
+  useEffect(() => {
+    if (form.mode !== "planning" || distributionTouched) return;
+    const qty = Number(form.requestedQuantity);
+    if (!qty || qty <= 0 || !form.desiredStartDate || activeShiftCodes.length === 0) {
+      setPlanDistribution([]);
+      return;
+    }
+    const lines = buildAutoPlanDistribution({
+      totalQuantity: qty,
+      startDate: form.desiredStartDate,
+      endDate: form.desiredEndDate || undefined,
+      slots: shiftSlots,
+      activeShiftCodes,
+      normByShift,
+    });
+    setPlanDistribution(lines);
+  }, [
+    form.mode,
+    form.requestedQuantity,
+    form.desiredStartDate,
+    form.desiredEndDate,
+    activeShiftCodes,
+    normByShift,
+    shiftSlots,
+    distributionTouched,
+  ]);
 
   const normPreview = useMemo(() => {
     if (!selectedProduct) return null;
@@ -124,6 +198,24 @@ export function PlanningOrdersTab({ subdivisionId }: Props) {
       selectedTooling ?? undefined
     );
   }, [selectedProduct, selectedTooling]);
+
+  const handleProductChange = (productId: string) => {
+    const product = products.find((p) => String(p.id) === productId);
+    let toolingId = "";
+    if (product) {
+      const byPf = product.pfNumber
+        ? tooling.find((t) => t.pfNumber === product.pfNumber)
+        : undefined;
+      const byLink = tooling.find((t) => t.products.some((pr) => pr.id === product.id));
+      const linked = byPf ?? byLink;
+      if (linked) toolingId = String(linked.id);
+    }
+    setForm((f) => ({
+      ...f,
+      productId,
+      toolingId: toolingId || f.toolingId,
+    }));
+  };
 
   const handleToolingChange = (toolingId: string) => {
     const t = tooling.find((x) => String(x.id) === toolingId);
@@ -158,6 +250,8 @@ export function PlanningOrdersTab({ subdivisionId }: Props) {
           shiftNormOverride: form.shiftNormOverride
             ? Number(form.shiftNormOverride)
             : undefined,
+          activeShiftCodes,
+          planDistribution: planDistribution.length > 0 ? planDistribution : undefined,
           priority: form.priority,
           orderNumber: form.orderNumber.trim() || undefined,
           comment: form.comment || undefined,
@@ -181,6 +275,8 @@ export function PlanningOrdersTab({ subdivisionId }: Props) {
         toast({ title: "Заказ создан (черновик)" });
       }
       setCreateOpen(false);
+      setDistributionTouched(false);
+      setPlanDistribution([]);
       setForm({
         toolingId: "",
         productId: "",
@@ -331,7 +427,7 @@ export function PlanningOrdersTab({ subdivisionId }: Props) {
       </div>
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Потребность / заказ</DialogTitle>
           </DialogHeader>
@@ -359,22 +455,6 @@ export function PlanningOrdersTab({ subdivisionId }: Props) {
             {form.mode === "planning" && (
               <>
                 <div>
-                  <Label>ПФ / оснастка</Label>
-                  <Select value={form.toolingId || "none"} onValueChange={(v) => handleToolingChange(v === "none" ? "" : v)}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Выберите ПФ" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Не выбрано</SelectItem>
-                      {tooling.map((t) => (
-                        <SelectItem key={t.id} value={String(t.id)}>
-                          {t.pfNumber} — {t.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
                   <Label>Оборудование (линия)</Label>
                   <Select
                     value={form.equipmentId}
@@ -390,15 +470,78 @@ export function PlanningOrdersTab({ subdivisionId }: Props) {
                     </SelectContent>
                   </Select>
                 </div>
+                <div>
+                  <Label>Изделие</Label>
+                  <Select
+                    value={form.productId}
+                    onValueChange={handleProductChange}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Выберите изделие" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {products.map((p) => (
+                        <SelectItem key={p.id} value={String(p.id)}>
+                          {p.sapCode} — {p.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {selectedProduct && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      SAP: {selectedProduct.sapCode}
+                      {shiftSlots.length > 0 ? (
+                        <>
+                          {" · "}
+                          {shiftSlots.map((slot) => (
+                            <span key={slot.code} className="mr-2">
+                              {slot.name}:{" "}
+                              {normByShift[slot.code]?.toLocaleString("ru-RU") ?? "—"} шт
+                            </span>
+                          ))}
+                        </>
+                      ) : normPreview != null ? (
+                        <> · норма: {normPreview.toLocaleString("ru-RU")} шт</>
+                      ) : null}
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <Label>ПФ / оснастка</Label>
+                  <Select
+                    value={form.toolingId || "none"}
+                    onValueChange={(v) => handleToolingChange(v === "none" ? "" : v)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Подставится по изделию" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Не выбрано</SelectItem>
+                      {tooling.map((t) => (
+                        <SelectItem key={t.id} value={String(t.id)}>
+                          {t.pfNumber} — {t.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {selectedTooling && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Гнёзд: {selectedTooling.cavities ?? "—"}
+                      {selectedTooling.maintenanceCycleInterval != null && (
+                        <> · ТО каждые {selectedTooling.maintenanceCycleInterval} циклов</>
+                      )}
+                    </p>
+                  )}
+                </div>
               </>
             )}
 
+            {form.mode !== "planning" && (
             <div>
               <Label>Изделие</Label>
               <Select
                 value={form.productId}
                 onValueChange={(v) => setForm((f) => ({ ...f, productId: v }))}
-                disabled={form.mode === "planning" && Boolean(selectedTooling?.productId)}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Выберите изделие" />
@@ -411,15 +554,32 @@ export function PlanningOrdersTab({ subdivisionId }: Props) {
                   ))}
                 </SelectContent>
               </Select>
-              {selectedProduct && (
-                <p className="text-xs text-muted-foreground mt-1">
-                  ПФ: {selectedProduct.pfNumber ?? "—"}
-                  {normPreview != null && (
-                    <> · норма 11ч: {normPreview.toLocaleString("ru-RU")} шт</>
-                  )}
-                </p>
-              )}
             </div>
+            )}
+
+            {form.mode === "planning" && shiftSlots.length > 0 && (
+              <div>
+                <Label className="mb-2 block">Смены в плане</Label>
+                <div className="flex flex-wrap gap-4">
+                  {shiftSlots.map((slot) => (
+                    <label key={slot.code} className="flex items-center gap-2 text-sm">
+                      <Checkbox
+                        checked={activeShiftCodes.includes(slot.code)}
+                        onCheckedChange={(checked) => {
+                          setDistributionTouched(false);
+                          setActiveShiftCodes((prev) =>
+                            checked
+                              ? [...prev, slot.code].sort()
+                              : prev.filter((c) => c !== slot.code)
+                          );
+                        }}
+                      />
+                      {slot.name} ({slot.hours} ч)
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -427,9 +587,10 @@ export function PlanningOrdersTab({ subdivisionId }: Props) {
                 <Input
                   type="number"
                   value={form.requestedQuantity}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, requestedQuantity: e.target.value }))
-                  }
+                  onChange={(e) => {
+                    setDistributionTouched(false);
+                    setForm((f) => ({ ...f, requestedQuantity: e.target.value }));
+                  }}
                 />
               </div>
               {form.mode === "planning" && (
@@ -454,9 +615,10 @@ export function PlanningOrdersTab({ subdivisionId }: Props) {
                   <Input
                     type="date"
                     value={form.desiredStartDate}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, desiredStartDate: e.target.value }))
-                    }
+                    onChange={(e) => {
+                      setDistributionTouched(false);
+                      setForm((f) => ({ ...f, desiredStartDate: e.target.value }));
+                    }}
                   />
                 </div>
                 <div>
@@ -464,11 +626,73 @@ export function PlanningOrdersTab({ subdivisionId }: Props) {
                   <Input
                     type="date"
                     value={form.desiredEndDate}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, desiredEndDate: e.target.value }))
-                    }
+                    onChange={(e) => {
+                      setDistributionTouched(false);
+                      setForm((f) => ({ ...f, desiredEndDate: e.target.value }));
+                    }}
                   />
                 </div>
+              </div>
+            )}
+
+            {form.mode === "planning" && planDistribution.length > 0 && (
+              <div>
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <Label>Распределение по дням и сменам</Label>
+                  <span className="text-xs text-muted-foreground">
+                    Σ {sumDistribution(planDistribution).toLocaleString("ru-RU")} /{" "}
+                    {Number(form.requestedQuantity).toLocaleString("ru-RU")} шт
+                  </span>
+                </div>
+                <div className="rounded-md border max-h-[200px] overflow-y-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Дата</TableHead>
+                        <TableHead>Смена</TableHead>
+                        <TableHead className="text-right">План, шт</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {planDistribution.map((line, idx) => {
+                        const slot = shiftSlots.find((s) => s.code === line.shiftCode);
+                        return (
+                          <TableRow key={`${line.planDate}-${line.shiftCode}-${idx}`}>
+                            <TableCell>{line.planDate}</TableCell>
+                            <TableCell>{slot?.name ?? `Смена ${line.shiftCode}`}</TableCell>
+                            <TableCell className="text-right">
+                              <Input
+                                type="number"
+                                min={0}
+                                className="h-8 w-24 ml-auto text-right"
+                                value={line.plannedQuantity}
+                                onChange={(e) => {
+                                  const v = Number(e.target.value);
+                                  if (Number.isNaN(v) || v < 0) return;
+                                  setDistributionTouched(true);
+                                  setPlanDistribution((prev) =>
+                                    prev.map((l, i) =>
+                                      i === idx ? { ...l, plannedQuantity: v } : l
+                                    )
+                                  );
+                                }}
+                              />
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="mt-1"
+                  onClick={() => setDistributionTouched(false)}
+                >
+                  Пересчитать автоматически
+                </Button>
               </div>
             )}
 

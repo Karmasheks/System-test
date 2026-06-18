@@ -822,6 +822,8 @@ export const PRODUCTION_TOOLING_STATUSES = [
   "ok",
   "repair",
   "testing",
+  "maintenance_due",
+  "on_maintenance",
   "decommissioned",
 ] as const;
 export type ProductionToolingStatus = (typeof PRODUCTION_TOOLING_STATUSES)[number];
@@ -880,6 +882,8 @@ export const products = pgTable(
     cavities: integer("cavities"),
     productWeight: real("product_weight"),
     shotWeight: real("shot_weight"),
+    /** Вес литника (литейной системы), г — на одну отливку. */
+    sprueWeight: real("sprue_weight"),
     defaultShiftNorm: real("default_shift_norm"),
     isSharedAcrossSubdivisions: boolean("is_shared_across_subdivisions").notNull().default(false),
     isActive: boolean("is_active").notNull().default(true),
@@ -920,6 +924,8 @@ export const materials = pgTable(
     type: text("type").notNull().default("other"),
     unit: text("unit").notNull().default("kg"),
     description: text("description"),
+    /** Опциональная привязка к изделию для расчёта расхода по выпуску. */
+    productId: integer("product_id"),
     isSharedAcrossSubdivisions: boolean("is_shared_across_subdivisions").notNull().default(false),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -1017,6 +1023,26 @@ export const productEquipment = pgTable(
     productEquipmentUnique: unique("product_equipment_product_equipment_unique").on(
       table.productId,
       table.equipmentId
+    ),
+  })
+);
+
+export const productShiftNorms = pgTable(
+  "product_shift_norms",
+  {
+    id: serial("id").primaryKey(),
+    productId: integer("product_id").notNull(),
+    subdivisionId: integer("subdivision_id").notNull(),
+    shiftCode: text("shift_code").notNull(),
+    shiftNorm: real("shift_norm").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    productShiftUnique: unique("product_shift_norms_unique").on(
+      table.productId,
+      table.subdivisionId,
+      table.shiftCode
     ),
   })
 );
@@ -1179,6 +1205,17 @@ export const productionTooling = pgTable(
     applicableEquipmentIds: jsonb("applicable_equipment_ids").$type<string[]>().default([]),
     storageLocation: text("storage_location"),
     requiresMaintenanceLevel2: boolean("requires_maintenance_level2").notNull().default(false),
+    /** Циклов до истечения гарантийного ресурса (опционально). */
+    cyclesUntilGuarantee: integer("cycles_until_guarantee"),
+    /** Периодичность ТО: через сколько циклов нужно ТО. */
+    maintenanceCycleInterval: integer("maintenance_cycle_interval"),
+    /** Суммарный счётчик циклов (из факта выпуска / плана). */
+    cycleCounterTotal: integer("cycle_counter_total").notNull().default(0),
+    /** Циклов с последнего ТО. */
+    cyclesSinceMaintenance: integer("cycles_since_maintenance").notNull().default(0),
+    /** Снимок total циклов на момент последнего ТО. */
+    cyclesAtLastMaintenance: integer("cycles_at_last_maintenance"),
+    lastMaintenanceAt: timestamp("last_maintenance_at"),
     comment: text("comment"),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -1192,6 +1229,33 @@ export const productionTooling = pgTable(
   })
 );
 
+export const productionToolingProducts = pgTable(
+  "production_tooling_products",
+  {
+    id: serial("id").primaryKey(),
+    toolingId: integer("tooling_id").notNull(),
+    productId: integer("product_id").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    toolingProductUnique: unique("production_tooling_products_unique").on(
+      table.toolingId,
+      table.productId
+    ),
+  })
+);
+
+export const productionToolingMaintenance = pgTable("production_tooling_maintenance", {
+  id: serial("id").primaryKey(),
+  toolingId: integer("tooling_id").notNull(),
+  performedAt: timestamp("performed_at").notNull().defaultNow(),
+  cyclesAtMaintenance: integer("cycles_at_maintenance").notNull().default(0),
+  comment: text("comment"),
+  performedById: integer("performed_by_id"),
+  performedByName: text("performed_by_name"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 export const productionDailyPlan = pgTable(
   "production_daily_plan",
   {
@@ -1204,6 +1268,7 @@ export const productionDailyPlan = pgTable(
     shiftCode: text("shift_code").notNull().default("1"),
     plannedQuantity: real("planned_quantity").notNull().default(0),
     pfNumber: text("pf_number"),
+    toolingId: integer("tooling_id"),
     comment: text("comment"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -1672,6 +1737,11 @@ export const insertProductEquipmentSchema = createInsertSchema(productEquipment)
   id: true,
   createdAt: true,
 });
+export const insertProductShiftNormSchema = createInsertSchema(productShiftNorms).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
 export const insertProductionOrderSchema = createInsertSchema(productionOrders)
   .omit({
     id: true,
@@ -1741,7 +1811,19 @@ export const insertProductionToolingSchema = createInsertSchema(productionToolin
     toolingType: productionToolingTypeSchema.optional(),
     status: productionToolingStatusSchema.optional(),
     applicableEquipmentIds: z.array(z.string()).optional(),
+    cyclesUntilGuarantee: z.number().int().positive().optional().nullable(),
+    maintenanceCycleInterval: z.number().int().positive().optional().nullable(),
+    cycleCounterTotal: z.number().int().min(0).optional(),
+    cyclesSinceMaintenance: z.number().int().min(0).optional(),
+    cyclesAtLastMaintenance: z.number().int().min(0).optional().nullable(),
+    lastMaintenanceAt: z.string().optional().nullable(),
   });
+export const insertProductionToolingMaintenanceSchema = createInsertSchema(
+  productionToolingMaintenance
+).omit({
+  id: true,
+  createdAt: true,
+});
 export const insertProductionDailyPlanSchema = createInsertSchema(productionDailyPlan)
   .omit({
     id: true,
@@ -1884,6 +1966,8 @@ export type ProductBom = typeof productBom.$inferSelect;
 export type InsertProductBom = z.infer<typeof insertProductBomSchema>;
 export type ProductEquipment = typeof productEquipment.$inferSelect;
 export type InsertProductEquipment = z.infer<typeof insertProductEquipmentSchema>;
+export type ProductShiftNorm = typeof productShiftNorms.$inferSelect;
+export type InsertProductShiftNorm = z.infer<typeof insertProductShiftNormSchema>;
 export type ProductionOrder = typeof productionOrders.$inferSelect;
 export type InsertProductionOrder = z.infer<typeof insertProductionOrderSchema>;
 export type ProductionSchedule = typeof productionSchedule.$inferSelect;
@@ -1900,6 +1984,11 @@ export type ProductionImportError = typeof productionImportErrors.$inferSelect;
 export type InsertProductionImportError = z.infer<typeof insertProductionImportErrorSchema>;
 export type ProductionTooling = typeof productionTooling.$inferSelect;
 export type InsertProductionTooling = z.infer<typeof insertProductionToolingSchema>;
+export type ProductionToolingProduct = typeof productionToolingProducts.$inferSelect;
+export type ProductionToolingMaintenance = typeof productionToolingMaintenance.$inferSelect;
+export type InsertProductionToolingMaintenance = z.infer<
+  typeof insertProductionToolingMaintenanceSchema
+>;
 export type ProductionDailyPlan = typeof productionDailyPlan.$inferSelect;
 export type InsertProductionDailyPlan = z.infer<typeof insertProductionDailyPlanSchema>;
 export type ProductionPlanningSettings = typeof productionPlanningSettings.$inferSelect;

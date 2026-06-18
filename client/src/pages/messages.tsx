@@ -35,6 +35,7 @@ import {
   useChatMessages,
   useChatMutations,
   chatMessagesQueryKey,
+  isPendingChatMessage,
   type ChatConversation,
   type ChatMessage,
 } from "@/hooks/use-chat";
@@ -97,6 +98,8 @@ export default function MessagesPage() {
   const [editingMessageText, setEditingMessageText] = useState("");
   const [deleteConversationOpen, setDeleteConversationOpen] = useState(false);
   const [deleteMessageTarget, setDeleteMessageTarget] = useState<ChatMessage | null>(null);
+  const [creatingDirectUserId, setCreatingDirectUserId] = useState<number | null>(null);
+  const [openedConversation, setOpenedConversation] = useState<ChatConversation | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const systemAdmin = isSystemAdmin();
@@ -123,7 +126,8 @@ export default function MessagesPage() {
   const subdivisionName = (id: number | null | undefined) =>
     subdivisions.find((s) => s.id === id)?.name ?? (id ? `#${id}` : "—");
 
-  const selectedConversation = conversations.find((c) => c.id === selectedId) ?? null;
+  const selectedConversation =
+    conversations.find((c) => c.id === selectedId) ?? openedConversation;
   const {
     data: messagesData,
     isLoading: messagesLoading,
@@ -181,6 +185,12 @@ export default function MessagesPage() {
   };
 
   useEffect(() => {
+    if (selectedId != null && conversations.some((c) => c.id === selectedId)) {
+      setOpenedConversation(null);
+    }
+  }, [conversations, selectedId]);
+
+  useEffect(() => {
     queryClient.removeQueries({
       predicate: (query) => {
         const key = query.queryKey;
@@ -210,11 +220,21 @@ export default function MessagesPage() {
   }, [messages]);
 
   const handleSend = async () => {
-    if (!selectedId || !messageText.trim()) return;
+    if (!selectedId || !messageText.trim() || !user) return;
+    const body = messageText.trim();
+    setMessageText("");
     try {
-      await sendMessage.mutateAsync({ conversationId: selectedId, body: messageText });
-      setMessageText("");
+      await sendMessage.mutateAsync({
+        conversationId: selectedId,
+        body,
+        sender: {
+          id: user.id,
+          name: user.name,
+          avatar: user.avatar ?? null,
+        },
+      });
     } catch (error) {
+      setMessageText(body);
       toast({
         title: "Ошибка",
         description: parseApiErrorMessage(error, "Не удалось отправить сообщение"),
@@ -225,8 +245,10 @@ export default function MessagesPage() {
 
   const handleCreateDirect = async (otherUserId: number) => {
     if (createDirect.isPending) return;
+    setCreatingDirectUserId(otherUserId);
     try {
       const conversation = await createDirect.mutateAsync(otherUserId);
+      setOpenedConversation(conversation);
       setSelectedId(conversation.id);
       setNewDialogOpen(false);
       resetUserPickerState();
@@ -236,6 +258,8 @@ export default function MessagesPage() {
         description: parseApiErrorMessage(error, "Не удалось создать диалог"),
         variant: "destructive",
       });
+    } finally {
+      setCreatingDirectUserId(null);
     }
   };
 
@@ -243,9 +267,10 @@ export default function MessagesPage() {
     if (createGroup.isPending) return;
     try {
       const conversation = await createGroup.mutateAsync({
-        title: groupTitle,
+        title: groupTitle.trim(),
         memberIds: groupMemberIds,
       });
+      setOpenedConversation(conversation);
       setSelectedId(conversation.id);
       setGroupDialogOpen(false);
       resetUserPickerState();
@@ -366,12 +391,18 @@ export default function MessagesPage() {
               <UserAvatar name={u.name} avatarUrl={u.avatar} className="h-8 w-8 shrink-0 mt-0.5" />
               <div className="min-w-0 flex-1 space-y-0.5">
                 <p className="font-medium leading-snug break-words">{u.name}</p>
-                {u.position && (
-                  <p className="text-xs text-muted-foreground leading-snug break-words">{u.position}</p>
+                {creatingDirectUserId === u.id ? (
+                  <p className="text-xs text-muted-foreground">Создание диалога…</p>
+                ) : (
+                  <>
+                    {u.position && (
+                      <p className="text-xs text-muted-foreground leading-snug break-words">{u.position}</p>
+                    )}
+                    <p className="text-xs text-muted-foreground leading-snug break-words">
+                      {subdivisionLabel(u, subdivisionName)}
+                    </p>
+                  </>
                 )}
-                <p className="text-xs text-muted-foreground leading-snug break-words">
-                  {subdivisionLabel(u, subdivisionName)}
-                </p>
               </div>
             </button>
           ))
@@ -466,7 +497,8 @@ export default function MessagesPage() {
           </aside>
 
           <section className="flex flex-1 flex-col min-w-0">
-            {selectedConversation ? (
+            {selectedId != null && (selectedConversation || createDirect.isPending || createGroup.isPending) ? (
+              selectedConversation ? (
               <>
                 <div className="border-b p-3 flex items-start justify-between gap-2">
                   <div className="min-w-0">
@@ -550,6 +582,11 @@ export default function MessagesPage() {
                   </Button>
                 </div>
               </>
+              ) : (
+                <div className="flex flex-1 items-center justify-center text-muted-foreground text-sm">
+                  Открытие диалога…
+                </div>
+              )
             ) : (
               <div className="flex flex-1 items-center justify-center text-muted-foreground text-sm">
                 Выберите диалог или создайте новый
@@ -607,7 +644,7 @@ export default function MessagesPage() {
               onClick={handleCreateGroup}
               disabled={!groupTitle.trim() || groupMemberIds.length === 0 || createGroup.isPending}
             >
-              Создать
+              {createGroup.isPending ? "Создание…" : "Создать"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -686,6 +723,7 @@ function ChatMessageBubble({
   const isDeleted = !!msg.deletedAt;
   const isEdited = !!msg.editedAt && !isDeleted;
   const isLeave = msg.messageKind === "leave";
+  const isPending = isPendingChatMessage(msg);
 
   if (isLeave) {
     return (
@@ -698,7 +736,7 @@ function ChatMessageBubble({
   }
 
   return (
-    <div className={`flex gap-2 group ${isOwn ? "flex-row-reverse" : ""}`}>
+    <div className={`flex gap-2 group ${isOwn ? "flex-row-reverse" : ""} ${isPending ? "opacity-60" : ""}`}>
       <UserAvatar
         name={msg.senderName}
         avatarUrl={msg.senderAvatar}

@@ -11,10 +11,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   useMaterialStocks,
   useProductionOrders,
+  useProductionProducts,
   useOrderMaterialRequirements,
   useProductionMutations,
 } from "@/hooks/use-production-planning";
-import { MATERIAL_TYPE_LABELS } from "@/lib/production-planning-constants";
+import {
+  MATERIAL_CATALOG_TYPES,
+  MATERIAL_TYPE_LABELS,
+} from "@/lib/production-planning-constants";
 import { AlertTriangle, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAccessControl } from "@/hooks/use-access-control";
@@ -50,6 +54,10 @@ export function PlanningMaterialsTab({ subdivisionId }: Props) {
   const { createMaterial } = useProductionMutations();
 
   const { data: stocks = [], isLoading } = useMaterialStocks(subdivisionId);
+  const { data: products = [] } = useProductionProducts({
+    subdivisionId,
+    activeOnly: true,
+  });
   const { data: orders = [] } = useProductionOrders({ subdivisionId });
 
   const [addOpen, setAddOpen] = useState(false);
@@ -58,6 +66,7 @@ export function PlanningMaterialsTab({ subdivisionId }: Props) {
     name: "",
     type: "base",
     unit: "kg",
+    productId: "",
   });
 
   const handleAddMaterial = async () => {
@@ -68,11 +77,12 @@ export function PlanningMaterialsTab({ subdivisionId }: Props) {
         name: form.name.trim(),
         type: form.type,
         unit: form.unit,
+        productId: form.productId ? Number(form.productId) : null,
         subdivisionIds: [subdivisionId],
       });
       toast({ title: "Материал добавлен" });
       setAddOpen(false);
-      setForm({ sapCode: "", name: "", type: "base", unit: "kg" });
+      setForm({ sapCode: "", name: "", type: "base", unit: "kg", productId: "" });
     } catch (e: unknown) {
       toast({
         title: "Ошибка",
@@ -119,7 +129,7 @@ export function PlanningMaterialsTab({ subdivisionId }: Props) {
         <div className="flex justify-end">
           <Button size="sm" onClick={() => setAddOpen(true)}>
             <Plus className="h-4 w-4 mr-2" />
-            Добавить материал / оснастку (склад)
+            Добавить материал
           </Button>
         </div>
       )}
@@ -150,6 +160,7 @@ export function PlanningMaterialsTab({ subdivisionId }: Props) {
                 <TableRow>
                   <TableHead>Материал</TableHead>
                   <TableHead>Тип</TableHead>
+                  <TableHead>Изделие</TableHead>
                   <TableHead>SAP</TableHead>
                   <TableHead>Остаток</TableHead>
                   <TableHead>Резерв</TableHead>
@@ -160,13 +171,13 @@ export function PlanningMaterialsTab({ subdivisionId }: Props) {
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center text-muted-foreground">
+                    <TableCell colSpan={8} className="text-center text-muted-foreground">
                       Загрузка…
                     </TableCell>
                   </TableRow>
                 ) : stocksTotal === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center text-muted-foreground">
+                    <TableCell colSpan={8} className="text-center text-muted-foreground">
                       Нет остатков
                     </TableCell>
                   </TableRow>
@@ -174,11 +185,16 @@ export function PlanningMaterialsTab({ subdivisionId }: Props) {
                   stockPageItems.map((s) => {
                   const avail = s.quantity - s.reservedQuantity;
                   const low = avail < s.minStock;
+                  const linkedProduct =
+                    (s as { linkedProductName?: string | null }).linkedProductName;
                   return (
                     <TableRow key={s.id}>
                       <TableCell>{s.materialName}</TableCell>
                       <TableCell>
                         {MATERIAL_TYPE_LABELS[s.materialType] ?? s.materialType}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground text-xs">
+                        {linkedProduct ?? "—"}
                       </TableCell>
                       <TableCell>{s.sapCode}</TableCell>
                       <TableCell>
@@ -258,7 +274,7 @@ export function PlanningMaterialsTab({ subdivisionId }: Props) {
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Новый материал / оснастка</DialogTitle>
+            <DialogTitle>Новый материал</DialogTitle>
           </DialogHeader>
           <div className="space-y-3 py-2">
             <div className="space-y-1">
@@ -275,8 +291,10 @@ export function PlanningMaterialsTab({ subdivisionId }: Props) {
                 <Select value={form.type} onValueChange={(v) => setForm({ ...form, type: v })}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {Object.entries(MATERIAL_TYPE_LABELS).map(([k, label]) => (
-                      <SelectItem key={k} value={k}>{label}</SelectItem>
+                    {MATERIAL_CATALOG_TYPES.map((k) => (
+                      <SelectItem key={k} value={k}>
+                        {MATERIAL_TYPE_LABELS[k]}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -285,6 +303,30 @@ export function PlanningMaterialsTab({ subdivisionId }: Props) {
                 <Label>Ед. изм.</Label>
                 <Input value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} />
               </div>
+            </div>
+            <div className="space-y-1">
+              <Label>Изделие (опционально)</Label>
+              <Select
+                value={form.productId || "none"}
+                onValueChange={(v) =>
+                  setForm({ ...form, productId: v === "none" ? "" : v })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Не привязано" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Не привязано</SelectItem>
+                  {products.map((p) => (
+                    <SelectItem key={p.id} value={String(p.id)}>
+                      {p.sapCode} — {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Для расчёта расхода по выпуску изделий, использующих этот материал
+              </p>
             </div>
           </div>
           <DialogFooter>

@@ -43,6 +43,16 @@ export type ChatMessagesPage = {
   total: number;
 };
 
+export type ChatMessageSender = {
+  id: number;
+  name: string;
+  avatar: string | null;
+};
+
+export function isPendingChatMessage(message: ChatMessage): boolean {
+  return message.id < 0;
+}
+
 export function chatMessagesQueryKey(conversationId: number): string {
   return `/api/chat/conversations/${conversationId}/messages`;
 }
@@ -69,19 +79,54 @@ function normalizeMessagesResponse(data: unknown): ChatMessagesPage {
   return { messages: [], total: 0 };
 }
 
+function mergeMessagePages(
+  current: ChatMessagesPage | undefined,
+  incoming: ChatMessagesPage
+): ChatMessagesPage {
+  if (!current) return incoming;
+
+  const pending = current.messages.filter((m) => isPendingChatMessage(m));
+  const byId = new Map<number, ChatMessage>();
+  for (const msg of incoming.messages) {
+    byId.set(msg.id, msg);
+  }
+  for (const msg of current.messages) {
+    if (!isPendingChatMessage(msg) && !byId.has(msg.id)) {
+      byId.set(msg.id, msg);
+    }
+  }
+
+  const messages = [...byId.values()].sort(
+    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+  );
+
+  const mergedPending = pending.filter(
+    (p) => !messages.some((m) => m.body === p.body && m.senderId === p.senderId && !isPendingChatMessage(m))
+  );
+
+  return {
+    messages: [...messages, ...mergedPending],
+    total: Math.max(incoming.total, messages.length + mergedPending.length),
+  };
+}
+
 export function useChatMessages(conversationId: number | null) {
   const url = conversationId != null ? chatMessagesQueryKey(conversationId) : null;
+  const queryClient = useQueryClient();
 
   return useQuery<ChatMessagesPage>({
     queryKey: [url],
     enabled: url != null,
     queryFn: async () => {
       const res = await apiRequest("GET", url!);
-      return normalizeMessagesResponse(await res.json());
+      const incoming = normalizeMessagesResponse(await res.json());
+      const current = queryClient.getQueryData<ChatMessagesPage>([url!]);
+      return mergeMessagePages(current, incoming);
     },
-    refetchInterval: 5000,
-    staleTime: 0,
+    refetchInterval: 2500,
+    staleTime: 1000,
     refetchOnMount: "always",
+    refetchOnWindowFocus: true,
   });
 }
 
@@ -97,8 +142,9 @@ export function useChatConversations(enabled = true) {
       }
       return applyPendingRead(data);
     },
-    refetchInterval: 30000,
-    staleTime: 5000,
+    refetchInterval: 15000,
+    staleTime: 3000,
+    refetchOnWindowFocus: true,
   });
 }
 
@@ -112,26 +158,32 @@ export function useChatMutations() {
   const conversationsKey = ["/api/chat/conversations"] as const;
 
   const patchConversationLastMessage = (conversationId: number, message: ChatMessage) => {
-    queryClient.setQueryData<ChatConversation[]>(conversationsKey, (current) =>
-      current?.map((c) => {
-        if (c.id !== conversationId) return c;
-        const shouldUpdatePreview =
-          !c.lastMessage || c.lastMessage.id === message.id || message.id >= c.lastMessage.id;
-        return {
-          ...c,
-          updatedAt: message.createdAt,
-          lastMessage: shouldUpdatePreview
-            ? {
-                id: message.id,
-                body: message.body,
-                senderId: message.senderId,
-                senderName: message.senderName,
-                createdAt: message.createdAt,
-              }
-            : c.lastMessage,
-        };
-      }) ?? current
-    );
+    queryClient.setQueryData<ChatConversation[]>(conversationsKey, (current) => {
+      if (!current) return current;
+      const index = current.findIndex((c) => c.id === conversationId);
+      if (index === -1) return current;
+
+      const c = current[index];
+      const shouldUpdatePreview =
+        !c.lastMessage || c.lastMessage.id === message.id || message.id >= c.lastMessage.id;
+      const updated: ChatConversation = {
+        ...c,
+        updatedAt: message.createdAt,
+        unreadCount: 0,
+        lastMessage: shouldUpdatePreview
+          ? {
+              id: message.id,
+              body: message.body,
+              senderId: message.senderId,
+              senderName: message.senderName,
+              createdAt: message.createdAt,
+            }
+          : c.lastMessage,
+      };
+
+      const rest = current.filter((_, i) => i !== index);
+      return [updated, ...rest];
+    });
   };
 
   const patchMessageInCache = (conversationId: number, message: ChatMessage) => {
@@ -152,16 +204,33 @@ export function useChatMutations() {
       return { ...current, messages };
     });
     patchConversationLastMessage(conversationId, message);
-    patchConversationUnread(conversationId, 0);
   };
 
-  const invalidate = (conversationId?: number) => {
-    queryClient.invalidateQueries({ queryKey: conversationsKey });
-    if (conversationId != null) {
-      queryClient.invalidateQueries({
-        queryKey: [chatMessagesQueryKey(conversationId)],
-      });
-    }
+  const replacePendingMessage = (
+    conversationId: number,
+    tempId: number,
+    message: ChatMessage
+  ) => {
+    const messagesKey = [chatMessagesQueryKey(conversationId)];
+    queryClient.setQueryData<ChatMessagesPage>(messagesKey, (current) => {
+      if (!current) {
+        return { messages: [message], total: 1 };
+      }
+      const index = current.messages.findIndex((m) => m.id === tempId);
+      if (index === -1) {
+        const exists = current.messages.some((m) => m.id === message.id);
+        return exists
+          ? current
+          : {
+              messages: [...current.messages, message],
+              total: current.total + 1,
+            };
+      }
+      const messages = [...current.messages];
+      messages[index] = message;
+      return { ...current, messages };
+    });
+    patchConversationLastMessage(conversationId, message);
   };
 
   const patchConversationUnread = (conversationId: number, unreadCount: number) => {
@@ -176,12 +245,35 @@ export function useChatMutations() {
     );
   };
 
+  const upsertConversationInCache = (conversation: ChatConversation) => {
+    queryClient.setQueryData<ChatConversation[]>(conversationsKey, (current) => {
+      const list = current ?? [];
+      const index = list.findIndex((c) => c.id === conversation.id);
+      if (index === -1) {
+        return [{ ...conversation, unreadCount: 0 }, ...list];
+      }
+      const item = { ...list[index], ...conversation, unreadCount: 0 };
+      const rest = list.filter((_, i) => i !== index);
+      return [item, ...rest];
+    });
+  };
+
+  const prepareConversationOpen = (conversation: ChatConversation) => {
+    upsertConversationInCache(conversation);
+    const messagesKey = [chatMessagesQueryKey(conversation.id)];
+    if (!queryClient.getQueryData(messagesKey)) {
+      queryClient.setQueryData<ChatMessagesPage>(messagesKey, { messages: [], total: 0 });
+    }
+  };
+
   const createDirect = useMutation({
     mutationFn: async (otherUserId: number) => {
       const res = await apiRequest("POST", "/api/chat/conversations/direct", { otherUserId });
       return res.json() as Promise<ChatConversation>;
     },
-    onSuccess: () => invalidate(),
+    onSuccess: (conversation) => {
+      prepareConversationOpen(conversation);
+    },
   });
 
   const createGroup = useMutation({
@@ -189,17 +281,57 @@ export function useChatMutations() {
       const res = await apiRequest("POST", "/api/chat/conversations/group", data);
       return res.json() as Promise<ChatConversation>;
     },
-    onSuccess: () => invalidate(),
+    onSuccess: (conversation) => {
+      prepareConversationOpen(conversation);
+    },
   });
 
   const sendMessage = useMutation({
-    mutationFn: async ({ conversationId, body }: { conversationId: number; body: string }) => {
+    mutationFn: async ({
+      conversationId,
+      body,
+    }: {
+      conversationId: number;
+      body: string;
+      sender: ChatMessageSender;
+    }) => {
       const res = await apiRequest("POST", `/api/chat/conversations/${conversationId}/messages`, {
         body,
       });
       return res.json() as Promise<ChatMessage>;
     },
-    onSuccess: (message, vars) => patchMessageInCache(vars.conversationId, message),
+    onMutate: async ({ conversationId, body, sender }) => {
+      const messagesKey = [chatMessagesQueryKey(conversationId)];
+      await queryClient.cancelQueries({ queryKey: messagesKey });
+      const previous = queryClient.getQueryData<ChatMessagesPage>(messagesKey);
+      const tempId = -Date.now();
+      const optimistic: ChatMessage = {
+        id: tempId,
+        conversationId,
+        senderId: sender.id,
+        body: body.trim(),
+        createdAt: new Date().toISOString(),
+        editedAt: null,
+        deletedAt: null,
+        messageKind: "user",
+        senderName: sender.name,
+        senderAvatar: sender.avatar,
+      };
+      patchMessageInCache(conversationId, optimistic);
+      return { previous, tempId, conversationId };
+    },
+    onSuccess: (message, _vars, context) => {
+      if (context?.tempId != null) {
+        replacePendingMessage(context.conversationId, context.tempId, message);
+      } else {
+        patchMessageInCache(message.conversationId, message);
+      }
+    },
+    onError: (_err, { conversationId }, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData([chatMessagesQueryKey(conversationId)], context.previous);
+      }
+    },
   });
 
   const markRead = useMutation({

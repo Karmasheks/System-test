@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,6 +17,7 @@ import {
   useProductionOrders,
   useProductionSchedule,
   useProductionMutations,
+  useProductEquipment,
 } from "@/hooks/use-production-planning";
 import { apiRequest } from "@/lib/queryClient";
 
@@ -46,6 +47,22 @@ export function PlanningFactsTab({ subdivisionId }: Props) {
     comment: "",
     factType: "ad_hoc",
   });
+
+  const selectedOrderId = form.orderId ? Number(form.orderId) : null;
+  const selectedOrder = orders.find((o) => o.id === selectedOrderId);
+  const { data: eqLinks = [] } = useProductEquipment(
+    selectedOrder?.productId ?? null,
+    subdivisionId
+  );
+
+  useEffect(() => {
+    if (!form.orderId || eqLinks.length === 0) return;
+    const preferred =
+      eqLinks.find((l) => l.equipmentId === form.equipmentId) ?? eqLinks[0];
+    if (preferred && form.equipmentId !== preferred.equipmentId) {
+      setForm((f) => ({ ...f, equipmentId: preferred.equipmentId }));
+    }
+  }, [form.orderId, eqLinks, form.equipmentId]);
 
   const [remaining, setRemaining] = useState<{
     remainingQuantity: number;

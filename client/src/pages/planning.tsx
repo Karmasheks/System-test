@@ -126,7 +126,7 @@ export default function PlanningPage() {
                 Внутренний склад
               </TabsTrigger>
               <TabsTrigger value="tooling" className={mobileTabsTriggerClass}>
-                Оснастка
+                Оснастка/ПФ
               </TabsTrigger>
               <TabsTrigger value="products" className={mobileTabsTriggerClass}>
                 Изделия

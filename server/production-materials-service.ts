@@ -32,9 +32,11 @@ export async function listMaterialStocksBySubdivision(subdivisionId: number) {
     .select({
       stock: materialStocks,
       material: materials,
+      product: products,
     })
     .from(materialStocks)
     .innerJoin(materials, eq(materialStocks.materialId, materials.id))
+    .leftJoin(products, eq(materials.productId, products.id))
     .where(eq(materialStocks.subdivisionId, subdivisionId));
 
   return stocks.map((row) => ({
@@ -43,6 +45,9 @@ export async function listMaterialStocksBySubdivision(subdivisionId: number) {
     sapCode: row.material.sapCode,
     materialType: row.material.type,
     materialUnit: row.material.unit,
+    materialProductId: row.material.productId,
+    linkedProductName: row.product?.name ?? null,
+    linkedProductSapCode: row.product?.sapCode ?? null,
   }));
 }
 

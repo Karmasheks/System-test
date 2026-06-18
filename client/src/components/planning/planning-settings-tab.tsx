@@ -21,6 +21,7 @@ import {
 } from "@shared/production-display-config";
 import { useToast } from "@/hooks/use-toast";
 import { Settings2 } from "lucide-react";
+import { PlanningShiftSettings } from "@/components/planning/planning-shift-settings";
 
 const WRITEOFF_MODE_LABELS: Record<string, string> = {
   sync: "Синхронно с фактом выпуска",
@@ -368,6 +369,8 @@ export function PlanningSettingsTab({ subdivisionId, subdivisionName }: Props) {
           </CardContent>
         </Card>
       </div>
+
+      <PlanningShiftSettings subdivisionId={subdivisionId} canEdit={canEdit} />
 
       <p className="text-xs text-muted-foreground">
         Локальные настройки (без сохранения) действуют только в вашем браузере. Кнопка «Сохранить

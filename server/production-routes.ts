@@ -68,14 +68,32 @@ import {
   createProductionTooling,
   updateProductionTooling,
   getProductionTooling,
+  getProductionToolingDetail,
   createProductFromTooling,
   syncToolingFromProduct,
+  recordToolingMaintenance,
+  listToolingMaintenanceDue,
 } from "./production-tooling-service";
 import {
   getDailyPlanGrid,
   bulkUpsertDailyPlan,
 } from "./production-daily-plan-service";
 import { createPlanningDemand } from "./production-planning-demand-service";
+import {
+  listShiftTemplates,
+  createShiftTemplate,
+  updateShiftTemplate,
+  getShiftTemplate,
+  ensureDefaultShiftTemplate,
+  setDefaultShiftTemplate,
+  getActiveShiftPattern,
+} from "./shift-template-service";
+import {
+  listProductShiftNorms,
+  bulkUpsertProductShiftNorms,
+  resolveNormsForProduct,
+} from "./product-shift-norm-service";
+import { shiftTemplatePatternSchema } from "@shared/shift-template-types";
 import { checkScheduleConflicts } from "./production-conflicts-service";
 import { exportOrdersJson, importOrdersFromRows, previewMappedImportRows, importMappedOrders, getImportBatch, buildProductionExport } from "./production-import-export-service";
 import {
@@ -101,6 +119,7 @@ const updateProductBodySchema = createProductBodySchema.partial();
 
 const createMaterialBodySchema = insertMaterialSchema.extend({
   subdivisionIds: subdivisionIdsSchema,
+  productId: z.number().int().positive().nullable().optional(),
 });
 const updateMaterialBodySchema = createMaterialBodySchema.partial();
 
@@ -114,6 +133,15 @@ const createProductFromToolingSchema = z.object({
   sapCode: z.string().min(1),
   name: z.string().optional(),
   defaultShiftNorm: z.number().positive().optional(),
+});
+
+const toolingBodySchema = insertProductionToolingSchema.extend({
+  productIds: z.array(z.number().int().positive()).optional(),
+});
+
+const toolingMaintenanceSchema = z.object({
+  comment: z.string().optional(),
+  performedAt: z.coerce.date().optional(),
 });
 
 const planningDemandSchema = z.object({
@@ -131,6 +159,36 @@ const planningDemandSchema = z.object({
   shiftNormOverride: z.number().positive().optional(),
   cycleTimeSecOverride: z.number().int().positive().optional(),
   setupTimeMin: z.number().int().min(0).optional(),
+  activeShiftCodes: z.array(z.string().min(1)).optional(),
+  planDistribution: z
+    .array(
+      z.object({
+        planDate: z.string().min(1),
+        shiftCode: z.string().min(1),
+        plannedQuantity: z.number().min(0),
+      })
+    )
+    .optional(),
+});
+
+const shiftTemplateBodySchema = z.object({
+  subdivisionId: z.number().int().positive().nullable().optional(),
+  name: z.string().min(1),
+  description: z.string().optional(),
+  pattern: shiftTemplatePatternSchema,
+  timezone: z.string().optional(),
+  isActive: z.boolean().optional(),
+});
+
+const productShiftNormsBodySchema = z.object({
+  subdivisionId: z.number().int().positive(),
+  productId: z.number().int().positive(),
+  norms: z.array(
+    z.object({
+      shiftCode: z.string().min(1),
+      shiftNorm: z.number().positive(),
+    })
+  ),
 });
 
 const conflictCheckSchema = z.object({
@@ -597,7 +655,7 @@ export function registerProductionRoutes(app: Express, authenticate: AuthMiddlew
     if (!ctx) return;
 
     try {
-      const body = insertProductionToolingSchema.parse(req.body);
+      const body = toolingBodySchema.parse(req.body);
       const subScope = await getSubdivisionScopeForRequest(req);
       if (subScope) {
         try {
@@ -631,10 +689,88 @@ export function registerProductionRoutes(app: Express, authenticate: AuthMiddlew
     }
 
     try {
-      const body = insertProductionToolingSchema.partial().parse(req.body);
+      const body = toolingBodySchema.partial().parse(req.body);
       res.json(await updateProductionTooling(id, body));
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "Ошибка обновления";
+      res.status(400).json({ message });
+    }
+  });
+
+  app.get("/api/production/tooling/maintenance-due", authenticate, async (req, res) => {
+    const ctx = await requireProductionView(req, res);
+    if (!ctx) return;
+
+    const subdivisionId = Number(req.query.subdivisionId);
+    if (!subdivisionId || Number.isNaN(subdivisionId)) {
+      return res.status(400).json({ message: "Укажите subdivisionId" });
+    }
+
+    const subScope = await getSubdivisionScopeForRequest(req);
+    if (subScope) {
+      try {
+        assertSubdivisionAccess(subScope, subdivisionId);
+      } catch (e) {
+        if (handleSubdivisionError(res, e)) return;
+      }
+    }
+
+    try {
+      res.json(await listToolingMaintenanceDue(subdivisionId));
+    } catch {
+      res.status(500).json({ message: "Ошибка загрузки ТО оснастки" });
+    }
+  });
+
+  app.get("/api/production/tooling/:id", authenticate, async (req, res) => {
+    const ctx = await requireProductionView(req, res);
+    if (!ctx) return;
+
+    const id = Number(req.params.id);
+    const detail = await getProductionToolingDetail(id);
+    if (!detail) return res.status(404).json({ message: "Не найдено" });
+
+    const subScope = await getSubdivisionScopeForRequest(req);
+    if (subScope) {
+      try {
+        assertSubdivisionAccess(subScope, detail.subdivisionId);
+      } catch (e) {
+        if (handleSubdivisionError(res, e)) return;
+      }
+    }
+
+    res.json(detail);
+  });
+
+  app.post("/api/production/tooling/:id/maintenance", authenticate, async (req, res) => {
+    const ctx = await requireProductionEdit(req, res);
+    if (!ctx) return;
+
+    const id = Number(req.params.id);
+    const existing = await getProductionTooling(id);
+    if (!existing) return res.status(404).json({ message: "Не найдено" });
+
+    const subScope = await getSubdivisionScopeForRequest(req);
+    if (subScope) {
+      try {
+        assertSubdivisionAccess(subScope, existing.subdivisionId);
+      } catch (e) {
+        if (handleSubdivisionError(res, e)) return;
+      }
+    }
+
+    try {
+      const body = toolingMaintenanceSchema.parse(req.body);
+      const record = await recordToolingMaintenance(id, body, {
+        id: ctx.user.id,
+        name: ctx.user.name,
+      });
+      res.status(201).json({
+        record,
+        tooling: await getProductionToolingDetail(id),
+      });
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Ошибка записи ТО";
       res.status(400).json({ message });
     }
   });
@@ -720,6 +856,7 @@ export function registerProductionRoutes(app: Express, authenticate: AuthMiddlew
             shiftCode: z.enum(["1", "2"]).optional(),
             plannedQuantity: z.number().min(0),
             pfNumber: z.string().nullable().optional(),
+            toolingId: z.number().int().positive().nullable().optional(),
             comment: z.string().nullable().optional(),
           })
         ),
@@ -1198,6 +1335,109 @@ export function registerProductionRoutes(app: Express, authenticate: AuthMiddlew
       );
     } catch {
       res.status(500).json({ message: "Ошибка загрузки overlay ТОиР" });
+    }
+  });
+
+  app.get("/api/production/shift-templates", authenticate, async (req, res) => {
+    const ctx = await requireProductionView(req, res);
+    if (!ctx) return;
+    const subdivisionId = Number(req.query.subdivisionId);
+    if (!subdivisionId) return res.status(400).json({ message: "Укажите subdivisionId" });
+    try {
+      await ensureDefaultShiftTemplate(subdivisionId);
+      res.json(await listShiftTemplates(subdivisionId));
+    } catch {
+      res.status(500).json({ message: "Ошибка загрузки шаблонов смен" });
+    }
+  });
+
+  app.get("/api/production/shift-templates/active", authenticate, async (req, res) => {
+    const ctx = await requireProductionView(req, res);
+    if (!ctx) return;
+    const subdivisionId = Number(req.query.subdivisionId);
+    if (!subdivisionId) return res.status(400).json({ message: "Укажите subdivisionId" });
+    try {
+      res.json(await getActiveShiftPattern(subdivisionId));
+    } catch {
+      res.status(500).json({ message: "Ошибка загрузки смен" });
+    }
+  });
+
+  app.post("/api/production/shift-templates", authenticate, async (req, res) => {
+    const ctx = await requireProductionEdit(req, res);
+    if (!ctx) return;
+    try {
+      const body = shiftTemplateBodySchema.parse(req.body);
+      res.status(201).json(await createShiftTemplate(body));
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Ошибка создания";
+      res.status(400).json({ message });
+    }
+  });
+
+  app.patch("/api/production/shift-templates/:id", authenticate, async (req, res) => {
+    const ctx = await requireProductionEdit(req, res);
+    if (!ctx) return;
+    try {
+      const body = shiftTemplateBodySchema.partial().parse(req.body);
+      const row = await updateShiftTemplate(Number(req.params.id), body);
+      if (!row) return res.status(404).json({ message: "Не найдено" });
+      res.json(row);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Ошибка обновления";
+      res.status(400).json({ message });
+    }
+  });
+
+  app.post("/api/production/shift-templates/default", authenticate, async (req, res) => {
+    const ctx = await requireProductionEdit(req, res);
+    if (!ctx) return;
+    try {
+      const body = z
+        .object({
+          subdivisionId: z.number().int().positive(),
+          templateId: z.number().int().positive().nullable(),
+        })
+        .parse(req.body);
+      await setDefaultShiftTemplate(body.subdivisionId, body.templateId);
+      res.json({ ok: true });
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Ошибка";
+      res.status(400).json({ message });
+    }
+  });
+
+  app.get("/api/production/products/:id/shift-norms", authenticate, async (req, res) => {
+    const ctx = await requireProductionView(req, res);
+    if (!ctx) return;
+    const productId = Number(req.params.id);
+    const subdivisionId = Number(req.query.subdivisionId);
+    if (!subdivisionId) return res.status(400).json({ message: "Укажите subdivisionId" });
+    try {
+      const pattern = await getActiveShiftPattern(subdivisionId);
+      const stored = await listProductShiftNorms(productId, subdivisionId);
+      const resolved = await resolveNormsForProduct(productId, subdivisionId, pattern.slots);
+      res.json({ stored, resolved, slots: pattern.slots });
+    } catch {
+      res.status(500).json({ message: "Ошибка загрузки норм" });
+    }
+  });
+
+  app.put("/api/production/products/:id/shift-norms", authenticate, async (req, res) => {
+    const ctx = await requireProductionEdit(req, res);
+    if (!ctx) return;
+    try {
+      const productId = Number(req.params.id);
+      const body = productShiftNormsBodySchema.parse({ ...req.body, productId });
+      const rows = await bulkUpsertProductShiftNorms(
+        body.subdivisionId,
+        body.productId,
+        body.norms
+      );
+      res.json(rows);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Ошибка сохранения";
+      res.status(400).json({ message });
     }
   });
 

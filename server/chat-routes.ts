@@ -76,14 +76,15 @@ export function registerChatRoutes(
       const user = req.user as AuthenticatedUser;
       const { title, memberIds } = createGroupSchema.parse(req.body);
 
-      for (const memberId of memberIds) {
+      const uniqueMemberIds = [...new Set(memberIds.filter((id) => id !== user.id))];
+      for (const memberId of uniqueMemberIds) {
         const member = await storage.getUser(memberId);
         if (!member || !member.isActive) {
           return res.status(400).json({ message: `Пользователь #${memberId} не найден` });
         }
       }
 
-      const conversation = await createGroupConversation(user.id, title, memberIds);
+      const conversation = await createGroupConversation(user.id, title, uniqueMemberIds);
       res.status(201).json(conversation);
     } catch (error: unknown) {
       if (error instanceof z.ZodError) {

@@ -10,6 +10,7 @@ import { ru } from "date-fns/locale";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -30,11 +31,13 @@ import { useEquipmentApi } from "@/hooks/use-equipment-api";
 import {
   useDailyPlanGrid,
   useProductionOrders,
+  useProductionProducts,
+  useProductionTooling,
   useProductionMutations,
   type DailyPlanGridResponse,
   type DailyPlanCellValue,
 } from "@/hooks/use-production-planning";
-import { ChevronLeft, ChevronRight, Plus, Save } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, Save, ClipboardList } from "lucide-react";
 
 type Props = {
   subdivisionId: number;
@@ -42,12 +45,12 @@ type Props = {
 
 type PendingKey = string;
 
-function cellKey(rowKey: string, date: string, shift: "1" | "2"): PendingKey {
+function cellKey(rowKey: string, date: string, shift: string): PendingKey {
   return `${rowKey}::${date}::${shift}`;
 }
 
 function emptyCell(): DailyPlanCellValue {
-  return { shift1: 0, shift2: 0, fact: 0 };
+  return { shifts: {}, fact: 0 };
 }
 
 export function PlanningCalendarGrid({ subdivisionId }: Props) {
@@ -62,7 +65,9 @@ export function PlanningCalendarGrid({ subdivisionId }: Props) {
   const { data: grid, isLoading, refetch } = useDailyPlanGrid(subdivisionId, from, to);
   const { allEquipment } = useEquipmentApi();
   const { data: orders = [] } = useProductionOrders({ subdivisionId });
-  const { bulkUpsertDailyPlan } = useProductionMutations();
+  const { data: products = [] } = useProductionProducts({ subdivisionId });
+  const { data: tooling = [] } = useProductionTooling(subdivisionId);
+  const { bulkUpsertDailyPlan, createFact } = useProductionMutations();
 
   const equipment = useMemo(
     () =>
@@ -78,30 +83,49 @@ export function PlanningCalendarGrid({ subdivisionId }: Props) {
   const [pending, setPending] = useState<Record<PendingKey, number>>({});
   const [addOpen, setAddOpen] = useState(false);
   const [addForm, setAddForm] = useState({ equipmentId: "", orderId: "" });
+  const [factOpen, setFactOpen] = useState(false);
+  const [factContext, setFactContext] = useState<{
+    row: DailyPlanGridResponse["rows"][0];
+    date: string;
+  } | null>(null);
+  const [factForm, setFactForm] = useState({
+    producedQuantity: "",
+    defectiveQuantity: "0",
+    downtimeMinutes: "0",
+    downtimeReason: "",
+    comment: "",
+  });
 
   const dates = grid?.dates ?? [];
   const rows = grid?.rows ?? [];
+  const shiftSlots =
+    grid?.shiftSlots?.length
+      ? grid.shiftSlots
+      : [
+          { code: "1", name: "Смена 1", hours: 11 },
+          { code: "2", name: "Смена 2", hours: 11 },
+        ];
 
   const getShiftValue = (
     row: DailyPlanGridResponse["rows"][0],
     date: string,
-    shift: "1" | "2"
+    shiftCode: string
   ) => {
-    const key = cellKey(row.key, date, shift);
+    const key = cellKey(row.key, date, shiftCode);
     if (pending[key] != null) return pending[key];
     const cell = row.cells[date] ?? emptyCell();
-    return shift === "1" ? cell.shift1 : cell.shift2;
+    return cell.shifts[shiftCode] ?? 0;
   };
 
   const handleShiftChange = (
     row: DailyPlanGridResponse["rows"][0],
     date: string,
-    shift: "1" | "2",
+    shiftCode: string,
     raw: string
   ) => {
     const value = Number(raw);
     if (Number.isNaN(value) || value < 0) return;
-    setPending((prev) => ({ ...prev, [cellKey(row.key, date, shift)]: value }));
+    setPending((prev) => ({ ...prev, [cellKey(row.key, date, shiftCode)]: value }));
   };
 
   const buildEntries = () => {
@@ -158,6 +182,11 @@ export function PlanningCalendarGrid({ subdivisionId }: Props) {
     const firstDate = dates[0];
     if (!firstDate) return;
 
+    const product = products.find((p) => p.id === order.productId);
+    const linkedTooling = product?.pfNumber
+      ? tooling.find((t) => t.pfNumber === product.pfNumber)
+      : tooling.find((t) => t.products.some((pr) => pr.id === order.productId));
+
     try {
       await bulkUpsertDailyPlan.mutateAsync({
         subdivisionId,
@@ -169,6 +198,8 @@ export function PlanningCalendarGrid({ subdivisionId }: Props) {
             planDate: firstDate,
             shiftCode: "1",
             plannedQuantity: 0,
+            pfNumber: product?.pfNumber ?? linkedTooling?.pfNumber ?? null,
+            toolingId: linkedTooling?.id ?? null,
           },
         ],
       });
@@ -178,6 +209,52 @@ export function PlanningCalendarGrid({ subdivisionId }: Props) {
       toast({ title: "Строка добавлена в план" });
     } catch {
       toast({ title: "Ошибка", variant: "destructive" });
+    }
+  };
+
+  const openFactDialog = (
+    row: DailyPlanGridResponse["rows"][0],
+    date: string
+  ) => {
+    if (!row.orderId) return;
+    setFactContext({ row, date });
+    setFactForm({
+      producedQuantity: "",
+      defectiveQuantity: "0",
+      downtimeMinutes: "0",
+      downtimeReason: "",
+      comment: "",
+    });
+    setFactOpen(true);
+  };
+
+  const handleSaveFact = async () => {
+    if (!factContext?.row.orderId) return;
+    try {
+      await createFact.mutateAsync({
+        subdivisionId,
+        orderId: factContext.row.orderId,
+        equipmentId: factContext.row.equipmentId,
+        reportDate: factContext.date,
+        producedQuantity: Number(factForm.producedQuantity),
+        defectiveQuantity: Number(factForm.defectiveQuantity),
+        downtimeMinutes: Number(factForm.downtimeMinutes),
+        downtimeReason: factForm.downtimeReason || undefined,
+        comment: factForm.comment || undefined,
+        factType: "ad_hoc",
+      });
+      toast({
+        title: "Факт смены сохранён",
+        description: "Счётчики оснастки и отчётность обновятся автоматически",
+      });
+      setFactOpen(false);
+      refetch();
+    } catch (e: unknown) {
+      toast({
+        title: "Ошибка",
+        description: e instanceof Error ? e.message : "Не удалось сохранить факт",
+        variant: "destructive",
+      });
     }
   };
 
@@ -223,8 +300,9 @@ export function PlanningCalendarGrid({ subdivisionId }: Props) {
       </div>
 
       <p className="text-xs text-muted-foreground">
-        План по сменам: в ячейке дня — смена 1 (верх) и смена 2 (низ). Факт выпуска отображается
-        под планом (из вкладки «Факт выпуска»).
+        План по сменам: в ячейке дня —{" "}
+        {shiftSlots.map((s) => s.name).join(", ")}. Нажмите «факт» под ячейкой,
+        чтобы ввести выпуск, брак и простои за смену.
       </p>
 
       {isLoading ? (
@@ -240,7 +318,7 @@ export function PlanningCalendarGrid({ subdivisionId }: Props) {
                 <th className="p-2 text-left min-w-[180px]">Изделие</th>
                 <th className="p-2 text-left min-w-[72px]">SAP</th>
                 <th className="p-2 text-left min-w-[64px]">№ ПФ</th>
-                <th className="p-2 text-center min-w-[72px]">Норма 11ч</th>
+                <th className="p-2 text-center min-w-[72px]">Норма</th>
                 <th className="p-2 text-center min-w-[72px]">План, шт</th>
                 <th className="p-2 text-center min-w-[72px]">Остаток</th>
                 <th className="p-2 text-center min-w-[72px]">Факт</th>
@@ -306,37 +384,50 @@ export function PlanningCalendarGrid({ subdivisionId }: Props) {
                         >
                           {canEdit ? (
                             <div className="space-y-0.5">
-                              <Input
-                                type="number"
-                                min={0}
-                                title="Смена 1"
-                                className="h-7 text-center text-[10px] px-0.5"
-                                value={getShiftValue(row, date, "1")}
-                                onChange={(e) =>
-                                  handleShiftChange(row, date, "1", e.target.value)
-                                }
-                              />
-                              <Input
-                                type="number"
-                                min={0}
-                                title="Смена 2"
-                                className="h-7 text-center text-[10px] px-0.5 bg-muted/30"
-                                value={getShiftValue(row, date, "2")}
-                                onChange={(e) =>
-                                  handleShiftChange(row, date, "2", e.target.value)
-                                }
-                              />
+                              {shiftSlots.map((slot, slotIdx) => (
+                                <Input
+                                  key={slot.code}
+                                  type="number"
+                                  min={0}
+                                  title={slot.name}
+                                  className={`h-7 text-center text-[10px] px-0.5 ${
+                                    slotIdx % 2 === 1 ? "bg-muted/30" : ""
+                                  }`}
+                                  value={getShiftValue(row, date, slot.code)}
+                                  onChange={(e) =>
+                                    handleShiftChange(row, date, slot.code, e.target.value)
+                                  }
+                                />
+                              ))}
                             </div>
                           ) : (
                             <div className="text-center py-1 tabular-nums">
-                              <div>{cell.shift1 || ""}</div>
-                              <div className="text-muted-foreground">{cell.shift2 || ""}</div>
+                              {shiftSlots.map((slot, slotIdx) => (
+                                <div
+                                  key={slot.code}
+                                  className={slotIdx % 2 === 1 ? "text-muted-foreground" : ""}
+                                >
+                                  {(row.cells[date] ?? emptyCell()).shifts[slot.code] || ""}
+                                </div>
+                              ))}
                             </div>
                           )}
-                          {cell.fact > 0 && (
-                            <div className="text-[10px] text-center text-green-700 dark:text-green-400 tabular-nums">
-                              ф {cell.fact}
-                            </div>
+                          {canEdit && row.orderId ? (
+                            <button
+                              type="button"
+                              className="w-full text-[10px] text-center text-muted-foreground hover:text-foreground flex items-center justify-center gap-0.5 py-0.5"
+                              onClick={() => openFactDialog(row, date)}
+                              title="Ввести факт смены"
+                            >
+                              <ClipboardList className="h-3 w-3" />
+                              {cell.fact > 0 ? `ф ${cell.fact}` : "факт"}
+                            </button>
+                          ) : (
+                            cell.fact > 0 && (
+                              <div className="text-[10px] text-center text-green-700 dark:text-green-400 tabular-nums">
+                                ф {cell.fact}
+                              </div>
+                            )
                           )}
                         </td>
                       );
@@ -395,6 +486,88 @@ export function PlanningCalendarGrid({ subdivisionId }: Props) {
               disabled={!addForm.equipmentId || !addForm.orderId}
             >
               Добавить
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={factOpen} onOpenChange={setFactOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Факт смены</DialogTitle>
+          </DialogHeader>
+          {factContext && (
+            <div className="space-y-3 py-2 text-sm">
+              <p className="text-muted-foreground">
+                {factContext.row.equipmentName} · {factContext.row.productSapCode} ·{" "}
+                {format(new Date(factContext.date), "d MMM yyyy", { locale: ru })}
+                {factContext.row.pfNumber && (
+                  <> · ПФ {factContext.row.pfNumber}</>
+                )}
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label>Выпущено, шт</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={factForm.producedQuantity}
+                    onChange={(e) =>
+                      setFactForm({ ...factForm, producedQuantity: e.target.value })
+                    }
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label>Брак, шт</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={factForm.defectiveQuantity}
+                    onChange={(e) =>
+                      setFactForm({ ...factForm, defectiveQuantity: e.target.value })
+                    }
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label>Простой, мин</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={factForm.downtimeMinutes}
+                    onChange={(e) =>
+                      setFactForm({ ...factForm, downtimeMinutes: e.target.value })
+                    }
+                  />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <Label>Причина простоя</Label>
+                <Input
+                  value={factForm.downtimeReason}
+                  onChange={(e) =>
+                    setFactForm({ ...factForm, downtimeReason: e.target.value })
+                  }
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>Комментарий</Label>
+                <Textarea
+                  value={factForm.comment}
+                  onChange={(e) =>
+                    setFactForm({ ...factForm, comment: e.target.value })
+                  }
+                  rows={2}
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setFactOpen(false)}>Отмена</Button>
+            <Button
+              onClick={handleSaveFact}
+              disabled={!factForm.producedQuantity || createFact.isPending}
+            >
+              Сохранить факт
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -11,13 +11,16 @@ import {
 import { and, eq } from "drizzle-orm";
 import type { InsertProductionDailyPlan } from "@shared/schema";
 import {
+  computeShiftNormFromCycle,
   computeShiftsToComplete,
   resolveShiftNorm,
 } from "@shared/production-norm-utils";
+import { getActiveShiftPattern } from "./shift-template-service";
+import { listSubdivisionShiftNorms } from "./product-shift-norm-service";
+import type { ShiftSlot } from "@shared/shift-template-types";
 
 export type DailyPlanCellValue = {
-  shift1: number;
-  shift2: number;
+  shifts: Record<string, number>;
   fact: number;
 };
 
@@ -32,6 +35,7 @@ export type DailyPlanGridRow = {
   productSapCode: string | null;
   pfNumber: string | null;
   shiftNorm: number | null;
+  normByShift: Record<string, number>;
   targetQuantity: number;
   completedQuantity: number;
   remainderQuantity: number;
@@ -47,6 +51,7 @@ export type DailyPlanGridResponse = {
   from: string;
   to: string;
   dates: string[];
+  shiftSlots: ShiftSlot[];
   rows: DailyPlanGridRow[];
 };
 
@@ -55,8 +60,10 @@ function dateKey(d: Date | string): string {
   return date.toISOString().slice(0, 10);
 }
 
-function emptyCell(): DailyPlanCellValue {
-  return { shift1: 0, shift2: 0, fact: 0 };
+function emptyCell(slotCodes: string[]): DailyPlanCellValue {
+  const shifts: Record<string, number> = {};
+  for (const code of slotCodes) shifts[code] = 0;
+  return { shifts, fact: 0 };
 }
 
 export async function listDailyPlan(filters: {
@@ -91,6 +98,8 @@ export async function getDailyPlanGrid(filters: {
   to: Date;
   equipmentId?: string;
 }): Promise<DailyPlanGridResponse> {
+  const pattern = await getActiveShiftPattern(filters.subdivisionId);
+  const slotCodes = pattern.slots.map((s) => s.code);
   const rows = await listDailyPlan(filters);
   const equipmentRows = await db.select().from(equipment);
   const equipmentNameById = new Map(equipmentRows.map((e) => [e.id, e.name]));
@@ -142,6 +151,41 @@ export async function getDailyPlanGrid(filters: {
 
   const rowMap = new Map<string, DailyPlanGridRow>();
 
+  const storedNormRows = await listSubdivisionShiftNorms(filters.subdivisionId);
+  const storedByProduct = new Map<number, Record<string, number>>();
+  for (const row of storedNormRows) {
+    const m = storedByProduct.get(row.productId) ?? {};
+    m[row.shiftCode] = row.shiftNorm;
+    storedByProduct.set(row.productId, m);
+  }
+
+  const buildNormByShift = (
+    product: (typeof productRows)[0] | undefined,
+    tooling: (typeof toolingRows)[0] | undefined,
+    productId: number | null
+  ): Record<string, number> => {
+    if (!productId || !product) return {};
+    const stored = storedByProduct.get(productId) ?? {};
+    const result: Record<string, number> = {};
+    for (const slot of pattern.slots) {
+      if (stored[slot.code] != null && stored[slot.code] > 0) {
+        result[slot.code] = stored[slot.code];
+        continue;
+      }
+      const computed = computeShiftNormFromCycle(
+        product.cycleTimeSec ?? tooling?.cycleTimeSec,
+        product.cavities ?? tooling?.cavities,
+        slot.hours
+      );
+      if (computed != null && computed > 0) {
+        result[slot.code] = computed;
+      } else if (product.defaultShiftNorm != null && product.defaultShiftNorm > 0) {
+        result[slot.code] = product.defaultShiftNorm;
+      }
+    }
+    return result;
+  };
+
   const ensureRow = (
     equipmentId: string,
     orderId: number | null,
@@ -170,7 +214,11 @@ export async function getDailyPlanGrid(filters: {
         : 0;
       const completed = order?.completedQuantity ?? 0;
       const remainder = order ? Math.max(0, target - completed) : 0;
-      const shiftNorm = product ? resolveShiftNorm(product, pe, tooling) : null;
+      const pid = productId ?? order?.productId ?? null;
+      const normByShift = buildNormByShift(product, tooling, pid);
+      const primaryNorm =
+        (slotCodes[0] ? normByShift[slotCodes[0]] : null) ??
+        (product ? resolveShiftNorm(product, pe, tooling) : null);
 
       gridRow = {
         key,
@@ -178,17 +226,18 @@ export async function getDailyPlanGrid(filters: {
         equipmentName: equipmentNameById.get(equipmentId) ?? equipmentId,
         orderId,
         orderNumber: order?.orderNumber ?? null,
-        productId: productId ?? order?.productId ?? null,
+        productId: pid,
         productName: product?.name ?? null,
         productSapCode: product?.sapCode ?? null,
         pfNumber: resolvedPf,
-        shiftNorm,
+        shiftNorm: primaryNorm,
+        normByShift,
         targetQuantity: target,
         completedQuantity: completed,
         remainderQuantity: remainder,
         percentComplete:
           target > 0 ? Math.round((completed / target) * 100) : completed > 0 ? 100 : 0,
-        shiftsToComplete: computeShiftsToComplete(remainder, shiftNorm),
+        shiftsToComplete: computeShiftsToComplete(remainder, primaryNorm),
         cells: {},
         planTotal: 0,
         factTotal: 0,
@@ -206,13 +255,11 @@ export async function getDailyPlanGrid(filters: {
       cell.pfNumber ?? null
     );
     const dk = dateKey(cell.planDate);
-    if (!gridRow.cells[dk]) gridRow.cells[dk] = emptyCell();
+    if (!gridRow.cells[dk]) gridRow.cells[dk] = emptyCell(slotCodes);
     const qty = cell.plannedQuantity;
-    if (cell.shiftCode === "2") {
-      gridRow.cells[dk].shift2 += qty;
-    } else {
-      gridRow.cells[dk].shift1 += qty;
-    }
+    const code = cell.shiftCode || slotCodes[0] || "1";
+    if (gridRow.cells[dk].shifts[code] == null) gridRow.cells[dk].shifts[code] = 0;
+    gridRow.cells[dk].shifts[code] += qty;
     gridRow.planTotal += qty;
   }
 
@@ -222,7 +269,7 @@ export async function getDailyPlanGrid(filters: {
     const pf = product?.pfNumber ?? null;
     const gridRow = ensureRow(fact.equipmentId, fact.orderId, order?.productId ?? null, pf);
     const dk = dateKey(fact.reportDate);
-    if (!gridRow.cells[dk]) gridRow.cells[dk] = emptyCell();
+    if (!gridRow.cells[dk]) gridRow.cells[dk] = emptyCell(slotCodes);
     gridRow.cells[dk].fact += fact.producedQuantity;
     gridRow.factTotal += fact.producedQuantity;
   }
@@ -236,6 +283,7 @@ export async function getDailyPlanGrid(filters: {
     from: filters.from.toISOString(),
     to: filters.to.toISOString(),
     dates,
+    shiftSlots: pattern.slots,
     rows: gridRows,
   };
 }
@@ -284,6 +332,7 @@ export async function upsertDailyPlanCell(data: InsertProductionDailyPlan) {
       .set({
         plannedQuantity: data.plannedQuantity,
         pfNumber: data.pfNumber,
+        toolingId: data.toolingId,
         comment: data.comment,
         updatedAt: new Date(),
       })
@@ -313,6 +362,7 @@ export async function bulkUpsertDailyPlan(
     shiftCode?: string;
     plannedQuantity: number;
     pfNumber?: string | null;
+    toolingId?: number | null;
     comment?: string | null;
   }>
 ) {
@@ -327,6 +377,7 @@ export async function bulkUpsertDailyPlan(
       shiftCode: (entry.shiftCode ?? "1") as "1" | "2",
       plannedQuantity: entry.plannedQuantity,
       pfNumber: entry.pfNumber ?? undefined,
+      toolingId: entry.toolingId ?? undefined,
       comment: entry.comment ?? undefined,
     });
     if (row) results.push(row);
