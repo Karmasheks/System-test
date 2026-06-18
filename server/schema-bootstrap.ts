@@ -78,6 +78,14 @@ export async function bootstrapSchema(connectionString: string): Promise<void> {
     await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS sprue_weight real`;
     await sql`ALTER TABLE materials ADD COLUMN IF NOT EXISTS product_id integer`;
 
+    await sql`ALTER TABLE production_tooling ADD COLUMN IF NOT EXISTS fixed_asset_number text`;
+    await sql`ALTER TABLE production_tooling ADD COLUMN IF NOT EXISTS info_updated_at timestamp`;
+    await sql`ALTER TABLE production_tooling ADD COLUMN IF NOT EXISTS next_maintenance_planned_at timestamp`;
+    await sql`ALTER TABLE production_tooling ADD COLUMN IF NOT EXISTS last_maintenance_duration_hours real`;
+    await sql`ALTER TABLE production_tooling ADD COLUMN IF NOT EXISTS estimated_maintenance_hours real`;
+    await sql`ALTER TABLE production_tooling ADD COLUMN IF NOT EXISTS cavities_layout text`;
+    await sql`ALTER TABLE production_tooling ADD COLUMN IF NOT EXISTS pieces_per_cycle integer`;
+
     await sql`
       CREATE TABLE IF NOT EXISTS shift_schedule_templates (
         id serial PRIMARY KEY,

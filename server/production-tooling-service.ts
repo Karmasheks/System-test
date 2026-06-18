@@ -18,6 +18,13 @@ import {
 } from "@shared/production-tooling-utils";
 import { createProduct } from "./production-service";
 import { recalculateToolingCycles } from "./production-tooling-cycle-service";
+import {
+  loadMaintenancePlanContext,
+  predictMaintenanceDateForTooling,
+  syncToolingMaintenancePlannedDate,
+  type MaintenancePlanContext,
+  linkedProductIdsForToolingRow,
+} from "./production-tooling-maintenance-plan";
 
 export type ToolingProductLink = {
   id: number;
@@ -74,7 +81,8 @@ async function loadProductLinks(toolings: (typeof productionTooling.$inferSelect
 function enrichTooling(
   row: typeof productionTooling.$inferSelect,
   productById: Map<number, typeof products.$inferSelect>,
-  junctionByTooling: Map<number, number[]>
+  junctionByTooling: Map<number, number[]>,
+  planCtx?: MaintenancePlanContext
 ): ProductionToolingView {
   const ids = new Set<number>();
   if (row.productId) ids.add(row.productId);
@@ -86,8 +94,13 @@ function enrichTooling(
     .map((p) => ({ id: p.id, sapCode: p.sapCode, name: p.name }))
     .sort((a, b) => a.sapCode.localeCompare(b.sapCode, "ru"));
 
+  const predictedMaintenanceAt = planCtx
+    ? predictMaintenanceDateForTooling(row, ids, planCtx)
+    : null;
+
   return {
     ...row,
+    nextMaintenancePlannedAt: predictedMaintenanceAt ?? row.nextMaintenancePlannedAt,
     products: linkedProducts,
     cyclesUntilMaintenance: cyclesUntilMaintenance(
       row.maintenanceCycleInterval,
@@ -126,7 +139,8 @@ export async function listProductionTooling(filters: {
   }
 
   const { productById, junctionByTooling } = await loadProductLinks(result);
-  return result.map((row) => enrichTooling(row, productById, junctionByTooling));
+  const planCtx = await loadMaintenancePlanContext(filters.subdivisionId);
+  return result.map((row) => enrichTooling(row, productById, junctionByTooling, planCtx));
 }
 
 export async function getProductionTooling(id: number) {
@@ -134,11 +148,20 @@ export async function getProductionTooling(id: number) {
   return row ?? null;
 }
 
+export async function getProductionToolingView(id: number): Promise<ProductionToolingView | null> {
+  const row = await getProductionTooling(id);
+  if (!row) return null;
+  const { productById, junctionByTooling } = await loadProductLinks([row]);
+  const planCtx = await loadMaintenancePlanContext(row.subdivisionId);
+  return enrichTooling(row, productById, junctionByTooling, planCtx);
+}
+
 export async function getProductionToolingDetail(id: number): Promise<ProductionToolingDetail | null> {
   const row = await getProductionTooling(id);
   if (!row) return null;
 
   const { productById, junctionByTooling } = await loadProductLinks([row]);
+  const planCtx = await loadMaintenancePlanContext(row.subdivisionId);
   const maintenanceHistory = await db
     .select()
     .from(productionToolingMaintenance)
@@ -146,7 +169,7 @@ export async function getProductionToolingDetail(id: number): Promise<Production
     .orderBy(productionToolingMaintenance.performedAt);
 
   return {
-    ...enrichTooling(row, productById, junctionByTooling),
+    ...enrichTooling(row, productById, junctionByTooling, planCtx),
     maintenanceHistory: maintenanceHistory.reverse(),
   };
 }
@@ -173,10 +196,25 @@ export async function setToolingProductLinks(toolingId: number, productIds: numb
     .where(eq(productionTooling.id, toolingId));
 }
 
+function parseOptionalTimestamp(value: string | Date | null | undefined): Date | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null || value === "") return null;
+  const d = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 export async function createProductionTooling(
-  data: InsertProductionTooling & { productIds?: number[] }
+  data: InsertProductionTooling & { productIds?: number[]; skipCycleRecalc?: boolean }
 ) {
-  const { productIds, lastMaintenanceAt, ...rest } = data;
+  const {
+    productIds,
+    lastMaintenanceAt,
+    infoUpdatedAt,
+    nextMaintenancePlannedAt,
+    skipCycleRecalc,
+    ...rest
+  } = data;
+  const now = new Date();
   const [row] = await db
     .insert(productionTooling)
     .values({
@@ -184,8 +222,10 @@ export async function createProductionTooling(
       applicableEquipmentIds: rest.applicableEquipmentIds ?? [],
       cycleCounterTotal: rest.cycleCounterTotal ?? 0,
       cyclesSinceMaintenance: rest.cyclesSinceMaintenance ?? 0,
-      lastMaintenanceAt: lastMaintenanceAt ? new Date(lastMaintenanceAt) : undefined,
-      updatedAt: new Date(),
+      lastMaintenanceAt: parseOptionalTimestamp(lastMaintenanceAt) ?? undefined,
+      infoUpdatedAt: parseOptionalTimestamp(infoUpdatedAt) ?? now,
+      nextMaintenancePlannedAt: parseOptionalTimestamp(nextMaintenancePlannedAt) ?? undefined,
+      updatedAt: now,
     })
     .returning();
 
@@ -195,8 +235,16 @@ export async function createProductionTooling(
     await setToolingProductLinks(row.id, [rest.productId]);
   }
 
-  await recalculateToolingCycles(row.id);
-  return (await getProductionToolingDetail(row.id))!;
+  if (!skipCycleRecalc) {
+    await recalculateToolingCycles(row.id);
+  } else {
+    const fresh = await getProductionTooling(row.id);
+    if (fresh) {
+      const ids = await linkedProductIdsForToolingRow(fresh);
+      await syncToolingMaintenancePlannedDate(fresh, ids);
+    }
+  }
+  return (await getProductionToolingView(row.id))!;
 }
 
 export async function getProductionToolingByPfNumber(
@@ -236,15 +284,29 @@ export async function updateProductionTooling(
     skipCycleRecalc?: boolean;
   }
 ) {
-  const { productIds, lastMaintenanceAt, skipCycleRecalc, ...rest } = data;
+  const {
+    productIds,
+    lastMaintenanceAt,
+    infoUpdatedAt,
+    nextMaintenancePlannedAt,
+    skipCycleRecalc,
+    ...rest
+  } = data;
+  const now = new Date();
   const updatePayload: Partial<typeof productionTooling.$inferInsert> = {
     ...rest,
-    updatedAt: new Date(),
+    updatedAt: now,
+    infoUpdatedAt:
+      infoUpdatedAt !== undefined
+        ? parseOptionalTimestamp(infoUpdatedAt) ?? null
+        : now,
   };
   if (lastMaintenanceAt !== undefined) {
-    updatePayload.lastMaintenanceAt = lastMaintenanceAt
-      ? new Date(lastMaintenanceAt)
-      : null;
+    updatePayload.lastMaintenanceAt = parseOptionalTimestamp(lastMaintenanceAt) ?? null;
+  }
+  if (nextMaintenancePlannedAt !== undefined) {
+    updatePayload.nextMaintenancePlannedAt =
+      parseOptionalTimestamp(nextMaintenancePlannedAt) ?? null;
   }
   const [row] = await db
     .update(productionTooling)
@@ -258,10 +320,22 @@ export async function updateProductionTooling(
     await setToolingProductLinks(id, productIds);
   }
 
-  if (!skipCycleRecalc) {
+  const hasManualCounters =
+    rest.cycleCounterTotal !== undefined ||
+    rest.cyclesSinceMaintenance !== undefined ||
+    rest.cyclesAtLastMaintenance !== undefined ||
+    lastMaintenanceAt !== undefined;
+
+  if (!skipCycleRecalc && !hasManualCounters) {
     await recalculateToolingCycles(id);
+  } else {
+    const fresh = await getProductionTooling(id);
+    if (fresh) {
+      const ids = await linkedProductIdsForToolingRow(fresh);
+      await syncToolingMaintenancePlannedDate(fresh, ids);
+    }
   }
-  return (await getProductionToolingDetail(id))!;
+  return (await getProductionToolingView(id))!;
 }
 
 export async function syncToolingFromProduct(productId: number) {
@@ -357,23 +431,30 @@ export async function createProductFromTooling(
 
 export async function recordToolingMaintenance(
   toolingId: number,
-  data: Omit<InsertProductionToolingMaintenance, "toolingId">,
+  data: Omit<InsertProductionToolingMaintenance, "toolingId"> & {
+    cyclesAtMaintenance?: number;
+  },
   user: { id: number; name: string }
 ) {
   const tooling = await getProductionTooling(toolingId);
   if (!tooling) throw new Error("Оснастка/ПФ не найдена");
 
-  await recalculateToolingCycles(toolingId);
-  const fresh = await getProductionTooling(toolingId);
-  if (!fresh) throw new Error("Оснастка/ПФ не найдена");
+  let cyclesAt = data.cyclesAtMaintenance;
+  if (cyclesAt == null) {
+    await recalculateToolingCycles(toolingId);
+    const fresh = await getProductionTooling(toolingId);
+    if (!fresh) throw new Error("Оснастка/ПФ не найдена");
+    cyclesAt = fresh.cycleCounterTotal;
+  }
 
-  const cyclesAt = fresh.cycleCounterTotal;
+  const performedAt = data.performedAt ?? new Date();
+  const totalCycles = Math.max(tooling.cycleCounterTotal, cyclesAt);
 
   const [record] = await db
     .insert(productionToolingMaintenance)
     .values({
       toolingId,
-      performedAt: data.performedAt ?? new Date(),
+      performedAt,
       cyclesAtMaintenance: cyclesAt,
       comment: data.comment ?? null,
       performedById: user.id,
@@ -384,13 +465,21 @@ export async function recordToolingMaintenance(
   await db
     .update(productionTooling)
     .set({
+      cycleCounterTotal: totalCycles,
       cyclesAtLastMaintenance: cyclesAt,
-      cyclesSinceMaintenance: 0,
-      lastMaintenanceAt: record.performedAt,
-      status: "ok",
+      cyclesSinceMaintenance: Math.max(0, totalCycles - cyclesAt),
+      lastMaintenanceAt: performedAt,
+      status: "maintenance_completed",
+      infoUpdatedAt: new Date(),
       updatedAt: new Date(),
     })
     .where(eq(productionTooling.id, toolingId));
+
+  const fresh = await getProductionTooling(toolingId);
+  if (fresh) {
+    const ids = await linkedProductIdsForToolingRow(fresh);
+    await syncToolingMaintenancePlannedDate(fresh, ids);
+  }
 
   return record;
 }

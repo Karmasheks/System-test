@@ -137,11 +137,13 @@ const createProductFromToolingSchema = z.object({
 
 const toolingBodySchema = insertProductionToolingSchema.extend({
   productIds: z.array(z.number().int().positive()).optional(),
+  skipCycleRecalc: z.boolean().optional(),
 });
 
 const toolingMaintenanceSchema = z.object({
   comment: z.string().optional(),
   performedAt: z.coerce.date().optional(),
+  cyclesAtMaintenance: z.number().int().min(0).optional(),
 });
 
 const planningDemandSchema = z.object({

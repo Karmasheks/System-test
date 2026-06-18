@@ -17,6 +17,7 @@ import {
 } from "@shared/production-norm-utils";
 import { getActiveShiftPattern } from "./shift-template-service";
 import { listSubdivisionShiftNorms } from "./product-shift-norm-service";
+import { effectivePiecesPerCycle } from "@shared/cavities-utils";
 import type { ShiftSlot } from "@shared/shift-template-types";
 
 export type DailyPlanCellValue = {
@@ -172,9 +173,15 @@ export async function getDailyPlanGrid(filters: {
         result[slot.code] = stored[slot.code];
         continue;
       }
+      const piecesPerCycle =
+        product.cavities != null && product.cavities > 0
+          ? product.cavities
+          : tooling
+            ? effectivePiecesPerCycle(tooling)
+            : 1;
       const computed = computeShiftNormFromCycle(
         product.cycleTimeSec ?? tooling?.cycleTimeSec,
-        product.cavities ?? tooling?.cavities,
+        piecesPerCycle,
         slot.hours
       );
       if (computed != null && computed > 0) {
@@ -382,5 +389,15 @@ export async function bulkUpsertDailyPlan(
     });
     if (row) results.push(row);
   }
+
+  try {
+    const { syncToolingMaintenancePlannedDatesForSubdivision } = await import(
+      "./production-tooling-maintenance-plan"
+    );
+    await syncToolingMaintenancePlannedDatesForSubdivision(subdivisionId);
+  } catch (err) {
+    console.error("tooling maintenance date sync after daily plan:", err);
+  }
+
   return results;
 }

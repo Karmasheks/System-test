@@ -39,6 +39,7 @@ import {
 } from "@/hooks/use-production-planning";
 import { useEquipmentApi } from "@/hooks/use-equipment-api";
 import { resolveShiftNorm } from "@shared/production-norm-utils";
+import { formatCavitiesDisplay } from "@shared/cavities-utils";
 import {
   buildAutoPlanDistribution,
   sumDistribution,
@@ -526,7 +527,7 @@ export function PlanningOrdersTab({ subdivisionId }: Props) {
                   </Select>
                   {selectedTooling && (
                     <p className="text-xs text-muted-foreground mt-1">
-                      Гнёзд: {selectedTooling.cavities ?? "—"}
+                      Гнёзд: {formatCavitiesDisplay(selectedTooling)}
                       {selectedTooling.maintenanceCycleInterval != null && (
                         <> · ТО каждые {selectedTooling.maintenanceCycleInterval} циклов</>
                       )}

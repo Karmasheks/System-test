@@ -1,6 +1,8 @@
+import { effectivePiecesPerCycle } from "./cavities-utils";
+
 export const DEFAULT_SHIFT_HOURS = 11;
 
-/** Норма выпуска за смену (11 ч) из цикла и гнёзд. */
+/** Норма выпуска за смену (11 ч) из цикла и изделий за смыкание. */
 export function computeShiftNormFromCycle(
   cycleTimeSec: number | null | undefined,
   cavities: number | null | undefined,
@@ -10,6 +12,24 @@ export function computeShiftNormFromCycle(
   const shotsPerShift = Math.floor((shiftHours * 3600) / cycleTimeSec);
   const c = cavities && cavities > 0 ? cavities : 1;
   return Math.floor(shotsPerShift * c);
+}
+
+type CavitiesSource = {
+  piecesPerCycle?: number | null;
+  cavitiesLayout?: string | null;
+  cavities?: number | null;
+};
+
+function piecesPerShiftFromSources(
+  product?: CavitiesSource | null,
+  tooling?: CavitiesSource | null
+): number {
+  if (product?.piecesPerCycle != null && product.piecesPerCycle > 0) {
+    return product.piecesPerCycle;
+  }
+  if (tooling) return effectivePiecesPerCycle(tooling);
+  if (product) return effectivePiecesPerCycle(product);
+  return 1;
 }
 
 export function resolveShiftNorm(
@@ -22,7 +42,7 @@ export function resolveShiftNorm(
     cycleTimeSecOverride?: number | null;
     shiftNormOverride?: number | null;
   } | null,
-  tooling?: { cycleTimeSec?: number | null; cavities?: number | null } | null,
+  tooling?: CavitiesSource & { cycleTimeSec?: number | null } | null,
   options?: {
     shiftCode?: string;
     shiftHours?: number;
@@ -45,9 +65,9 @@ export function resolveShiftNorm(
     equipmentLink?.cycleTimeSecOverride ??
     product.cycleTimeSec ??
     tooling?.cycleTimeSec;
-  const cavities = product.cavities ?? tooling?.cavities;
+  const piecesPerCycle = piecesPerShiftFromSources(product, tooling);
   const hours = options?.shiftHours ?? DEFAULT_SHIFT_HOURS;
-  return computeShiftNormFromCycle(cycle, cavities, hours);
+  return computeShiftNormFromCycle(cycle, piecesPerCycle, hours);
 }
 
 export function computeShiftsToComplete(

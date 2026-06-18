@@ -13,6 +13,10 @@ import {
 } from "@shared/production-tooling-utils";
 import type { ProductionToolingStatus } from "@shared/schema";
 import { getProductionTooling, patchToolingCycleCounters } from "./production-tooling-service";
+import {
+  linkedProductIdsForToolingRow,
+  syncToolingMaintenancePlannedDate,
+} from "./production-tooling-maintenance-plan";
 
 async function linkedProductIdsForTooling(
   tooling: typeof productionTooling.$inferSelect
@@ -75,7 +79,7 @@ export async function recalculateToolingCycles(toolingId: number): Promise<void>
     totalPieces += fact.producedQuantity ?? 0;
   }
 
-  const totalCycles = piecesToCycles(totalPieces, tooling.cavities);
+  const totalCycles = piecesToCycles(totalPieces, tooling);
   const base = tooling.cyclesAtLastMaintenance ?? 0;
   const sinceMaintenance = Math.max(0, totalCycles - base);
 
@@ -88,12 +92,16 @@ async function updateToolingCounters(
   sinceMaintenance: number
 ): Promise<void> {
   let status: ProductionToolingStatus = tooling.status as ProductionToolingStatus;
-  if (
-    tooling.status !== "decommissioned" &&
-    tooling.status !== "on_maintenance" &&
-    tooling.status !== "repair" &&
-    tooling.status !== "testing"
-  ) {
+  const frozenStatuses = new Set([
+    "decommissioned",
+    "on_maintenance",
+    "repair",
+    "testing",
+    "storage",
+    "conservation",
+    "maintenance_completed",
+  ]);
+  if (!frozenStatuses.has(tooling.status)) {
     if (isMaintenanceDue(tooling.maintenanceCycleInterval, sinceMaintenance)) {
       status = "maintenance_due";
     } else if (status === "maintenance_due") {
@@ -106,6 +114,12 @@ async function updateToolingCounters(
     cyclesSinceMaintenance: sinceMaintenance,
     status,
   });
+
+  const fresh = await getProductionTooling(tooling.id);
+  if (fresh) {
+    const productIds = await linkedProductIdsForToolingRow(fresh);
+    await syncToolingMaintenancePlannedDate(fresh, productIds);
+  }
 }
 
 export async function recalculateToolingCyclesForSubdivision(subdivisionId: number): Promise<void> {

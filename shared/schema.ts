@@ -820,6 +820,10 @@ export type ProductionToolingType = (typeof PRODUCTION_TOOLING_TYPES)[number];
 
 export const PRODUCTION_TOOLING_STATUSES = [
   "ok",
+  "in_production",
+  "maintenance_completed",
+  "storage",
+  "conservation",
   "repair",
   "testing",
   "maintenance_due",
@@ -1200,6 +1204,10 @@ export const productionTooling = pgTable(
     status: text("status").notNull().default("ok"),
     cycleTimeSec: integer("cycle_time_sec"),
     cavities: integer("cavities"),
+    /** Схема гнёзд, напр. «2+2+4+1» (сумма в cavities). */
+    cavitiesLayout: text("cavities_layout"),
+    /** Изделий за цикл — приоритет для счётчика смыканий над первым числом схемы. */
+    piecesPerCycle: integer("pieces_per_cycle"),
     productWeightGr: real("product_weight_gr"),
     shotWeightGr: real("shot_weight_gr"),
     applicableEquipmentIds: jsonb("applicable_equipment_ids").$type<string[]>().default([]),
@@ -1216,6 +1224,16 @@ export const productionTooling = pgTable(
     /** Снимок total циклов на момент последнего ТО. */
     cyclesAtLastMaintenance: integer("cycles_at_last_maintenance"),
     lastMaintenanceAt: timestamp("last_maintenance_at"),
+    /** Инвентарный номер / № ОС */
+    fixedAssetNumber: text("fixed_asset_number"),
+    /** Дата обновления карточки (как в реестре ПФ) */
+    infoUpdatedAt: timestamp("info_updated_at"),
+    /** Плановая дата следующего ТО */
+    nextMaintenancePlannedAt: timestamp("next_maintenance_planned_at"),
+    /** Длительность последнего ТО, часов */
+    lastMaintenanceDurationHours: real("last_maintenance_duration_hours"),
+    /** Оценочное время ТО, часов */
+    estimatedMaintenanceHours: real("estimated_maintenance_hours"),
     comment: text("comment"),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -1817,6 +1835,13 @@ export const insertProductionToolingSchema = createInsertSchema(productionToolin
     cyclesSinceMaintenance: z.number().int().min(0).optional(),
     cyclesAtLastMaintenance: z.number().int().min(0).optional().nullable(),
     lastMaintenanceAt: z.string().optional().nullable(),
+    fixedAssetNumber: z.string().optional().nullable(),
+    infoUpdatedAt: z.string().optional().nullable(),
+    nextMaintenancePlannedAt: z.string().optional().nullable(),
+    lastMaintenanceDurationHours: z.number().min(0).optional().nullable(),
+    estimatedMaintenanceHours: z.number().min(0).optional().nullable(),
+    cavitiesLayout: z.string().optional().nullable(),
+    piecesPerCycle: z.number().int().positive().optional().nullable(),
   });
 export const insertProductionToolingMaintenanceSchema = createInsertSchema(
   productionToolingMaintenance

@@ -46,11 +46,25 @@ import {
 } from "@/hooks/use-production-planning";
 import {
   TOOLING_STATUS_LABELS,
-  TOOLING_STATUS_VARIANTS,
   TOOLING_TYPE_LABELS,
 } from "@/lib/production-planning-constants";
-import { Plus, Wrench, PackagePlus, Eye, CheckCircle2 } from "lucide-react";
+import {
+  ToolingStatusBadge,
+  PercentCell,
+  plannedDateClass,
+} from "@/lib/production-tooling-status";
+import { cn } from "@/lib/utils";
+import { Plus, Wrench, PackagePlus, CheckCircle2 } from "lucide-react";
 import { computeShiftNormFromCycle } from "@shared/production-norm-utils";
+import {
+  warrantyUsagePercent,
+  maintenanceUsagePercent,
+} from "@shared/production-tooling-utils";
+import {
+  effectivePiecesPerCycle,
+  formatCavitiesDisplay,
+  parseCavitiesInput,
+} from "@shared/cavities-utils";
 import { ListPaginationControls } from "@/components/list-pagination-controls";
 import { useListPagination } from "@/hooks/use-list-pagination";
 
@@ -69,6 +83,7 @@ type ToolingFormState = {
   pfNumber: string;
   name: string;
   cavities: string;
+  piecesPerCycle: string;
   productIds: number[];
   productParams: Record<number, ProductParamsForm>;
   toolingType: string;
@@ -76,6 +91,15 @@ type ToolingFormState = {
   storageLocation: string;
   cyclesUntilGuarantee: string;
   maintenanceCycleInterval: string;
+  cycleCounterTotal: string;
+  cyclesSinceMaintenance: string;
+  cyclesAtLastMaintenance: string;
+  lastMaintenanceAt: string;
+  fixedAssetNumber: string;
+  infoUpdatedAt: string;
+  nextMaintenancePlannedAt: string;
+  lastMaintenanceDurationHours: string;
+  estimatedMaintenanceHours: string;
   comment: string;
 };
 
@@ -93,16 +117,31 @@ function paramsFromProduct(p: {
   };
 }
 
-function parseProductParams(params: ProductParamsForm, cavities?: number) {
+function cavitiesConfigFromForm(form: ToolingFormState) {
+  const parsed = parseCavitiesInput(form.cavities);
+  const ppc = parseOptionalInt(form.piecesPerCycle);
+  return {
+    ...parsed,
+    piecesPerCycle: ppc,
+  };
+}
+
+function effectivePiecesFromForm(form: ToolingFormState): number {
+  return effectivePiecesPerCycle(cavitiesConfigFromForm(form));
+}
+
+function parseProductParams(params: ProductParamsForm, form: ToolingFormState) {
   const cycle = params.cycleTimeSec ? Number(params.cycleTimeSec) : undefined;
+  const cavityFields = cavitiesConfigFromForm(form);
+  const piecesPerCycle = effectivePiecesPerCycle(cavityFields);
   return {
     cycleTimeSec: cycle,
-    cavities,
+    cavities: cavityFields.cavities,
     productWeight: params.productWeight ? Number(params.productWeight) : undefined,
     shotWeight: params.shotWeight ? Number(params.shotWeight) : undefined,
     defaultShiftNorm: params.defaultShiftNorm
       ? Number(params.defaultShiftNorm)
-      : computeShiftNormFromCycle(cycle ?? null, cavities ?? null) ?? undefined,
+      : computeShiftNormFromCycle(cycle ?? null, piecesPerCycle) ?? undefined,
   };
 }
 
@@ -110,6 +149,7 @@ const emptyForm = (): ToolingFormState => ({
   pfNumber: "",
   name: "",
   cavities: "",
+  piecesPerCycle: "",
   productIds: [],
   productParams: {},
   toolingType: "press_form",
@@ -117,8 +157,97 @@ const emptyForm = (): ToolingFormState => ({
   storageLocation: "",
   cyclesUntilGuarantee: "",
   maintenanceCycleInterval: "",
+  cycleCounterTotal: "",
+  cyclesSinceMaintenance: "",
+  cyclesAtLastMaintenance: "",
+  lastMaintenanceAt: "",
+  fixedAssetNumber: "",
+  infoUpdatedAt: "",
+  nextMaintenancePlannedAt: "",
+  lastMaintenanceDurationHours: "",
+  estimatedMaintenanceHours: "",
   comment: "",
 });
+
+function toDateInput(value: string | Date | null | undefined) {
+  if (!value) return "";
+  const d = typeof value === "string" ? new Date(value) : value;
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toISOString().slice(0, 10);
+}
+
+function parseOptionalFloat(raw: string): number | undefined {
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  const n = Number(trimmed);
+  if (!Number.isFinite(n) || n < 0) return undefined;
+  return n;
+}
+
+function productsNeedSync(
+  editing: ProductionToolingView | null,
+  form: ToolingFormState
+): boolean {
+  if (form.productIds.length === 0) return false;
+  if (!editing) return true;
+  const prevIds = [...editing.products.map((p) => p.id)].sort((a, b) => a - b);
+  const nextIds = [...form.productIds].sort((a, b) => a - b);
+  if (prevIds.length !== nextIds.length || prevIds.some((id, i) => id !== nextIds[i])) {
+    return true;
+  }
+  return form.productIds.some((id) => {
+    const params = form.productParams[id];
+    return Boolean(
+      params?.cycleTimeSec ||
+        params?.productWeight ||
+        params?.shotWeight ||
+        params?.defaultShiftNorm
+    );
+  });
+}
+
+function productNamesList(products: ProductionToolingView["products"]) {
+  if (products.length === 0) return "—";
+  return products.map((p) => p.name).join("; ");
+}
+
+function parseOptionalInt(raw: string): number | undefined {
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  const n = Number(trimmed);
+  if (!Number.isInteger(n) || n < 0) return undefined;
+  return n;
+}
+
+function buildCycleCounterPayload(form: ToolingFormState) {
+  const cycleCounterTotal = parseOptionalInt(form.cycleCounterTotal);
+  const cyclesSinceMaintenance = parseOptionalInt(form.cyclesSinceMaintenance);
+  let cyclesAtLastMaintenance = parseOptionalInt(form.cyclesAtLastMaintenance);
+
+  if (
+    cyclesAtLastMaintenance === undefined &&
+    cycleCounterTotal !== undefined &&
+    cyclesSinceMaintenance !== undefined
+  ) {
+    cyclesAtLastMaintenance = Math.max(0, cycleCounterTotal - cyclesSinceMaintenance);
+  }
+
+  const hasCounters =
+    cycleCounterTotal !== undefined ||
+    cyclesSinceMaintenance !== undefined ||
+    cyclesAtLastMaintenance !== undefined ||
+    form.lastMaintenanceAt.trim() !== "";
+
+  return {
+    cycleCounterTotal,
+    cyclesSinceMaintenance,
+    cyclesAtLastMaintenance,
+    lastMaintenanceAt: form.lastMaintenanceAt.trim()
+      ? new Date(form.lastMaintenanceAt).toISOString()
+      : undefined,
+    skipCycleRecalc: hasCounters,
+  };
+}
 
 function formatDate(value: string | Date | null | undefined) {
   if (!value) return "—";
@@ -129,14 +258,6 @@ function formatDate(value: string | Date | null | undefined) {
     month: "2-digit",
     year: "numeric",
   });
-}
-
-function StatusBadge({ status }: { status: string }) {
-  return (
-    <Badge variant={TOOLING_STATUS_VARIANTS[status] ?? "outline"}>
-      {TOOLING_STATUS_LABELS[status] ?? status}
-    </Badge>
-  );
 }
 
 function ProductLinks({ products }: { products: ProductionToolingView["products"] }) {
@@ -196,6 +317,8 @@ export function PlanningToolingTab({ subdivisionId }: Props) {
   const [maintenanceOpen, setMaintenanceOpen] = useState(false);
   const [maintenanceToolingId, setMaintenanceToolingId] = useState<number | null>(null);
   const [maintenanceComment, setMaintenanceComment] = useState("");
+  const [maintenancePerformedAt, setMaintenancePerformedAt] = useState("");
+  const [maintenanceCyclesAt, setMaintenanceCyclesAt] = useState("");
 
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<ProductionToolingView | null>(null);
@@ -227,7 +350,12 @@ export function PlanningToolingTab({ subdivisionId }: Props) {
     setForm({
       pfNumber: row.pfNumber,
       name: row.name,
-      cavities: row.cavities ? String(row.cavities) : "",
+      cavities: row.cavitiesLayout?.trim()
+        ? row.cavitiesLayout
+        : row.cavities != null
+          ? String(row.cavities)
+          : "",
+      piecesPerCycle: row.piecesPerCycle != null ? String(row.piecesPerCycle) : "",
       productIds: row.products.map((p) => p.id),
       productParams,
       toolingType: row.toolingType,
@@ -239,6 +367,20 @@ export function PlanningToolingTab({ subdivisionId }: Props) {
       maintenanceCycleInterval: row.maintenanceCycleInterval
         ? String(row.maintenanceCycleInterval)
         : "",
+      cycleCounterTotal: String(row.cycleCounterTotal ?? 0),
+      cyclesSinceMaintenance: String(row.cyclesSinceMaintenance ?? 0),
+      cyclesAtLastMaintenance:
+        row.cyclesAtLastMaintenance != null ? String(row.cyclesAtLastMaintenance) : "",
+      lastMaintenanceAt: toDateInput(row.lastMaintenanceAt),
+      fixedAssetNumber: row.fixedAssetNumber ?? "",
+      infoUpdatedAt: toDateInput(row.infoUpdatedAt),
+      nextMaintenancePlannedAt: toDateInput(row.nextMaintenancePlannedAt),
+      lastMaintenanceDurationHours:
+        row.lastMaintenanceDurationHours != null
+          ? String(row.lastMaintenanceDurationHours)
+          : "",
+      estimatedMaintenanceHours:
+        row.estimatedMaintenanceHours != null ? String(row.estimatedMaintenanceHours) : "",
       comment: row.comment ?? "",
     });
     setOpen(true);
@@ -281,26 +423,28 @@ export function PlanningToolingTab({ subdivisionId }: Props) {
   };
 
   const syncLinkedProducts = async (pfNumber: string) => {
-    const cavities = form.cavities ? Number(form.cavities) : undefined;
-    for (const productId of form.productIds) {
-      const params = form.productParams[productId];
-      if (!params) continue;
-      const parsed = parseProductParams(params, cavities);
-      await updateProduct.mutateAsync({
-        id: productId,
-        pfNumber,
-        ...parsed,
-      });
-    }
+    if (form.productIds.length === 0) return;
+    await Promise.all(
+      form.productIds.map(async (productId) => {
+        const params = form.productParams[productId];
+        if (!params) return;
+        const parsed = parseProductParams(params, form);
+        await updateProduct.mutateAsync({
+          id: productId,
+          pfNumber,
+          ...parsed,
+        });
+      })
+    );
   };
 
   const handleSave = async () => {
     try {
       const pfNumber = form.pfNumber.trim();
-      const cavities = form.cavities ? Number(form.cavities) : undefined;
+      const cavityFields = cavitiesConfigFromForm(form);
       const firstId = form.productIds[0];
       const firstParsed = firstId && form.productParams[firstId]
-        ? parseProductParams(form.productParams[firstId], cavities)
+        ? parseProductParams(form.productParams[firstId], form)
         : {
             cycleTimeSec: undefined,
             productWeight: undefined,
@@ -317,7 +461,9 @@ export function PlanningToolingTab({ subdivisionId }: Props) {
         toolingType: form.toolingType,
         status: form.status,
         cycleTimeSec: firstParsed.cycleTimeSec,
-        cavities,
+        cavities: cavityFields.cavities,
+        cavitiesLayout: cavityFields.cavitiesLayout ?? null,
+        piecesPerCycle: cavityFields.piecesPerCycle ?? null,
         productWeightGr: firstParsed.productWeight,
         shotWeightGr: firstParsed.shotWeight,
         storageLocation: form.storageLocation || undefined,
@@ -327,17 +473,28 @@ export function PlanningToolingTab({ subdivisionId }: Props) {
         maintenanceCycleInterval: form.maintenanceCycleInterval
           ? Number(form.maintenanceCycleInterval)
           : undefined,
+        fixedAssetNumber: form.fixedAssetNumber.trim() || undefined,
+        infoUpdatedAt: form.infoUpdatedAt.trim()
+          ? new Date(form.infoUpdatedAt).toISOString()
+          : undefined,
+        lastMaintenanceDurationHours: parseOptionalFloat(form.lastMaintenanceDurationHours),
+        estimatedMaintenanceHours: parseOptionalFloat(form.estimatedMaintenanceHours),
         comment: form.comment || undefined,
+        ...buildCycleCounterPayload(form),
       };
 
       if (editing) {
-        await updateTooling.mutateAsync({ id: editing.id, ...payload });
-        await syncLinkedProducts(pfNumber);
+        const saved = await updateTooling.mutateAsync({ id: editing.id, ...payload });
+        if (productsNeedSync(editing, form)) {
+          await syncLinkedProducts(pfNumber);
+        }
         toast({ title: "Оснастка/ПФ обновлена" });
-        if (detailId === editing.id) setDetailId(editing.id);
+        if (detailId === editing.id && saved?.id) setDetailId(saved.id);
       } else {
         const created = await createTooling.mutateAsync(payload);
-        await syncLinkedProducts(pfNumber);
+        if (form.productIds.length > 0) {
+          await syncLinkedProducts(pfNumber);
+        }
         toast({ title: "Оснастка/ПФ добавлена" });
         if (created?.id) setDetailId(created.id);
       }
@@ -379,17 +536,25 @@ export function PlanningToolingTab({ subdivisionId }: Props) {
   };
 
   const openMaintenanceDialog = (toolingId: number) => {
+    const row = tooling.find((t) => t.id === toolingId) ?? (detailId === toolingId ? detail : null);
     setMaintenanceToolingId(toolingId);
     setMaintenanceComment("");
+    setMaintenancePerformedAt(new Date().toISOString().slice(0, 10));
+    setMaintenanceCyclesAt(
+      row?.cycleCounterTotal != null ? String(row.cycleCounterTotal) : ""
+    );
     setMaintenanceOpen(true);
   };
 
   const handleRecordMaintenance = async () => {
     if (!maintenanceToolingId) return;
     try {
+      const cyclesAt = parseOptionalInt(maintenanceCyclesAt);
       await recordToolingMaintenance.mutateAsync({
         toolingId: maintenanceToolingId,
         comment: maintenanceComment.trim() || undefined,
+        performedAt: maintenancePerformedAt || undefined,
+        cyclesAtMaintenance: cyclesAt,
       });
       toast({ title: "ТО оснастки/ПФ записано" });
       setMaintenanceOpen(false);
@@ -423,74 +588,129 @@ export function PlanningToolingTab({ subdivisionId }: Props) {
         )}
       </div>
 
-      <div className="rounded-md border">
+      <div className="rounded-md border overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-10">№</TableHead>
               <TableHead>№ ПФ</TableHead>
-              <TableHead>Наименование</TableHead>
-              <TableHead>SAP / изделия</TableHead>
-              <TableHead>Тип</TableHead>
-              <TableHead>Статус</TableHead>
-              <TableHead>Циклов (всего)</TableHead>
-              <TableHead>После ТО</TableHead>
-              <TableHead>До ТО</TableHead>
-              <TableHead>До гарантии</TableHead>
-              <TableHead>Цикл, сек</TableHead>
+              <TableHead className="min-w-[180px]">Изделие</TableHead>
               <TableHead>Гнёзд</TableHead>
-              <TableHead></TableHead>
+              <TableHead>Дата обновления</TableHead>
+              <TableHead>Смыканий</TableHead>
+              <TableHead>Гарантия</TableHead>
+              <TableHead>% гарантии</TableHead>
+              <TableHead>Дата ТО</TableHead>
+              <TableHead>После ТО</TableHead>
+              <TableHead>Период ТО</TableHead>
+              <TableHead>% наработки</TableHead>
+              <TableHead>След. ТО</TableHead>
+              <TableHead>№ ОС</TableHead>
+              <TableHead>Статус</TableHead>
+              <TableHead className="min-w-[120px]">Местоположение</TableHead>
+              <TableHead>ТО, ч</TableHead>
+              <TableHead>Оценка ТО, ч</TableHead>
+              {canEdit && <TableHead className="w-12" />}
             </TableRow>
           </TableHeader>
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={12} className="text-center text-muted-foreground">
+                <TableCell colSpan={canEdit ? 19 : 18} className="text-center text-muted-foreground">
                   Загрузка…
                 </TableCell>
               </TableRow>
             ) : tooling.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={12} className="text-center text-muted-foreground">
+                <TableCell colSpan={canEdit ? 19 : 18} className="text-center text-muted-foreground">
                   Нет записей. Добавьте пресс-формы и оснастку по каталогу ПФ.
                 </TableCell>
               </TableRow>
             ) : (
-              paginatedTooling.map((row) => (
-                <TableRow key={row.id} className="cursor-pointer hover:bg-muted/50">
-                  <TableCell className="font-mono">{row.pfNumber}</TableCell>
-                  <TableCell>{row.name}</TableCell>
-                  <TableCell><ProductLinks products={row.products} /></TableCell>
-                  <TableCell>
-                    {TOOLING_TYPE_LABELS[row.toolingType] ?? row.toolingType}
-                  </TableCell>
-                  <TableCell>
-                    <StatusBadge status={row.status} />
-                  </TableCell>
-                  <TableCell>{row.cycleCounterTotal}</TableCell>
-                  <TableCell>{row.cyclesSinceMaintenance}</TableCell>
-                  <TableCell>
-                    {row.cyclesUntilMaintenance != null
-                      ? row.cyclesUntilMaintenance
-                      : "—"}
-                  </TableCell>
-                  <TableCell>
-                    {row.cyclesRemainingGuarantee != null
-                      ? row.cyclesRemainingGuarantee
-                      : "—"}
-                  </TableCell>
-                  <TableCell>{row.cycleTimeSec ?? "—"}</TableCell>
-                  <TableCell>{row.cavities ?? "—"}</TableCell>
-                  <TableCell>
-                    <div className="flex gap-1">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => setDetailId(row.id)}
-                        title="Карточка"
-                      >
-                        <Eye className="h-4 w-4" />
-                      </Button>
-                      {canEdit && (
+              paginatedTooling.map((row, index) => {
+                const warrantyPct = warrantyUsagePercent(
+                  row.cycleCounterTotal,
+                  row.cyclesUntilGuarantee
+                );
+                const maintenancePct = maintenanceUsagePercent(
+                  row.cyclesSinceMaintenance,
+                  row.maintenanceCycleInterval
+                );
+                return (
+                  <TableRow
+                    key={row.id}
+                    className="cursor-pointer hover:bg-muted/50"
+                    onClick={() => setDetailId(row.id)}
+                  >
+                    <TableCell className="text-muted-foreground">{from + index}</TableCell>
+                    <TableCell className="font-mono text-blue-700 dark:text-blue-300 underline-offset-2">
+                      {row.pfNumber}
+                    </TableCell>
+                    <TableCell className="text-sm">{productNamesList(row.products)}</TableCell>
+                    <TableCell className="tabular-nums">
+                      {formatCavitiesDisplay({
+                        cavitiesLayout: row.cavitiesLayout,
+                        cavities: row.cavities,
+                      })}
+                      {row.piecesPerCycle != null && (
+                        <span className="block text-xs text-muted-foreground">
+                          {row.piecesPerCycle} изд./цикл
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell
+                      className={cn(
+                        row.infoUpdatedAt &&
+                          "bg-green-100 text-green-900 dark:bg-green-950 dark:text-green-100"
+                      )}
+                    >
+                      {formatDate(row.infoUpdatedAt)}
+                    </TableCell>
+                    <TableCell className="tabular-nums">{row.cycleCounterTotal}</TableCell>
+                    <TableCell className="tabular-nums">
+                      {row.cyclesUntilGuarantee ?? "—"}
+                    </TableCell>
+                    <TableCell>
+                      <PercentCell value={warrantyPct} />
+                    </TableCell>
+                    <TableCell
+                      className={cn(
+                        row.lastMaintenanceAt &&
+                          "bg-green-100 text-green-900 dark:bg-green-950 dark:text-green-100"
+                      )}
+                    >
+                      {formatDate(row.lastMaintenanceAt)}
+                    </TableCell>
+                    <TableCell className="tabular-nums">{row.cyclesSinceMaintenance}</TableCell>
+                    <TableCell className="tabular-nums">
+                      {row.maintenanceCycleInterval ?? "—"}
+                    </TableCell>
+                    <TableCell>
+                      <PercentCell value={maintenancePct} />
+                    </TableCell>
+                    <TableCell
+                      className={cn(
+                        "tabular-nums",
+                        plannedDateClass(row.nextMaintenancePlannedAt)
+                      )}
+                    >
+                      {formatDate(row.nextMaintenancePlannedAt)}
+                    </TableCell>
+                    <TableCell className="font-mono text-sm">
+                      {row.fixedAssetNumber ?? "—"}
+                    </TableCell>
+                    <TableCell>
+                      <ToolingStatusBadge status={row.status} />
+                    </TableCell>
+                    <TableCell className="text-sm">{row.storageLocation ?? "—"}</TableCell>
+                    <TableCell className="tabular-nums">
+                      {row.lastMaintenanceDurationHours ?? "—"}
+                    </TableCell>
+                    <TableCell className="tabular-nums">
+                      {row.estimatedMaintenanceHours ?? "—"}
+                    </TableCell>
+                    {canEdit && (
+                      <TableCell onClick={(e) => e.stopPropagation()}>
                         <Button
                           size="sm"
                           variant="ghost"
@@ -499,11 +719,11 @@ export function PlanningToolingTab({ subdivisionId }: Props) {
                         >
                           <Wrench className="h-4 w-4" />
                         </Button>
-                      )}
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))
+                      </TableCell>
+                    )}
+                  </TableRow>
+                );
+              })
             )}
           </TableBody>
         </Table>
@@ -554,7 +774,11 @@ export function PlanningToolingTab({ subdivisionId }: Props) {
               </TableRow>
             ) : (
               maintenanceDue.map((row) => (
-                <TableRow key={row.id}>
+                <TableRow
+                  key={row.id}
+                  className="cursor-pointer hover:bg-muted/50"
+                  onClick={() => setDetailId(row.id)}
+                >
                   <TableCell className="font-mono">{row.pfNumber}</TableCell>
                   <TableCell>{row.name}</TableCell>
                   <TableCell><ProductLinks products={row.products} /></TableCell>
@@ -563,25 +787,16 @@ export function PlanningToolingTab({ subdivisionId }: Props) {
                   </TableCell>
                   <TableCell>{row.maintenanceCycleInterval ?? "—"}</TableCell>
                   <TableCell>{formatDate(row.lastMaintenanceAt)}</TableCell>
-                  <TableCell>
-                    <div className="flex gap-1">
+                  <TableCell onClick={(e) => e.stopPropagation()}>
+                    {canEdit && (
                       <Button
                         size="sm"
-                        variant="outline"
-                        onClick={() => setDetailId(row.id)}
+                        onClick={() => openMaintenanceDialog(row.id)}
                       >
-                        <Eye className="h-4 w-4" />
+                        <CheckCircle2 className="h-4 w-4 mr-1" />
+                        Выполнить ТО
                       </Button>
-                      {canEdit && (
-                        <Button
-                          size="sm"
-                          onClick={() => openMaintenanceDialog(row.id)}
-                        >
-                          <CheckCircle2 className="h-4 w-4 mr-1" />
-                          Выполнить ТО
-                        </Button>
-                      )}
-                    </div>
+                    )}
                   </TableCell>
                 </TableRow>
               ))
@@ -622,7 +837,7 @@ export function PlanningToolingTab({ subdivisionId }: Props) {
                 <>
                   <span className="font-mono">{detail.pfNumber}</span>
                   <span>— {detail.name}</span>
-                  <StatusBadge status={detail.status} />
+                  <ToolingStatusBadge status={detail.status} />
                 </>
               ) : (
                 "Карточка оснастки/ПФ"
@@ -642,7 +857,7 @@ export function PlanningToolingTab({ subdivisionId }: Props) {
                       const full = products.find((pr) => pr.id === p.id);
                       const normPreview = computeShiftNormFromCycle(
                         full?.cycleTimeSec ?? null,
-                        detail.cavities ?? null
+                        effectivePiecesPerCycle(detail)
                       );
                       return (
                         <div key={p.id} className="rounded-md border p-3 space-y-2">
@@ -686,53 +901,118 @@ export function PlanningToolingTab({ subdivisionId }: Props) {
                   <div>{TOOLING_TYPE_LABELS[detail.toolingType] ?? detail.toolingType}</div>
                 </div>
                 <div>
-                  <div className="text-muted-foreground">Гнёзд</div>
-                  <div>{detail.cavities ?? "—"}</div>
+                  <div className="text-muted-foreground">Гнёзда</div>
+                  <div>
+                    {formatCavitiesDisplay({
+                      cavitiesLayout: detail.cavitiesLayout,
+                      cavities: detail.cavities,
+                    })}
+                  </div>
+                  {detail.cavitiesLayout && (
+                    <div className="text-xs text-muted-foreground">
+                      Всего: {detail.cavities ?? "—"} гнёзд
+                    </div>
+                  )}
                 </div>
                 <div>
-                  <div className="text-muted-foreground">Место хранения</div>
+                  <div className="text-muted-foreground">Изделий за цикл (счётчик)</div>
+                  <div className="font-medium tabular-nums">
+                    {effectivePiecesPerCycle(detail)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">№ ОС</div>
+                  <div className="font-mono">{detail.fixedAssetNumber ?? "—"}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Местоположение</div>
                   <div>{detail.storageLocation ?? "—"}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Дата обновления</div>
+                  <div>{formatDate(detail.infoUpdatedAt)}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Плановая дата ТО</div>
+                  <div
+                    className={cn(
+                      "inline-block rounded px-1.5",
+                      plannedDateClass(detail.nextMaintenancePlannedAt)
+                    )}
+                  >
+                    {formatDate(detail.nextMaintenancePlannedAt)}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    По плану выпуска изделий
+                  </p>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Длительность ТО, ч</div>
+                  <div>{detail.lastMaintenanceDurationHours ?? "—"}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Оценка ТО, ч</div>
+                  <div>{detail.estimatedMaintenanceHours ?? "—"}</div>
                 </div>
               </section>
 
               <section className="space-y-2">
-                <h3 className="font-medium">Счётчики циклов</h3>
-                <div className="grid grid-cols-2 gap-3 rounded-md border p-3">
+                <h3 className="font-medium">Реестр: гарантия и ТО</h3>
+                <div className="grid grid-cols-2 gap-3 rounded-md border p-3 text-sm">
                   <div>
-                    <div className="text-muted-foreground">Всего (из плана)</div>
-                    <div className="text-lg font-semibold">{detail.cycleCounterTotal}</div>
+                    <div className="text-muted-foreground">Смыканий (всего)</div>
+                    <div className="text-lg font-semibold tabular-nums">{detail.cycleCounterTotal}</div>
                   </div>
                   <div>
-                    <div className="text-muted-foreground">После последнего ТО</div>
-                    <div className="text-lg font-semibold">{detail.cyclesSinceMaintenance}</div>
+                    <div className="text-muted-foreground">Гарантия, смыканий</div>
+                    <div className="tabular-nums">{detail.cyclesUntilGuarantee ?? "—"}</div>
                   </div>
                   <div>
-                    <div className="text-muted-foreground">На момент ТО</div>
-                    <div>{detail.cyclesAtLastMaintenance ?? "—"}</div>
+                    <div className="text-muted-foreground">% гарантии</div>
+                    <PercentCell
+                      value={warrantyUsagePercent(
+                        detail.cycleCounterTotal,
+                        detail.cyclesUntilGuarantee
+                      )}
+                    />
                   </div>
                   <div>
-                    <div className="text-muted-foreground">До следующего ТО</div>
-                    <div className="font-medium">
-                      {detail.cyclesUntilMaintenance != null
-                        ? detail.cyclesUntilMaintenance
+                    <div className="text-muted-foreground">Осталось до гарантии</div>
+                    <div className="tabular-nums">
+                      {detail.cyclesRemainingGuarantee != null
+                        ? detail.cyclesRemainingGuarantee
                         : "—"}
                     </div>
                   </div>
                   <div>
-                    <div className="text-muted-foreground">Интервал ТО, циклов</div>
-                    <div>{detail.maintenanceCycleInterval ?? "—"}</div>
+                    <div className="text-muted-foreground">После последнего ТО</div>
+                    <div className="text-lg font-semibold tabular-nums">
+                      {detail.cyclesSinceMaintenance}
+                    </div>
                   </div>
                   <div>
-                    <div className="text-muted-foreground">До гарантии, циклов</div>
-                    <div>
-                      {detail.cyclesRemainingGuarantee != null
-                        ? detail.cyclesRemainingGuarantee
-                        : "—"}
-                      {detail.cyclesUntilGuarantee != null && (
-                        <span className="text-muted-foreground text-xs ml-1">
-                          (лимит {detail.cyclesUntilGuarantee})
-                        </span>
+                    <div className="text-muted-foreground">На момент ТО</div>
+                    <div className="tabular-nums">{detail.cyclesAtLastMaintenance ?? "—"}</div>
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground">Периодичность ТО</div>
+                    <div className="tabular-nums">{detail.maintenanceCycleInterval ?? "—"}</div>
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground">% наработки после ТО</div>
+                    <PercentCell
+                      value={maintenanceUsagePercent(
+                        detail.cyclesSinceMaintenance,
+                        detail.maintenanceCycleInterval
                       )}
+                    />
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground">До следующего ТО</div>
+                    <div className="font-medium tabular-nums">
+                      {detail.cyclesUntilMaintenance != null
+                        ? detail.cyclesUntilMaintenance
+                        : "—"}
                     </div>
                   </div>
                   <div>
@@ -741,7 +1021,9 @@ export function PlanningToolingTab({ subdivisionId }: Props) {
                   </div>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Циклы считаются из факта выпуска (вкладка «Факт» / календарь): изделия ÷ гнёзда формы.
+                  Циклы считаются из факта выпуска: изделия ÷ изделий за цикл
+                  ({effectivePiecesPerCycle(detail)}).
+                  Для уже работающих форм значения можно задать вручную через «Редактировать».
                 </p>
               </section>
 
@@ -841,13 +1123,34 @@ export function PlanningToolingTab({ subdivisionId }: Props) {
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
                 />
               </div>
-              <div className="space-y-1">
-                <Label>Гнёзд, шт</Label>
-                <Input
-                  value={form.cavities}
-                  onChange={(e) => setForm({ ...form, cavities: e.target.value })}
-                  placeholder="Количество гнёзд формы"
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label>Гнёзда</Label>
+                  <Input
+                    value={form.cavities}
+                    onChange={(e) => setForm({ ...form, cavities: e.target.value })}
+                    placeholder="8 или 2+2+4+1"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Схема «2+2+4+1» — сумма {parseCavitiesInput(form.cavities).cavities ?? "—"} гнёзд
+                  </p>
+                </div>
+                <div className="space-y-1">
+                  <Label>Изделий за цикл (опц.)</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={form.piecesPerCycle}
+                    onChange={(e) => setForm({ ...form, piecesPerCycle: e.target.value })}
+                    placeholder="Приоритет для счётчика"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Счёт смыканий: {effectivePiecesFromForm(form)} изд./цикл
+                    {!form.piecesPerCycle.trim() && form.cavities.includes("+")
+                      ? " (первое число схемы)"
+                      : ""}
+                  </p>
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
@@ -866,6 +1169,24 @@ export function PlanningToolingTab({ subdivisionId }: Props) {
                   <Input
                     value={form.storageLocation}
                     onChange={(e) => setForm({ ...form, storageLocation: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label>№ ОС (инвентарный)</Label>
+                  <Input
+                    value={form.fixedAssetNumber}
+                    onChange={(e) => setForm({ ...form, fixedAssetNumber: e.target.value })}
+                    placeholder="1000691"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label>Дата обновления информации</Label>
+                  <Input
+                    type="date"
+                    value={form.infoUpdatedAt}
+                    onChange={(e) => setForm({ ...form, infoUpdatedAt: e.target.value })}
                   />
                 </div>
               </div>
@@ -891,6 +1212,105 @@ export function PlanningToolingTab({ subdivisionId }: Props) {
                   />
                 </div>
               </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label>Плановая дата следующего ТО</Label>
+                  <Input
+                    type="date"
+                    value={form.nextMaintenancePlannedAt}
+                    readOnly
+                    disabled
+                    className="bg-muted"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Рассчитывается автоматически по плану выпуска и наработке после ТО
+                  </p>
+                </div>
+                <div className="space-y-1">
+                  <Label>Длительность последнего ТО, ч</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    step={0.5}
+                    value={form.lastMaintenanceDurationHours}
+                    onChange={(e) =>
+                      setForm({ ...form, lastMaintenanceDurationHours: e.target.value })
+                    }
+                    placeholder="Часы"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label>Оценочное время ТО, ч</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    step={0.5}
+                    value={form.estimatedMaintenanceHours}
+                    onChange={(e) =>
+                      setForm({ ...form, estimatedMaintenanceHours: e.target.value })
+                    }
+                    placeholder="Часы"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-3 rounded-md border p-3 bg-muted/20">
+                <h4 className="text-sm font-medium">Счётчики и ТО (ручной ввод)</h4>
+                <p className="text-xs text-muted-foreground">
+                  Для форм уже в работе укажите накопленные циклы и дату последнего ТО. После
+                  сохранения значения не перезапишутся автоматически, пока поля заполнены.
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label>Всего циклов</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      value={form.cycleCounterTotal}
+                      onChange={(e) =>
+                        setForm({ ...form, cycleCounterTotal: e.target.value })
+                      }
+                      placeholder="0"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>После последнего ТО</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      value={form.cyclesSinceMaintenance}
+                      onChange={(e) =>
+                        setForm({ ...form, cyclesSinceMaintenance: e.target.value })
+                      }
+                      placeholder="0"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>На момент ТО</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      value={form.cyclesAtLastMaintenance}
+                      onChange={(e) =>
+                        setForm({ ...form, cyclesAtLastMaintenance: e.target.value })
+                      }
+                      placeholder="Авто: всего − после ТО"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Дата последнего ТО</Label>
+                    <Input
+                      type="date"
+                      value={form.lastMaintenanceAt}
+                      onChange={(e) =>
+                        setForm({ ...form, lastMaintenanceAt: e.target.value })
+                      }
+                    />
+                  </div>
+                </div>
+              </div>
+
               <div className="space-y-1">
                 <Label>Комментарий</Label>
                 <Input
@@ -938,10 +1358,10 @@ export function PlanningToolingTab({ subdivisionId }: Props) {
                   {form.productIds.map((productId) => {
                     const product = products.find((p) => p.id === productId);
                     const params = form.productParams[productId] ?? paramsFromProduct({});
-                    const cavitiesNum = form.cavities ? Number(form.cavities) : null;
+                    const piecesPerCycle = effectivePiecesFromForm(form);
                     const normPreview = computeShiftNormFromCycle(
                       params.cycleTimeSec ? Number(params.cycleTimeSec) : null,
-                      cavitiesNum
+                      piecesPerCycle
                     );
                     return (
                       <div key={productId} className="rounded-md border p-3 space-y-3">
@@ -1061,9 +1481,29 @@ export function PlanningToolingTab({ subdivisionId }: Props) {
           </DialogHeader>
           <div className="space-y-3 py-2">
             <p className="text-sm text-muted-foreground">
-              Счётчик «после ТО» обнулится, в историю добавится запис с текущим суммарным
-              счётчиком циклов.
+              Зафиксируйте ТО: счётчик «после ТО» сбросится относительно указанного суммарного
+              значения циклов на момент обслуживания.
             </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>Дата ТО</Label>
+                <Input
+                  type="date"
+                  value={maintenancePerformedAt}
+                  onChange={(e) => setMaintenancePerformedAt(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>Циклов на момент ТО</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={maintenanceCyclesAt}
+                  onChange={(e) => setMaintenanceCyclesAt(e.target.value)}
+                  placeholder="Текущий счётчик"
+                />
+              </div>
+            </div>
             <div className="space-y-1">
               <Label>Комментарий</Label>
               <Input

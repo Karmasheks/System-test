@@ -332,6 +332,8 @@ export function useProductionTooling(
   return useQuery<ProductionToolingView[]>({
     queryKey: ["/api/production/tooling", subdivisionId, search, activeOnly],
     enabled: subdivisionId != null,
+    staleTime: 20_000,
+    placeholderData: (previous) => previous,
     queryFn: async () => {
       const res = await apiRequest(
         "GET",
@@ -350,6 +352,8 @@ export function useToolingDetail(id: number | null) {
   return useQuery<ProductionToolingDetail>({
     queryKey: ["/api/production/tooling", id],
     enabled: id != null,
+    staleTime: 10_000,
+    placeholderData: (previous) => previous,
     queryFn: async () => {
       const res = await apiRequest("GET", `/api/production/tooling/${id}`);
       return res.json();
@@ -694,7 +698,32 @@ export function useProductionMutations() {
     queryClient.invalidateQueries({ queryKey: ["/api/production/tooling"] });
     queryClient.invalidateQueries({ queryKey: ["/api/production/daily-plan/grid"] });
     queryClient.invalidateQueries({ queryKey: ["/api/production/shift-templates"] });
+  };
+
+  const invalidateToolingQueries = () => {
+    queryClient.invalidateQueries({ queryKey: ["/api/production/tooling"] });
+  };
+
+  const invalidateProductsQueries = () => {
     queryClient.invalidateQueries({ queryKey: ["/api/production/products"] });
+  };
+
+  const patchToolingInCaches = (updated: ProductionToolingView) => {
+    queryClient.setQueriesData<ProductionToolingView[]>(
+      { queryKey: ["/api/production/tooling"] },
+      (old) => {
+        if (!old || !Array.isArray(old)) return old;
+        const idx = old.findIndex((t) => t.id === updated.id);
+        if (idx < 0) return old;
+        const next = [...old];
+        next[idx] = { ...next[idx], ...updated };
+        return next;
+      }
+    );
+    queryClient.setQueryData<ProductionToolingDetail>(
+      ["/api/production/tooling", updated.id],
+      (old) => (old ? { ...old, ...updated } : old)
+    );
   };
 
   const createOrder = useMutation({
@@ -798,17 +827,25 @@ export function useProductionMutations() {
   const createTooling = useMutation({
     mutationFn: async (body: Record<string, unknown>) => {
       const res = await apiRequest("POST", "/api/production/tooling", body);
-      return res.json();
+      return res.json() as Promise<ProductionToolingView>;
     },
-    onSuccess: invalidateAll,
+    onSuccess: (data) => {
+      if (data?.id) patchToolingInCaches(data);
+      invalidateToolingQueries();
+      invalidateProductsQueries();
+    },
   });
 
   const updateTooling = useMutation({
     mutationFn: async ({ id, ...body }: { id: number } & Record<string, unknown>) => {
       const res = await apiRequest("PATCH", `/api/production/tooling/${id}`, body);
-      return res.json();
+      return res.json() as Promise<ProductionToolingView>;
     },
-    onSuccess: invalidateAll,
+    onSuccess: (data) => {
+      if (data?.id) patchToolingInCaches(data);
+      invalidateToolingQueries();
+      invalidateProductsQueries();
+    },
   });
 
   const bulkUpsertDailyPlan = useMutation({
@@ -852,7 +889,7 @@ export function useProductionMutations() {
       const res = await apiRequest("PATCH", `/api/production/products/${id}`, body);
       return res.json();
     },
-    onSuccess: invalidateAll,
+    onSuccess: invalidateProductsQueries,
   });
 
   const createProductFromTooling = useMutation({
@@ -867,14 +904,22 @@ export function useProductionMutations() {
       );
       return res.json();
     },
-    onSuccess: invalidateAll,
+    onSuccess: () => {
+      invalidateToolingQueries();
+      invalidateProductsQueries();
+    },
   });
 
   const recordToolingMaintenance = useMutation({
     mutationFn: async ({
       toolingId,
       ...body
-    }: { toolingId: number; comment?: string; performedAt?: string }) => {
+    }: {
+      toolingId: number;
+      comment?: string;
+      performedAt?: string;
+      cyclesAtMaintenance?: number;
+    }) => {
       const res = await apiRequest(
         "POST",
         `/api/production/tooling/${toolingId}/maintenance`,
@@ -882,7 +927,9 @@ export function useProductionMutations() {
       );
       return res.json();
     },
-    onSuccess: invalidateAll,
+    onSuccess: () => {
+      invalidateToolingQueries();
+    },
   });
 
   const addBomLine = useMutation({
