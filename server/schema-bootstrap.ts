@@ -80,6 +80,7 @@ export async function bootstrapSchema(connectionString: string): Promise<void> {
     await sql`ALTER TABLE production_daily_plan ADD COLUMN IF NOT EXISTS tooling_id integer`;
 
     await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS sprue_weight real`;
+    await sql`ALTER TABLE products ADD COLUMN IF NOT EXISTS custom_attributes jsonb DEFAULT '{}'::jsonb`;
     await sql`ALTER TABLE materials ADD COLUMN IF NOT EXISTS product_id integer`;
 
     await sql`ALTER TABLE production_tooling ADD COLUMN IF NOT EXISTS fixed_asset_number text`;

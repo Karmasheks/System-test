@@ -49,17 +49,21 @@ import {
   PRODUCTION_ORDER_PRIORITY_LABELS,
   PRODUCTION_ORDER_STATUS_LABELS,
 } from "@/lib/production-planning-constants";
-import { Plus, Upload, ArrowRightCircle } from "lucide-react";
+import { Plus, Upload, ArrowRightCircle, Trash2 } from "lucide-react";
 import type { ProductionOrder } from "@shared/schema";
 import { ProductionExcelImportDialog } from "@/components/planning/production-excel-import-dialog";
 import { ListPaginationControls } from "@/components/list-pagination-controls";
 import { useListPagination } from "@/hooks/use-list-pagination";
+import { ProductCatalogPicker } from "@/components/planning/product-catalog-picker";
+import { ToolingPfPicker } from "@/components/planning/tooling-pf-picker";
 
 type Props = {
   subdivisionId: number;
+  /** Встроенный блок на вкладке «График» — компактнее. */
+  embedded?: boolean;
 };
 
-export function PlanningOrdersTab({ subdivisionId }: Props) {
+export function PlanningOrdersTab({ subdivisionId, embedded }: Props) {
   const { toast } = useToast();
   const { canEditModule } = useAccessControl();
   const canEdit = canEditModule("production_planning");
@@ -104,7 +108,8 @@ export function PlanningOrdersTab({ subdivisionId }: Props) {
     to,
   } = useListPagination(orders, 25, ordersFilterKey);
 
-  const { createOrder, updateOrderStatus, createPlanningDemand } = useProductionMutations();
+  const { createOrder, updateOrderStatus, deleteOrder, createPlanningDemand } =
+    useProductionMutations();
 
   const [form, setForm] = useState({
     toolingId: "",
@@ -300,6 +305,39 @@ export function PlanningOrdersTab({ subdivisionId }: Props) {
     }
   };
 
+  const handleStatusChange = async (order: ProductionOrder, status: string) => {
+    try {
+      await updateOrderStatus.mutateAsync({ id: order.id, status });
+      toast({ title: "Статус обновлён" });
+    } catch (e: unknown) {
+      toast({
+        title: "Ошибка",
+        variant: "destructive",
+        description: e instanceof Error ? e.message : "Не удалось изменить статус",
+      });
+    }
+  };
+
+  const handleDeleteOrder = async (order: ProductionOrder) => {
+    if (
+      !window.confirm(
+        `Удалить заказ ${order.orderNumber}? Это действие нельзя отменить.`
+      )
+    ) {
+      return;
+    }
+    try {
+      await deleteOrder.mutateAsync(order.id);
+      toast({ title: "Заказ удалён" });
+    } catch (e: unknown) {
+      toast({
+        title: "Не удалось удалить",
+        description: e instanceof Error ? e.message : "Ошибка",
+        variant: "destructive",
+      });
+    }
+  };
+
   const handleToPlan = async (order: ProductionOrder) => {
     try {
       await updateOrderStatus.mutateAsync({ id: order.id, status: "ready" });
@@ -314,7 +352,8 @@ export function PlanningOrdersTab({ subdivisionId }: Props) {
   };
 
   return (
-    <div className="space-y-4">
+    <div className={embedded ? "space-y-3" : "space-y-4"}>
+      {!embedded && (
       <div className="flex flex-wrap gap-2 items-center justify-between">
         <div className="flex flex-wrap gap-2">
           <Select value={statusFilter} onValueChange={setStatusFilter}>
@@ -353,6 +392,19 @@ export function PlanningOrdersTab({ subdivisionId }: Props) {
           </div>
         )}
       </div>
+      )}
+
+      {embedded && canEdit && (
+        <div className="flex flex-wrap gap-2 items-center justify-between">
+          <p className="text-sm text-muted-foreground">
+            Создайте потребность — она появится в календаре плана ниже.
+          </p>
+          <Button size="sm" onClick={() => setCreateOpen(true)}>
+            <Plus className="w-4 h-4 mr-1" />
+            Новая потребность
+          </Button>
+        </div>
+      )}
 
       <div>
         <div className="rounded-md border">
@@ -365,7 +417,7 @@ export function PlanningOrdersTab({ subdivisionId }: Props) {
                 <TableHead>Выполнено</TableHead>
                 <TableHead>Статус</TableHead>
                 <TableHead>Приоритет</TableHead>
-                <TableHead className="w-[100px]" />
+                <TableHead className="w-[140px]">Действия</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -391,24 +443,57 @@ export function PlanningOrdersTab({ subdivisionId }: Props) {
                     <TableCell>{o.requestedQuantity}</TableCell>
                     <TableCell>{o.completedQuantity}</TableCell>
                     <TableCell>
-                      <Badge variant="outline">
-                        {PRODUCTION_ORDER_STATUS_LABELS[o.status] ?? o.status}
-                      </Badge>
+                      {canEdit ? (
+                        <Select
+                          value={o.status}
+                          onValueChange={(v) => handleStatusChange(o, v)}
+                        >
+                          <SelectTrigger className="h-8 w-[130px] text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {Object.entries(PRODUCTION_ORDER_STATUS_LABELS).map(([k, v]) => (
+                              <SelectItem key={k} value={k}>{v}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <Badge variant="outline">
+                          {PRODUCTION_ORDER_STATUS_LABELS[o.status] ?? o.status}
+                        </Badge>
+                      )}
                     </TableCell>
                     <TableCell>
                       {PRODUCTION_ORDER_PRIORITY_LABELS[o.priority] ?? o.priority}
                     </TableCell>
                     <TableCell>
-                      {canEdit && o.status === "draft" && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleToPlan(o)}
-                          title="В план"
-                        >
-                          <ArrowRightCircle className="w-4 h-4" />
-                        </Button>
-                      )}
+                      <div className="flex items-center gap-1">
+                        {canEdit && o.status === "draft" && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => handleToPlan(o)}
+                            title="Готов к планированию"
+                          >
+                            <ArrowRightCircle className="w-4 h-4" />
+                          </Button>
+                        )}
+                        {canEdit &&
+                          o.completedQuantity === 0 &&
+                          o.status !== "cancelled" && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-destructive hover:text-destructive"
+                              onClick={() => handleDeleteOrder(o)}
+                              title="Удалить заказ"
+                              disabled={deleteOrder.isPending}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 );
@@ -473,21 +558,13 @@ export function PlanningOrdersTab({ subdivisionId }: Props) {
                 </div>
                 <div>
                   <Label>Изделие</Label>
-                  <Select
+                  <ProductCatalogPicker
+                    products={products}
                     value={form.productId}
-                    onValueChange={handleProductChange}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Выберите изделие" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {products.map((p) => (
-                        <SelectItem key={p.id} value={String(p.id)}>
-                          {p.sapCode} — {p.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    onChange={handleProductChange}
+                    preferredPfNumber={selectedTooling?.pfNumber}
+                    placeholder="Выберите изделие"
+                  />
                   {selectedProduct && (
                     <p className="text-xs text-muted-foreground mt-1">
                       SAP: {selectedProduct.sapCode}
@@ -509,22 +586,15 @@ export function PlanningOrdersTab({ subdivisionId }: Props) {
                 </div>
                 <div>
                   <Label>ПФ / оснастка</Label>
-                  <Select
-                    value={form.toolingId || "none"}
-                    onValueChange={(v) => handleToolingChange(v === "none" ? "" : v)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Подставится по изделию" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Не выбрано</SelectItem>
-                      {tooling.map((t) => (
-                        <SelectItem key={t.id} value={String(t.id)}>
-                          {t.pfNumber} — {t.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <ToolingPfPicker
+                    tooling={tooling}
+                    value={form.toolingId}
+                    onChange={handleToolingChange}
+                    preferredProductId={
+                      form.productId ? Number(form.productId) : selectedProduct?.id ?? null
+                    }
+                    placeholder="Подставится по изделию"
+                  />
                   {selectedTooling && (
                     <p className="text-xs text-muted-foreground mt-1">
                       Гнёзд: {formatCavitiesDisplay(selectedTooling)}
@@ -540,21 +610,12 @@ export function PlanningOrdersTab({ subdivisionId }: Props) {
             {form.mode !== "planning" && (
             <div>
               <Label>Изделие</Label>
-              <Select
+              <ProductCatalogPicker
+                products={products}
                 value={form.productId}
-                onValueChange={(v) => setForm((f) => ({ ...f, productId: v }))}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Выберите изделие" />
-                </SelectTrigger>
-                <SelectContent>
-                  {products.map((p) => (
-                    <SelectItem key={p.id} value={String(p.id)}>
-                      {p.sapCode} — {p.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                onChange={(productId) => setForm((f) => ({ ...f, productId }))}
+                placeholder="Выберите изделие"
+              />
             </div>
             )}
 

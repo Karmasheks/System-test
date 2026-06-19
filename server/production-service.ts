@@ -10,6 +10,7 @@ import {
   productionSchedule,
   productionFact,
   productionDowntimes,
+  productionDailyPlan,
   productionPlanConflicts,
   maintenanceRecords,
   equipment,
@@ -460,6 +461,30 @@ export async function updateOrderStatus(id: number, status: ProductionOrderStatu
     .where(eq(productionOrders.id, id))
     .returning();
   return row ?? null;
+}
+
+export async function deleteProductionOrder(id: number) {
+  const order = await getProductionOrder(id);
+  if (!order) return null;
+
+  const [factRow] = await db
+    .select({ count: sql<number>`count(*)`.mapWith(Number) })
+    .from(productionFact)
+    .where(eq(productionFact.orderId, id));
+  if ((factRow?.count ?? 0) > 0 || order.completedQuantity > 0) {
+    throw new Error(
+      "Нельзя удалить заказ с фактом выпуска. Установите статус «Отменён»."
+    );
+  }
+
+  await db.delete(productionDailyPlan).where(eq(productionDailyPlan.orderId, id));
+  await db.delete(productionSchedule).where(eq(productionSchedule.orderId, id));
+  await db.delete(productionPlanConflicts).where(eq(productionPlanConflicts.orderId, id));
+  const [deleted] = await db
+    .delete(productionOrders)
+    .where(eq(productionOrders.id, id))
+    .returning();
+  return deleted ?? null;
 }
 
 export async function getOrderRemainingQuantity(orderId: number) {

@@ -47,6 +47,7 @@ import {
   createProductionOrder,
   updateProductionOrder,
   updateOrderStatus,
+  deleteProductionOrder,
   getOrderRemainingQuantity,
   listSchedule,
   assignScheduleSlot,
@@ -64,7 +65,7 @@ import {
   getProductionPlanningSettings,
   updateProductionPlanningSettings,
 } from "./production-service";
-import { listMaterialStocksBySubdivision, getInternalWarehouseSummary } from "./production-materials-service";
+import { listMaterialStocksBySubdivision, getInternalWarehouseSummary, adjustMaterialStock, updateMaterialStockFields, getMaterialStockById } from "./production-materials-service";
 import {
   listProductionTooling,
   createProductionTooling,
@@ -596,6 +597,82 @@ export function registerProductionRoutes(app: Express, authenticate: AuthMiddlew
     }
   });
 
+  app.patch("/api/production/materials/stocks/:id", authenticate, async (req, res) => {
+    const ctx = await requireProductionEdit(req, res);
+    if (!ctx) return;
+
+    try {
+      const id = Number(req.params.id);
+      const existing = await getMaterialStockById(id);
+      if (!existing) return res.status(404).json({ message: "Не найдено" });
+
+      const subScope = await getSubdivisionScopeForRequest(req);
+      if (subScope) {
+        try {
+          assertSubdivisionAccess(subScope, existing.subdivisionId);
+        } catch (e) {
+          if (handleSubdivisionError(res, e)) return;
+        }
+      }
+
+      const body = z
+        .object({
+          minStock: z.number().min(0).optional(),
+          storageLocation: z.string().optional(),
+          quantity: z.number().min(0).optional(),
+        })
+        .parse(req.body);
+
+      const stock = await updateMaterialStockFields(id, body);
+      if (!stock) return res.status(404).json({ message: "Не найдено" });
+
+      res.json(stock);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Ошибка обновления";
+      res.status(400).json({ message });
+    }
+  });
+
+  app.post("/api/production/materials/stocks/:id/adjust", authenticate, async (req, res) => {
+    const ctx = await requireProductionEdit(req, res);
+    if (!ctx) return;
+
+    try {
+      const id = Number(req.params.id);
+      const existing = await getMaterialStockById(id);
+      if (!existing) return res.status(404).json({ message: "Не найдено" });
+
+      const subScope = await getSubdivisionScopeForRequest(req);
+      if (subScope) {
+        try {
+          assertSubdivisionAccess(subScope, existing.subdivisionId);
+        } catch (e) {
+          if (handleSubdivisionError(res, e)) return;
+        }
+      }
+
+      const body = z
+        .object({
+          quantityDelta: z.number(),
+          comment: z.string().optional(),
+        })
+        .parse(req.body);
+
+      const user = req.user as AuthenticatedUser;
+      const result = await adjustMaterialStock({
+        stockId: id,
+        quantityDelta: body.quantityDelta,
+        comment: body.comment,
+        user: { id: user.id, name: user.name },
+      });
+
+      res.json(result);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Ошибка корректировки";
+      res.status(400).json({ message });
+    }
+  });
+
   app.get("/api/production/warehouse/summary", authenticate, async (req, res) => {
     const ctx = await requireProductionView(req, res);
     if (!ctx) return;
@@ -857,7 +934,7 @@ export function registerProductionRoutes(app: Express, authenticate: AuthMiddlew
             orderId: z.number().int().positive().nullable().optional(),
             productId: z.number().int().positive().nullable().optional(),
             planDate: z.string().min(1),
-            shiftCode: z.enum(["1", "2"]).optional(),
+            shiftCode: z.string().min(1).max(8).optional(),
             plannedQuantity: z.number().min(0),
             pfNumber: z.string().nullable().optional(),
             toolingId: z.number().int().positive().nullable().optional(),
@@ -1118,6 +1195,33 @@ export function registerProductionRoutes(app: Express, authenticate: AuthMiddlew
       res.json(order);
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "Ошибка";
+      res.status(400).json({ message });
+    }
+  });
+
+  app.delete("/api/production/orders/:id", authenticate, async (req, res) => {
+    const ctx = await requireProductionEdit(req, res);
+    if (!ctx) return;
+
+    try {
+      const id = Number(req.params.id);
+      const existing = await getProductionOrder(id);
+      if (!existing) return res.status(404).json({ message: "Не найдено" });
+
+      const subScope = await getSubdivisionScopeForRequest(req);
+      if (subScope) {
+        try {
+          assertSubdivisionAccess(subScope, existing.subdivisionId);
+        } catch (e) {
+          if (handleSubdivisionError(res, e)) return;
+        }
+      }
+
+      const deleted = await deleteProductionOrder(id);
+      if (!deleted) return res.status(404).json({ message: "Не найдено" });
+      res.json({ ok: true, id: deleted.id });
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Ошибка удаления";
       res.status(400).json({ message });
     }
   });

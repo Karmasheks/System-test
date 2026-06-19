@@ -392,6 +392,8 @@ export type ShiftSlotView = {
   hours: number;
   startTime?: string;
   endTime?: string;
+  lunchMinutes?: number;
+  breakMinutes?: number;
 };
 
 export type DailyPlanGridResponse = {
@@ -808,6 +810,55 @@ export function useProductionMutations() {
     onSuccess: invalidateAll,
   });
 
+  const deleteOrder = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await apiRequest("DELETE", `/api/production/orders/${id}`);
+      return res.json();
+    },
+    onSuccess: invalidateAll,
+  });
+
+  const updateMaterialStock = useMutation({
+    mutationFn: async ({
+      id,
+      ...body
+    }: {
+      id: number;
+      minStock?: number;
+      storageLocation?: string;
+      quantity?: number;
+    }) => {
+      const res = await apiRequest("PATCH", `/api/production/materials/stocks/${id}`, body);
+      return res.json();
+    },
+    onSuccess: () => {
+      invalidateAll();
+      queryClient.invalidateQueries({ queryKey: ["/api/production/warehouse/summary"] });
+    },
+  });
+
+  const adjustMaterialStock = useMutation({
+    mutationFn: async ({
+      id,
+      quantityDelta,
+      comment,
+    }: {
+      id: number;
+      quantityDelta: number;
+      comment?: string;
+    }) => {
+      const res = await apiRequest("POST", `/api/production/materials/stocks/${id}/adjust`, {
+        quantityDelta,
+        comment,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      invalidateAll();
+      queryClient.invalidateQueries({ queryKey: ["/api/production/warehouse/summary"] });
+    },
+  });
+
   const assignSchedule = useMutation({
     mutationFn: async (body: Record<string, unknown>) => {
       const res = await apiRequest("POST", "/api/production/schedule", body);
@@ -1075,6 +1126,9 @@ export function useProductionMutations() {
   return {
     createOrder,
     updateOrderStatus,
+    deleteOrder,
+    adjustMaterialStock,
+    updateMaterialStock,
     assignSchedule,
     updateSchedule,
     cancelSchedule,

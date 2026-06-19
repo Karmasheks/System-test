@@ -58,7 +58,9 @@ export function ScheduleTimeline({
   return (
     <div className="space-y-2">
       <div className="flex border-b pb-2 text-xs text-muted-foreground">
-        <div className="w-48 shrink-0 pr-2 font-medium text-foreground">Оборудование</div>
+        <div className="w-[min(280px,32%)] shrink-0 pr-3 font-medium text-foreground">
+          Оборудование
+        </div>
         <div className="flex-1 grid grid-cols-7 gap-1">
           {days.map((d) => (
             <div key={d.toISOString()} className="text-center">
@@ -78,14 +80,16 @@ export function ScheduleTimeline({
             eq.repairSubdivisionId != null;
 
           return (
-            <div key={eq.id} className="flex items-stretch min-h-[44px] border-b border-border/50">
-              <div className="w-48 shrink-0 pr-2 py-1 text-sm truncate" title={eq.name}>
-                <span className="font-medium">{eq.name}</span>
+            <div key={eq.id} className="flex items-stretch min-h-[52px] border-b border-border/50">
+              <div className="w-[min(280px,32%)] shrink-0 pr-3 py-1.5 text-sm" title={eq.name}>
+                <span className="font-medium leading-snug whitespace-normal break-words line-clamp-3">
+                  {eq.name}
+                </span>
                 {unavailable && (
                   <span className="block text-xs text-muted-foreground">недоступно</span>
                 )}
               </div>
-              <div className="relative flex-1 h-11 bg-muted/30 rounded-md overflow-hidden">
+              <div className="relative flex-1 min-h-[52px] bg-muted/30 rounded-md overflow-hidden">
                 {showUnavailableOverlay && unavailable && (
                   <div
                     className="absolute inset-0 bg-gray-400/25 pointer-events-none"
@@ -120,14 +124,19 @@ export function ScheduleTimeline({
                     key={slot.id}
                     type="button"
                     className={cn(
-                      "absolute top-1 bottom-1 rounded border text-[10px] px-1 truncate shadow-sm hover:opacity-90",
+                      "absolute top-1 bottom-1 rounded border text-[10px] px-1 shadow-sm hover:opacity-90 text-left overflow-hidden",
                       slotColor(slot.conflictStatus, slot.status)
                     )}
-                    style={{ left: `${left}%`, width: `${width}%` }}
+                    style={{ left: `${left}%`, width: `${width}%`, minWidth: width < 3 ? "2rem" : undefined }}
                     onClick={() => onSlotClick(slot)}
-                    title={`Заказ #${slot.orderId} · ${SCHEDULE_CONFLICT_LABELS[slot.conflictStatus] ?? slot.conflictStatus}`}
+                    title={`${slot.orderNumber ?? `#${slot.orderId}`}${slot.productName ? ` · ${slot.productName}` : ""} · ${slot.plannedQuantity} шт`}
                   >
-                    #{slot.orderId}
+                    <span className="block truncate font-medium">
+                      {slot.orderNumber ?? `#${slot.orderId}`}
+                    </span>
+                    {width >= 6 && slot.productName && (
+                      <span className="block truncate opacity-90 text-[9px]">{slot.productName}</span>
+                    )}
                   </button>
                 ))}
               </div>

@@ -17,12 +17,12 @@ import { useProductionDisplayConfig } from "@/hooks/use-production-display-confi
 import {
   PRODUCTION_SCHEDULE_STATUS_CODES,
   PRODUCTION_SCHEDULE_STATUS_LABELS,
-  PRODUCT_CATALOG_PRESETS,
   type ProductionDisplayConfig,
 } from "@shared/production-display-config";
 import { useToast } from "@/hooks/use-toast";
 import { Settings2 } from "lucide-react";
 import { PlanningShiftSettings } from "@/components/planning/planning-shift-settings";
+import { ProductCatalogSettingsPanel } from "@/components/planning/product-catalog-settings-panel";
 
 const WRITEOFF_MODE_LABELS: Record<string, string> = {
   sync: "Синхронно с фактом выпуска",
@@ -376,58 +376,15 @@ export function PlanningSettingsTab({ subdivisionId, subdivisionName }: Props) {
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Справочник изделий</CardTitle>
             <CardDescription>
-              Какие поля показывать на вкладке «Изделия» — под тип продукции подразделения
+              Стандартные и свои поля на вкладке «Изделия». Сохраняйте шаблоны под тип продукции.
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4 text-sm">
-            <div className="flex flex-wrap gap-2">
-              {Object.entries(PRODUCT_CATALOG_PRESETS).map(([key, preset]) => (
-                <Button
-                  key={key}
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() =>
-                    applyLocalOverrides({
-                      productCatalog: {
-                        ...config.productCatalog,
-                        ...preset.config,
-                      },
-                    })
-                  }
-                >
-                  {preset.label}
-                </Button>
-              ))}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Пресеты можно донастроить чекбоксами ниже. Вес и литник необязательны при сохранении.
-            </p>
-            {(
-              [
-                ["showPfTooling", "ПФ / оснастка"],
-                ["showProductWeight", "Вес изделия"],
-                ["showSprueWeight", "Вес литника"],
-                ["showShiftNorm", "Норма смены"],
-                ["showCycleTime", "Цикл литья"],
-                ["showCavities", "Гнёзда"],
-              ] as const
-            ).map(([field, label]) => (
-              <label key={field} className="flex items-center gap-2">
-                <Checkbox
-                  checked={config.productCatalog[field]}
-                  onCheckedChange={(v) =>
-                    applyLocalOverrides({
-                      productCatalog: {
-                        ...config.productCatalog,
-                        [field]: Boolean(v),
-                      },
-                    })
-                  }
-                />
-                {label}
-              </label>
-            ))}
+          <CardContent>
+            <ProductCatalogSettingsPanel
+              catalog={config.productCatalog}
+              canEdit={canEdit}
+              onChange={(productCatalog) => applyLocalOverrides({ productCatalog })}
+            />
           </CardContent>
         </Card>
 
@@ -441,9 +398,7 @@ export function PlanningSettingsTab({ subdivisionId, subdivisionName }: Props) {
           <CardContent className="space-y-2 text-sm">
             {(
               [
-                ["schedule", "График планирования"],
-                ["orders", "Потребность и заказ"],
-                ["facts", "Факт выпуска"],
+                ["schedule", "График и заказы (план + потребности)"],
                 ["warehouse", "Внутренний склад"],
                 ["tooling", "Оснастка / ПФ"],
                 ["products", "Изделия"],

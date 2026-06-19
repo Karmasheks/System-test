@@ -3,71 +3,58 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { Check, ChevronDown, ChevronUp } from "lucide-react";
-import type { ProductionToolingView } from "@/hooks/use-production-planning";
+import type { ProductWithSubs } from "@/hooks/use-production-planning";
 
 type Props = {
-  tooling: ProductionToolingView[];
+  products: ProductWithSubs[];
   value: string;
-  onChange: (toolingId: string) => void;
+  onChange: (productId: string) => void;
   disabled?: boolean;
   placeholder?: string;
-  /** Поднять в списке ПФ, связанные с этим изделием. */
-  preferredProductId?: number | null;
+  /** Поднять в списке изделия с этим номером ПФ (при выборе оснастки). */
+  preferredPfNumber?: string | null;
   allowClear?: boolean;
 };
 
-export function ToolingPfPicker({
-  tooling,
+export function ProductCatalogPicker({
+  products,
   value,
   onChange,
   disabled,
-  placeholder = "Не привязано",
-  preferredProductId,
-  allowClear = true,
+  placeholder = "Выберите изделие",
+  preferredPfNumber,
+  allowClear = false,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [search, setSearch] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
 
   const sorted = useMemo(() => {
-    const list = [...tooling].sort((a, b) =>
-      a.pfNumber.localeCompare(b.pfNumber, "ru", { numeric: true })
+    const list = [...products].sort((a, b) =>
+      a.sapCode.localeCompare(b.sapCode, "ru", { numeric: true })
     );
-    if (preferredProductId == null) return list;
+    if (!preferredPfNumber?.trim()) return list;
+    const pf = preferredPfNumber.trim().toLowerCase();
     return list.sort((a, b) => {
-      const aLinked =
-        a.productId === preferredProductId ||
-        a.products.some((p) => p.id === preferredProductId)
-          ? 0
-          : 1;
-      const bLinked =
-        b.productId === preferredProductId ||
-        b.products.some((p) => p.id === preferredProductId)
-          ? 0
-          : 1;
-      if (aLinked !== bLinked) return aLinked - bLinked;
-      return a.pfNumber.localeCompare(b.pfNumber, "ru", { numeric: true });
+      const aMatch = (a.pfNumber ?? "").toLowerCase() === pf ? 0 : 1;
+      const bMatch = (b.pfNumber ?? "").toLowerCase() === pf ? 0 : 1;
+      if (aMatch !== bMatch) return aMatch - bMatch;
+      return a.sapCode.localeCompare(b.sapCode, "ru", { numeric: true });
     });
-  }, [tooling, preferredProductId]);
+  }, [products, preferredPfNumber]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return sorted;
-    return sorted.filter((t) => {
-      if (
-        t.pfNumber.toLowerCase().includes(q) ||
-        t.name.toLowerCase().includes(q)
-      ) {
-        return true;
-      }
-      return t.products.some(
-        (p) =>
-          p.sapCode.toLowerCase().includes(q) || p.name.toLowerCase().includes(q)
-      );
-    });
+    return sorted.filter(
+      (p) =>
+        p.sapCode.toLowerCase().includes(q) ||
+        p.name.toLowerCase().includes(q) ||
+        (p.pfNumber ?? "").toLowerCase().includes(q)
+    );
   }, [sorted, search]);
 
-  const selected = sorted.find((t) => String(t.id) === value);
+  const selected = sorted.find((p) => String(p.id) === value);
 
   const scrollList = (position: "start" | "middle" | "end") => {
     const el = listRef.current;
@@ -100,7 +87,7 @@ export function ToolingPfPicker({
         <span className="truncate text-left pr-2">
           {selected ? (
             <>
-              <span className="font-mono">{selected.pfNumber}</span>
+              <span className="font-mono">{selected.sapCode}</span>
               <span className="text-muted-foreground"> — {selected.name}</span>
             </>
           ) : (
@@ -122,7 +109,7 @@ export function ToolingPfPicker({
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Поиск: номер ПФ, название, SAP изделия…"
+            placeholder="Поиск: SAP, название, номер ПФ…"
             className="h-8 text-sm bg-background"
             autoFocus
           />
@@ -183,12 +170,12 @@ export function ToolingPfPicker({
                 Ничего не найдено
               </p>
             ) : (
-              filtered.map((t) => {
-                const id = String(t.id);
+              filtered.map((p) => {
+                const id = String(p.id);
                 const isSelected = value === id;
                 return (
                   <button
-                    key={t.id}
+                    key={p.id}
                     type="button"
                     role="option"
                     aria-selected={isSelected}
@@ -205,11 +192,11 @@ export function ToolingPfPicker({
                       )}
                     />
                     <span className="min-w-0">
-                      <span className="font-mono font-medium block">{t.pfNumber}</span>
-                      <span className="text-xs text-muted-foreground line-clamp-2">{t.name}</span>
-                      {t.products.length > 0 && (
-                        <span className="text-[11px] text-muted-foreground line-clamp-1">
-                          {t.products.map((p) => p.sapCode).join(", ")}
+                      <span className="font-mono font-medium block">{p.sapCode}</span>
+                      <span className="text-xs text-muted-foreground line-clamp-2">{p.name}</span>
+                      {p.pfNumber && (
+                        <span className="text-[11px] text-muted-foreground font-mono">
+                          ПФ {p.pfNumber}
                         </span>
                       )}
                     </span>

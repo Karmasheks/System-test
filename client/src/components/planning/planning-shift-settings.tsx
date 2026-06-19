@@ -20,7 +20,12 @@ import {
   type ShiftSlotView,
 } from "@/hooks/use-production-planning";
 import { DEFAULT_SHIFT_SLOTS } from "@shared/shift-template-types";
+import {
+  computeShiftEndTime,
+  resolveShiftBreakMinutes,
+} from "@shared/shift-timeline-utils";
 import { Clock, Plus, Save } from "lucide-react";
+import { ShiftSlotTimeline } from "@/components/planning/shift-slot-timeline";
 
 type Props = {
   subdivisionId: number;
@@ -29,11 +34,19 @@ type Props = {
 
 function emptySlots(count: number): ShiftSlotView[] {
   const base = DEFAULT_SHIFT_SLOTS.slice(0, count);
-  return base.map((s, i) => ({
+  return base.map((s, i) => withComputedEnd({
     ...s,
     code: String(i + 1),
     name: s.name || `Смена ${i + 1}`,
   }));
+}
+
+function withComputedEnd(slot: ShiftSlotView): ShiftSlotView {
+  const { lunchMinutes, breakMinutes } = resolveShiftBreakMinutes(slot);
+  const endTime =
+    computeShiftEndTime(slot.startTime, slot.hours, lunchMinutes, breakMinutes) ??
+    slot.endTime;
+  return { ...slot, lunchMinutes, breakMinutes, endTime };
 }
 
 export function PlanningShiftSettings({ subdivisionId, canEdit }: Props) {
@@ -75,7 +88,7 @@ export function PlanningShiftSettings({ subdivisionId, canEdit }: Props) {
   useEffect(() => {
     if (!selectedTemplate) return;
     setTemplateName(selectedTemplate.name);
-    const s = selectedTemplate.pattern.slots;
+    const s = selectedTemplate.pattern.slots.map(withComputedEnd);
     setSlotCount(String(s.length));
     setSlots(s);
   }, [selectedTemplate?.id]);
@@ -105,13 +118,20 @@ export function PlanningShiftSettings({ subdivisionId, canEdit }: Props) {
 
   const updateSlot = (index: number, patch: Partial<ShiftSlotView>) => {
     setSlots((prev) =>
-      prev.map((s, i) => (i === index ? { ...s, ...patch, code: String(i + 1) } : s))
+      prev.map((s, i) =>
+        i === index ? withComputedEnd({ ...s, ...patch, code: String(i + 1) }) : s
+      )
     );
   };
 
+  const activeSlotsNormalized = useMemo(
+    () => activeSlots.map(withComputedEnd),
+    [activeSlots]
+  );
+
   const handleSaveTemplate = async () => {
     if (!canEdit) return;
-    const pattern = { slots: activeSlots };
+    const pattern = { slots: activeSlotsNormalized };
     try {
       if (selectedTemplateId && selectedTemplateId !== "new") {
         await updateShiftTemplate.mutateAsync({
@@ -199,7 +219,8 @@ export function PlanningShiftSettings({ subdivisionId, canEdit }: Props) {
             Шаблон смен
           </CardTitle>
           <CardDescription>
-            От 1 до 3 смен с разной длительностью. Используется при расчёте плана и норм.
+            Рабочие часы — для норм и плана. Обед и перерывы добавляются к календарному
+            интервалу (например, 11 ч работы + 1 ч обед + 1 ч перерывы = с 08:00 до 21:00).
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4 text-sm">
@@ -246,60 +267,97 @@ export function PlanningShiftSettings({ subdivisionId, canEdit }: Props) {
             />
           </div>
 
-          <div className="space-y-3">
-            {activeSlots.map((slot, index) => (
+          <div className="space-y-4">
+            {activeSlotsNormalized.map((slot, index) => (
               <div
                 key={slot.code}
-                className="grid gap-2 sm:grid-cols-4 p-3 rounded-md border bg-muted/20"
+                className="space-y-3 p-3 rounded-md border bg-muted/20"
               >
-                <div>
-                  <Label className="text-xs">Смена {index + 1}</Label>
-                  <Input
-                    className="h-9 mt-1"
-                    value={slot.name}
-                    onChange={(e) => updateSlot(index, { name: e.target.value })}
-                    disabled={!canEdit}
-                  />
+                <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-6">
+                  <div>
+                    <Label className="text-xs">Смена {index + 1}</Label>
+                    <Input
+                      className="h-9 mt-1"
+                      value={slot.name}
+                      onChange={(e) => updateSlot(index, { name: e.target.value })}
+                      disabled={!canEdit}
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Рабочих часов</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={24}
+                      step={0.5}
+                      className="h-9 mt-1"
+                      value={slot.hours}
+                      onChange={(e) =>
+                        updateSlot(index, { hours: Number(e.target.value) || 11 })
+                      }
+                      disabled={!canEdit}
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Начало</Label>
+                    <Input
+                      className="h-9 mt-1"
+                      placeholder="08:00"
+                      value={slot.startTime ?? ""}
+                      onChange={(e) => updateSlot(index, { startTime: e.target.value })}
+                      disabled={!canEdit}
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Обед, мин</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={240}
+                      step={15}
+                      className="h-9 mt-1"
+                      value={slot.lunchMinutes ?? 60}
+                      onChange={(e) =>
+                        updateSlot(index, {
+                          lunchMinutes: Math.max(0, Number(e.target.value) || 0),
+                        })
+                      }
+                      disabled={!canEdit}
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Перерывы, мин</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={240}
+                      step={15}
+                      className="h-9 mt-1"
+                      value={slot.breakMinutes ?? 60}
+                      onChange={(e) =>
+                        updateSlot(index, {
+                          breakMinutes: Math.max(0, Number(e.target.value) || 0),
+                        })
+                      }
+                      disabled={!canEdit}
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Окончание</Label>
+                    <Input
+                      className="h-9 mt-1 bg-muted/40"
+                      placeholder="21:00"
+                      value={slot.endTime ?? ""}
+                      readOnly
+                      tabIndex={-1}
+                      title="Рассчитывается: начало + рабочие часы + обед + перерывы"
+                    />
+                  </div>
                 </div>
-                <div>
-                  <Label className="text-xs">Часов</Label>
-                  <Input
-                    type="number"
-                    min={1}
-                    max={24}
-                    step={0.5}
-                    className="h-9 mt-1"
-                    value={slot.hours}
-                    onChange={(e) =>
-                      updateSlot(index, { hours: Number(e.target.value) || 11 })
-                    }
-                    disabled={!canEdit}
-                  />
-                </div>
-                <div>
-                  <Label className="text-xs">Начало</Label>
-                  <Input
-                    className="h-9 mt-1"
-                    placeholder="07:00"
-                    value={slot.startTime ?? ""}
-                    onChange={(e) => updateSlot(index, { startTime: e.target.value })}
-                    disabled={!canEdit}
-                  />
-                </div>
-                <div>
-                  <Label className="text-xs">Окончание</Label>
-                  <Input
-                    className="h-9 mt-1"
-                    placeholder="18:00"
-                    value={slot.endTime ?? ""}
-                    onChange={(e) => updateSlot(index, { endTime: e.target.value })}
-                    disabled={!canEdit}
-                  />
-                </div>
+                <ShiftSlotTimeline slot={slot} compact />
               </div>
             ))}
           </div>
-
           {canEdit && (
             <div className="flex flex-wrap gap-2">
               <Button
@@ -355,7 +413,10 @@ export function PlanningShiftSettings({ subdivisionId, canEdit }: Props) {
               {normSlots.map((slot) => (
                 <div key={slot.code} className="flex flex-wrap items-center gap-3">
                   <span className="min-w-[140px] text-muted-foreground">
-                    {slot.name} ({slot.hours} ч)
+                    {slot.name} ({slot.hours} ч раб.
+                    {(slot.lunchMinutes ?? 0) + (slot.breakMinutes ?? 0) > 0 &&
+                      `, ${slot.startTime ?? "?"}–${slot.endTime ?? "?"}`}
+                    )
                   </span>
                   <Input
                     type="number"

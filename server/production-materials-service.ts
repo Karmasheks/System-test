@@ -149,6 +149,65 @@ export async function recordMaterialMovement(
   return movement;
 }
 
+export async function getMaterialStockById(id: number) {
+  const [row] = await db.select().from(materialStocks).where(eq(materialStocks.id, id));
+  return row ?? null;
+}
+
+export async function updateMaterialStockFields(
+  stockId: number,
+  data: { minStock?: number; storageLocation?: string; quantity?: number }
+) {
+  const patch: Record<string, unknown> = { updatedAt: new Date() };
+  if (data.minStock != null) patch.minStock = data.minStock;
+  if (data.storageLocation != null) patch.storageLocation = data.storageLocation;
+  if (data.quantity != null) patch.quantity = data.quantity;
+
+  const [row] = await db
+    .update(materialStocks)
+    .set(patch)
+    .where(eq(materialStocks.id, stockId))
+    .returning();
+  return row ?? null;
+}
+
+export async function adjustMaterialStock(input: {
+  stockId: number;
+  quantityDelta: number;
+  comment?: string;
+  user: { id: number; name: string };
+}) {
+  const [stock] = await db
+    .select()
+    .from(materialStocks)
+    .where(eq(materialStocks.id, input.stockId));
+  if (!stock) throw new Error("Позиция склада не найдена");
+
+  const nextQty = stock.quantity + input.quantityDelta;
+  if (nextQty < 0) {
+    throw new Error("Недостаточно остатка на складе");
+  }
+
+  const [updated] = await db
+    .update(materialStocks)
+    .set({ quantity: nextQty, updatedAt: new Date() })
+    .where(eq(materialStocks.id, input.stockId))
+    .returning();
+
+  const movementType = input.quantityDelta >= 0 ? ("in" as const) : ("out" as const);
+  const movement = await recordMaterialMovement({
+    materialId: stock.materialId,
+    subdivisionId: stock.subdivisionId,
+    type: movementType,
+    quantity: Math.abs(input.quantityDelta),
+    comment: input.comment ?? (input.quantityDelta >= 0 ? "Приход" : "Расход"),
+    performedById: input.user.id,
+    performedByName: input.user.name,
+  });
+
+  return { stock: updated, movement };
+}
+
 async function adjustStockQuantity(
   materialId: number,
   subdivisionId: number,

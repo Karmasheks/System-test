@@ -15,6 +15,8 @@ export interface ScheduleTimelineSlot {
   id: number;
   equipmentId: string;
   orderId: number;
+  orderNumber?: string;
+  productName?: string;
   startTime: string;
   endTime: string;
   plannedQuantity: number;

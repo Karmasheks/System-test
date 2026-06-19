@@ -38,6 +38,7 @@ import {
   type DailyPlanCellValue,
 } from "@/hooks/use-production-planning";
 import { ChevronLeft, ChevronRight, Plus, Save, ClipboardList } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 type Props = {
   subdivisionId: number;
@@ -258,6 +259,8 @@ export function PlanningCalendarGrid({ subdivisionId }: Props) {
     }
   };
 
+  const pendingCount = Object.keys(pending).length;
+
   const formatShifts = (v: number | null) =>
     v != null ? v.toLocaleString("ru-RU", { maximumFractionDigits: 1 }) : "—";
 
@@ -290,26 +293,34 @@ export function PlanningCalendarGrid({ subdivisionId }: Props) {
                 <Plus className="h-4 w-4 mr-2" />
                 Строка (оборудование + заказ)
               </Button>
-              <Button onClick={handleSave} disabled={bulkUpsertDailyPlan.isPending}>
+              <Button
+                onClick={handleSave}
+                disabled={bulkUpsertDailyPlan.isPending || pendingCount === 0}
+                variant={pendingCount > 0 ? "default" : "secondary"}
+              >
                 <Save className="h-4 w-4 mr-2" />
-                Сохранить план
+                Сохранить план{pendingCount > 0 ? ` (${pendingCount})` : ""}
               </Button>
+              {pendingCount > 0 && (
+                <Button variant="ghost" size="sm" onClick={() => setPending({})}>
+                  Отменить изменения
+                </Button>
+              )}
             </>
           )}
         </div>
       </div>
 
-      <p className="text-xs text-muted-foreground">
-        План по сменам: в ячейке дня —{" "}
-        {shiftSlots.map((s) => s.name).join(", ")}. Нажмите «факт» под ячейкой,
-        чтобы ввести выпуск, брак и простои за смену.
+      <p className="text-sm text-muted-foreground">
+        В ячейке дня: <strong>план по сменам</strong> (верх) и <strong>выпуск за день</strong> (кнопка).
+        Итог по заказу — в колонке «Факт» слева (сумма всех дней).
       </p>
 
       {isLoading ? (
         <p className="text-sm text-muted-foreground">Загрузка календаря…</p>
       ) : (
         <div className="overflow-x-auto rounded-md border">
-          <table className="w-full text-xs border-collapse min-w-[1200px]">
+          <table className="w-full text-sm border-collapse min-w-[1100px]">
             <thead>
               <tr className="bg-muted/50 border-b">
                 <th className="p-2 text-left sticky left-0 bg-muted/50 z-20 min-w-[160px]">
@@ -327,11 +338,14 @@ export function PlanningCalendarGrid({ subdivisionId }: Props) {
                 {dates.map((d) => (
                   <th
                     key={d}
-                    className="p-1 text-center min-w-[56px] whitespace-nowrap border-l border-border/40"
+                    className="p-1.5 text-center min-w-[72px] whitespace-nowrap border-l border-border/40"
                   >
-                    <div>{format(new Date(d), "d", { locale: ru })}</div>
-                    <div className="text-[10px] text-muted-foreground">
+                    <div className="font-medium">{format(new Date(d), "d", { locale: ru })}</div>
+                    <div className="text-[11px] text-muted-foreground font-normal">
                       {format(new Date(d), "EEE", { locale: ru })}
+                    </div>
+                    <div className="text-[10px] text-muted-foreground font-normal mt-0.5">
+                      {shiftSlots.map((s) => s.code).join(" · ")}
                     </div>
                   </th>
                 ))}
@@ -377,22 +391,36 @@ export function PlanningCalendarGrid({ subdivisionId }: Props) {
                     <td className="p-2 text-center tabular-nums">{row.percentComplete}</td>
                     {dates.map((date) => {
                       const cell = row.cells[date] ?? emptyCell();
+                      const hasPending = shiftSlots.some(
+                        (slot) => pending[cellKey(row.key, date, slot.code)] != null
+                      );
                       return (
                         <td
                           key={date}
-                          className="p-0.5 border-l border-border/30 align-top"
+                          className={cn(
+                            "p-1 border-l border-border/30 align-top min-w-[72px]",
+                            hasPending && "bg-amber-50/80 dark:bg-amber-950/20"
+                          )}
                         >
+                          {cell.fact > 0 && (
+                            <div className="mb-1 rounded bg-emerald-100 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-300 text-center text-xs font-semibold tabular-nums py-0.5">
+                              +{cell.fact.toLocaleString("ru-RU")}
+                            </div>
+                          )}
                           {canEdit ? (
-                            <div className="space-y-0.5">
+                            <div className="space-y-1">
                               {shiftSlots.map((slot, slotIdx) => (
                                 <Input
                                   key={slot.code}
                                   type="number"
                                   min={0}
-                                  title={slot.name}
-                                  className={`h-7 text-center text-[10px] px-0.5 ${
-                                    slotIdx % 2 === 1 ? "bg-muted/30" : ""
-                                  }`}
+                                  title={`${slot.name} — план, шт`}
+                                  className={cn(
+                                    "h-8 text-center text-xs px-1",
+                                    slotIdx % 2 === 1 && "bg-muted/30",
+                                    pending[cellKey(row.key, date, slot.code)] != null &&
+                                      "ring-1 ring-amber-400"
+                                  )}
                                   value={getShiftValue(row, date, slot.code)}
                                   onChange={(e) =>
                                     handleShiftChange(row, date, slot.code, e.target.value)
@@ -401,34 +429,29 @@ export function PlanningCalendarGrid({ subdivisionId }: Props) {
                               ))}
                             </div>
                           ) : (
-                            <div className="text-center py-1 tabular-nums">
+                            <div className="text-center py-1 tabular-nums text-xs">
                               {shiftSlots.map((slot, slotIdx) => (
                                 <div
                                   key={slot.code}
                                   className={slotIdx % 2 === 1 ? "text-muted-foreground" : ""}
                                 >
-                                  {(row.cells[date] ?? emptyCell()).shifts[slot.code] || ""}
+                                  {(row.cells[date] ?? emptyCell()).shifts[slot.code] || "—"}
                                 </div>
                               ))}
                             </div>
                           )}
                           {canEdit && row.orderId ? (
-                            <button
+                            <Button
                               type="button"
-                              className="w-full text-[10px] text-center text-muted-foreground hover:text-foreground flex items-center justify-center gap-0.5 py-0.5"
+                              variant={cell.fact > 0 ? "secondary" : "outline"}
+                              size="sm"
+                              className="w-full h-7 mt-1 text-xs"
                               onClick={() => openFactDialog(row, date)}
-                              title="Ввести факт смены"
                             >
-                              <ClipboardList className="h-3 w-3" />
-                              {cell.fact > 0 ? `ф ${cell.fact}` : "факт"}
-                            </button>
-                          ) : (
-                            cell.fact > 0 && (
-                              <div className="text-[10px] text-center text-green-700 dark:text-green-400 tabular-nums">
-                                ф {cell.fact}
-                              </div>
-                            )
-                          )}
+                              <ClipboardList className="h-3.5 w-3.5 mr-1" />
+                              Выпуск
+                            </Button>
+                          ) : null}
                         </td>
                       );
                     })}

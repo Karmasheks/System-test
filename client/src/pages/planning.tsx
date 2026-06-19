@@ -10,13 +10,11 @@ import {
   useProductionTooling,
 } from "@/hooks/use-production-planning";
 import { PlanningKpiCards } from "@/components/planning/planning-kpi-cards";
-import { PlanningOrdersTab } from "@/components/planning/planning-orders-tab";
 import { PlanningScheduleTab } from "@/components/planning/planning-schedule-tab";
 import { PlanningMaterialsTab } from "@/components/planning/planning-materials-tab";
 import { PlanningWarehouseTab } from "@/components/planning/planning-warehouse-tab";
 import { PlanningToolingTab } from "@/components/planning/planning-tooling-tab";
 import { PlanningProductsTab } from "@/components/planning/planning-products-tab";
-import { PlanningFactsTab } from "@/components/planning/planning-facts-tab";
 import { PlanningConflictsTab } from "@/components/planning/planning-conflicts-tab";
 import { PlanningAnalyticsTab } from "@/components/planning/planning-analytics-tab";
 import { PlanningOeeTab } from "@/components/planning/planning-oee-tab";
@@ -67,8 +65,6 @@ export default function PlanningPage() {
   const defaultPlanningTab = useMemo(() => {
     const order = [
       "schedule",
-      "orders",
-      "facts",
       "warehouse",
       "tooling",
       "products",
@@ -112,8 +108,8 @@ export default function PlanningPage() {
                 </h1>
                 <p className="text-xs text-muted-foreground sm:text-sm">
                   {filterLabel
-                    ? `${filterLabel} · заказ и календарь плана`
-                    : "Заказ, календарь плана и факт выпуска"}
+                    ? `${filterLabel} · график, заказы и склад`
+                    : "График плана, заказы и внутренний склад"}
                 </p>
               </div>
             </div>
@@ -160,17 +156,7 @@ export default function PlanningPage() {
             <TabsList className={cn(mobileTabsListClass, "sm:grid sm:grid-cols-3 lg:grid-cols-6")}>
               {tabs.schedule && (
                 <TabsTrigger value="schedule" className={mobileTabsTriggerClass}>
-                  График планирования
-                </TabsTrigger>
-              )}
-              {tabs.orders && (
-                <TabsTrigger value="orders" className={mobileTabsTriggerClass}>
-                  Потребность и заказ
-                </TabsTrigger>
-              )}
-              {tabs.facts && (
-                <TabsTrigger value="facts" className={mobileTabsTriggerClass}>
-                  Факт выпуска
+                  График и заказы
                 </TabsTrigger>
               )}
               {tabs.warehouse && (
@@ -216,16 +202,6 @@ export default function PlanningPage() {
             {tabs.schedule && (
               <TabsContent value="schedule">
                 <PlanningScheduleTab subdivisionId={effectiveSubdivisionId!} />
-              </TabsContent>
-            )}
-            {tabs.orders && (
-              <TabsContent value="orders">
-                <PlanningOrdersTab subdivisionId={effectiveSubdivisionId!} />
-              </TabsContent>
-            )}
-            {tabs.facts && (
-              <TabsContent value="facts">
-                <PlanningFactsTab subdivisionId={effectiveSubdivisionId!} />
               </TabsContent>
             )}
             {tabs.warehouse && (

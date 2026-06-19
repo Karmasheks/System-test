@@ -888,6 +888,8 @@ export const products = pgTable(
     shotWeight: real("shot_weight"),
     /** Вес литника (литейной системы), г — на одну отливку. */
     sprueWeight: real("sprue_weight"),
+    /** Произвольные поля карточки изделия (id → значение). */
+    customAttributes: jsonb("custom_attributes").$type<Record<string, string | number | null>>(),
     defaultShiftNorm: real("default_shift_norm"),
     isSharedAcrossSubdivisions: boolean("is_shared_across_subdivisions").notNull().default(false),
     isActive: boolean("is_active").notNull().default(true),

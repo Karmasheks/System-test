@@ -28,8 +28,16 @@ import {
 } from "@/hooks/use-production-planning";
 import { cn } from "@/lib/utils";
 import { Plus, Package } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
 import { formatCavitiesDisplay } from "@shared/cavities-utils";
-import type { ProductCatalogDisplayConfig } from "@shared/production-display-config";
+import type {
+  ProductCatalogCustomField,
+  ProductCatalogDisplayConfig,
+} from "@shared/production-display-config";
+import {
+  getFormCustomFields,
+  getTableCustomFields,
+} from "@shared/production-display-config";
 import { ListPaginationControls } from "@/components/list-pagination-controls";
 import { useListPagination } from "@/hooks/use-list-pagination";
 import { ToolingPfPicker } from "@/components/planning/tooling-pf-picker";
@@ -60,6 +68,7 @@ function ProductMetricLines({
 
 function useProductCatalogColumns(catalog: ProductCatalogDisplayConfig) {
   return useMemo(() => {
+    const tableCustomFields = getTableCustomFields(catalog);
     const showWeights = catalog.showProductWeight || catalog.showSprueWeight;
     const showNorms =
       catalog.showShiftNorm || catalog.showCycleTime || catalog.showCavities;
@@ -67,8 +76,72 @@ function useProductCatalogColumns(catalog: ProductCatalogDisplayConfig) {
     if (catalog.showPfTooling) columns.push({ id: "pf", label: "ПФ / оснастка" });
     if (showWeights) columns.push({ id: "weights", label: "Вес и литник" });
     if (showNorms) columns.push({ id: "norms", label: "Нормы и цикл" });
-    return { columns, showWeights, showNorms };
+    for (const field of tableCustomFields) {
+      columns.push({
+        id: `custom_${field.id}`,
+        label: field.unit ? `${field.label}, ${field.unit}` : field.label,
+      });
+    }
+    return { columns, showWeights, showNorms, tableCustomFields };
   }, [catalog]);
+}
+
+function formatCustomFieldValue(
+  field: ProductCatalogCustomField,
+  raw: string | number | null | undefined
+): ReactNode {
+  if (raw == null || raw === "") return "—";
+  if (field.fieldType === "number") {
+    return (
+      <span className="tabular-nums">
+        {typeof raw === "number" ? raw.toLocaleString("ru-RU") : raw}
+        {field.unit ? ` ${field.unit}` : ""}
+      </span>
+    );
+  }
+  return <span className="whitespace-pre-wrap break-words">{String(raw)}</span>;
+}
+
+function CustomFieldInput({
+  field,
+  value,
+  onChange,
+}: {
+  field: ProductCatalogCustomField;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const label = field.unit ? `${field.label}, ${field.unit}` : field.label;
+  if (field.fieldType === "textarea") {
+    return (
+      <div className="space-y-1">
+        <Label>
+          {label}
+          {field.required ? " *" : ""}
+        </Label>
+        <Textarea
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          rows={3}
+        />
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-1">
+      <Label>
+        {label}
+        {field.required ? " *" : ""}
+      </Label>
+      <Input
+        type={field.fieldType === "number" ? "number" : "text"}
+        step={field.fieldType === "number" ? "any" : undefined}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={field.required ? "Обязательно" : "Необязательно"}
+      />
+    </div>
+  );
 }
 
 export function PlanningProductsTab({ subdivisionId }: Props) {
@@ -77,7 +150,8 @@ export function PlanningProductsTab({ subdivisionId }: Props) {
   const canEdit = canEditModule("production_planning");
   const { config, isLoading: settingsLoading } = useProductionDisplayConfig(subdivisionId);
   const catalog = config.productCatalog;
-  const { columns, showWeights, showNorms } = useProductCatalogColumns(catalog);
+  const { columns, showWeights, showNorms, tableCustomFields } = useProductCatalogColumns(catalog);
+  const formCustomFields = useMemo(() => getFormCustomFields(catalog), [catalog]);
 
   const [search, setSearch] = useState("");
   const { data: products = [], isLoading } = useProductionProducts({
@@ -107,10 +181,18 @@ export function PlanningProductsTab({ subdivisionId }: Props) {
     toolingId: "",
     productWeight: "",
     sprueWeight: "",
+    customAttributes: {} as Record<string, string>,
   });
 
   const resetForm = () => {
-    setForm({ sapCode: "", name: "", toolingId: "", productWeight: "", sprueWeight: "" });
+    setForm({
+      sapCode: "",
+      name: "",
+      toolingId: "",
+      productWeight: "",
+      sprueWeight: "",
+      customAttributes: {},
+    });
     setEditing(null);
   };
 
@@ -133,12 +215,28 @@ export function PlanningProductsTab({ subdivisionId }: Props) {
       toolingId: linked ? String(linked.id) : "",
       productWeight: p.productWeight != null ? String(p.productWeight) : "",
       sprueWeight: sprueWeight != null ? String(sprueWeight) : "",
+      customAttributes: Object.fromEntries(
+        formCustomFields.map((f) => {
+          const raw = p.customAttributes?.[f.id];
+          return [f.id, raw != null ? String(raw) : ""];
+        })
+      ),
     });
     setOpen(true);
   };
 
   const handleSaveProduct = async () => {
     try {
+      for (const field of formCustomFields) {
+        if (field.required && !form.customAttributes[field.id]?.trim()) {
+          toast({
+            title: `Заполните поле «${field.label}»`,
+            variant: "destructive",
+          });
+          return;
+        }
+      }
+
       const selectedTooling = tooling.find((t) => String(t.id) === form.toolingId);
       const cavities = selectedTooling?.cavities ?? editing?.cavities ?? 1;
       const productWeight =
@@ -152,6 +250,19 @@ export function PlanningProductsTab({ subdivisionId }: Props) {
           ? productWeight * cavities + sprueWeight
           : undefined;
 
+      const customAttributes: Record<string, string | number | null> = {
+        ...(editing?.customAttributes ?? {}),
+      };
+      for (const field of formCustomFields) {
+        const raw = form.customAttributes[field.id]?.trim() ?? "";
+        if (!raw) {
+          delete customAttributes[field.id];
+          continue;
+        }
+        customAttributes[field.id] =
+          field.fieldType === "number" ? Number(raw) : raw;
+      }
+
       const payload = {
         subdivisionId,
         sapCode: form.sapCode.trim(),
@@ -163,6 +274,7 @@ export function PlanningProductsTab({ subdivisionId }: Props) {
         productWeight,
         sprueWeight,
         shotWeight,
+        customAttributes: Object.keys(customAttributes).length > 0 ? customAttributes : {},
         isActive: true,
         subdivisionIds: [subdivisionId],
       };
@@ -345,6 +457,11 @@ export function PlanningProductsTab({ subdivisionId }: Props) {
                           <ProductMetricLines lines={normLines} />
                         </TableCell>
                       )}
+                      {tableCustomFields.map((field) => (
+                        <TableCell key={field.id} className="align-top text-xs">
+                          {formatCustomFieldValue(field, p.customAttributes?.[field.id])}
+                        </TableCell>
+                      ))}
                     </TableRow>
                   );
                 })
@@ -445,13 +562,32 @@ export function PlanningProductsTab({ subdivisionId }: Props) {
                 )}
               </div>
             )}
+            {formCustomFields.map((field) => (
+              <CustomFieldInput
+                key={field.id}
+                field={field}
+                value={form.customAttributes[field.id] ?? ""}
+                onChange={(value) =>
+                  setForm({
+                    ...form,
+                    customAttributes: { ...form.customAttributes, [field.id]: value },
+                  })
+                }
+              />
+            ))}
           </div>
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>Отмена</Button>
             <Button
               onClick={handleSaveProduct}
-              disabled={!form.sapCode.trim() || !form.name.trim()}
+              disabled={
+                !form.sapCode.trim() ||
+                !form.name.trim() ||
+                formCustomFields.some(
+                  (f) => f.required && !form.customAttributes[f.id]?.trim()
+                )
+              }
             >
               {editing ? "Сохранить" : "Создать"}
             </Button>

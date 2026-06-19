@@ -1,4 +1,15 @@
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Table,
   TableBody,
@@ -8,10 +19,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { useInternalWarehouseSummary } from "@/hooks/use-production-planning";
+import { useInternalWarehouseSummary, useProductionMutations, type MaterialStockRow } from "@/hooks/use-production-planning";
+import { useAccessControl } from "@/hooks/use-access-control";
+import { useToast } from "@/hooks/use-toast";
 import { MATERIAL_TYPE_LABELS } from "@/lib/production-planning-constants";
 import { formatRuDateTime } from "@/lib/export-utils";
-import { Package, AlertTriangle, Boxes } from "lucide-react";
+import { Package, AlertTriangle, Boxes, Pencil } from "lucide-react";
 import { PRODUCTION_ORDER_STATUS_LABELS } from "@/lib/production-planning-constants";
 import { ListPaginationControls } from "@/components/list-pagination-controls";
 import { useListPagination } from "@/hooks/use-list-pagination";
@@ -21,7 +34,77 @@ type Props = {
 };
 
 export function PlanningWarehouseTab({ subdivisionId }: Props) {
-  const { data, isLoading } = useInternalWarehouseSummary(subdivisionId);
+  const { toast } = useToast();
+  const { canEditModule } = useAccessControl();
+  const canEdit = canEditModule("production_planning");
+  const { adjustMaterialStock, updateMaterialStock } = useProductionMutations();
+  const { data, isLoading, refetch } = useInternalWarehouseSummary(subdivisionId);
+
+  const [editStock, setEditStock] = useState<MaterialStockRow | null>(null);
+  const [stockForm, setStockForm] = useState({
+    quantity: "",
+    minStock: "",
+    storageLocation: "",
+    adjustDelta: "",
+    adjustComment: "",
+  });
+
+  const openStockEdit = (s: MaterialStockRow) => {
+    setEditStock(s);
+    setStockForm({
+      quantity: String(s.quantity),
+      minStock: String(s.minStock),
+      storageLocation: s.storageLocation ?? "",
+      adjustDelta: "",
+      adjustComment: "",
+    });
+  };
+
+  const handleSaveStockMeta = async () => {
+    if (!editStock) return;
+    try {
+      await updateMaterialStock.mutateAsync({
+        id: editStock.id,
+        quantity: Number(stockForm.quantity),
+        minStock: Number(stockForm.minStock),
+        storageLocation: stockForm.storageLocation,
+      });
+      toast({ title: "Остаток обновлён" });
+      setEditStock(null);
+      refetch();
+    } catch (e: unknown) {
+      toast({
+        title: "Ошибка",
+        variant: "destructive",
+        description: e instanceof Error ? e.message : "Не удалось сохранить",
+      });
+    }
+  };
+
+  const handleAdjustStock = async () => {
+    if (!editStock) return;
+    const delta = Number(stockForm.adjustDelta);
+    if (!delta || Number.isNaN(delta)) {
+      toast({ title: "Укажите изменение (+/-)", variant: "destructive" });
+      return;
+    }
+    try {
+      await adjustMaterialStock.mutateAsync({
+        id: editStock.id,
+        quantityDelta: delta,
+        comment: stockForm.adjustComment || undefined,
+      });
+      toast({ title: delta > 0 ? "Приход зарегистрирован" : "Расход зарегистрирован" });
+      setEditStock(null);
+      refetch();
+    } catch (e: unknown) {
+      toast({
+        title: "Ошибка",
+        variant: "destructive",
+        description: e instanceof Error ? e.message : "Не удалось выполнить",
+      });
+    }
+  };
 
   const summary = data?.summary;
 
@@ -233,6 +316,7 @@ export function PlanningWarehouseTab({ subdivisionId }: Props) {
                     <TableHead>Резерв</TableHead>
                     <TableHead>Мин.</TableHead>
                     <TableHead>Склад</TableHead>
+                    {canEdit && <TableHead className="w-[80px]" />}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -252,6 +336,18 @@ export function PlanningWarehouseTab({ subdivisionId }: Props) {
                       <TableCell>{s.reservedQuantity}</TableCell>
                       <TableCell>{s.minStock}</TableCell>
                       <TableCell>{s.storageLocation || "—"}</TableCell>
+                      {canEdit && (
+                        <TableCell>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => openStockEdit(s)}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
+                      )}
                     </TableRow>
                   );
                 })}
@@ -355,6 +451,87 @@ export function PlanningWarehouseTab({ subdivisionId }: Props) {
           </div>
         </CardContent>
       </Card>
+
+      <Dialog open={editStock != null} onOpenChange={(o) => !o && setEditStock(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editStock?.materialName}</DialogTitle>
+          </DialogHeader>
+          {editStock && (
+            <div className="space-y-4 py-2">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label>Остаток, {editStock.materialUnit}</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={stockForm.quantity}
+                    onChange={(e) => setStockForm({ ...stockForm, quantity: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label>Мин. запас</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={stockForm.minStock}
+                    onChange={(e) => setStockForm({ ...stockForm, minStock: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <Label>Место хранения</Label>
+                <Input
+                  value={stockForm.storageLocation}
+                  onChange={(e) =>
+                    setStockForm({ ...stockForm, storageLocation: e.target.value })
+                  }
+                />
+              </div>
+              <div className="rounded-md border p-3 space-y-2 bg-muted/20">
+                <p className="text-xs font-medium">Приход / расход (движение)</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label>Изменение (+/-)</Label>
+                    <Input
+                      type="number"
+                      placeholder="+100 или -50"
+                      value={stockForm.adjustDelta}
+                      onChange={(e) =>
+                        setStockForm({ ...stockForm, adjustDelta: e.target.value })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Комментарий</Label>
+                    <Input
+                      value={stockForm.adjustComment}
+                      onChange={(e) =>
+                        setStockForm({ ...stockForm, adjustComment: e.target.value })
+                      }
+                    />
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleAdjustStock}
+                  disabled={adjustMaterialStock.isPending}
+                >
+                  Записать движение
+                </Button>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditStock(null)}>Отмена</Button>
+            <Button onClick={handleSaveStockMeta} disabled={updateMaterialStock.isPending}>
+              Сохранить остаток
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
